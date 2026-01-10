@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue';
+import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
 import TabItem from '../ui/TabItem.vue';
 import DropdownMenu from '../ui/DropdownMenu.vue';
 import ShortcutHint from '../ui/ShortcutHint.vue';
@@ -21,13 +21,18 @@ const dropdownX = ref(0);
 const dropdownY = ref(0);
 let tabCounter = 1;
 
+const tabsContainerRef = ref<HTMLDivElement>();
+
 const NEW_TAB_MENU = [
   { key: 'local', label: 'Local Terminal', shortcut: 'Cmd+Shift+T' },
   { key: 'ssh', label: 'Remote Connection', shortcut: 'Cmd+T' },
 ];
 
-const handleTabClick = (id: string) => {
+const handleTabClick = async (id: string) => {
   activeTabId.value = id;
+  
+  await nextTick();
+  scrollToActiveTab();
 };
 
 const handleTabClose = (id: string) => {
@@ -42,7 +47,7 @@ const handleTabClose = (id: string) => {
   }
 };
 
-const handleAddTab = () => {
+const handleAddTab = async () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Terminal ${tabCounter}`,
@@ -50,6 +55,9 @@ const handleAddTab = () => {
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
+  
+  await nextTick();
+  scrollToActiveTab();
 };
 
 const toggleDropdown = (event: MouseEvent) => {
@@ -59,14 +67,26 @@ const toggleDropdown = (event: MouseEvent) => {
     const container = target.closest('.tab-actions') as HTMLElement;
     if (container) {
       const rect = container.getBoundingClientRect();
-      dropdownX.value = rect.left;
+      
+      // Calculate the available space on the right side
+      const availableRightSpace = window.innerWidth - rect.left;
+      const menuWidth = 200; // Approximate dropdown menu width
+      
+      // Adjust x position if menu would go off-screen
+      if (availableRightSpace < menuWidth) {
+        // Position the menu to appear from the right edge of the button
+        dropdownX.value = Math.max(rect.right - menuWidth, 0); // Ensure it doesn't go off the left edge
+      } else {
+        dropdownX.value = rect.left;
+      }
+      
       dropdownY.value = rect.bottom + 2;
     }
   }
   isDropdownOpen.value = !isDropdownOpen.value;
 };
 
-const handleMenuSelect = (key: string) => {
+const handleMenuSelect = async (key: string) => {
   if (key === 'local') {
     const newTab: Tab = {
       id: `tab-${Date.now()}-${tabCounter++}`,
@@ -85,6 +105,9 @@ const handleMenuSelect = (key: string) => {
     activeTabId.value = newTab.id;
   }
   isDropdownOpen.value = false;
+  
+  await nextTick();
+  scrollToActiveTab();
 };
 
 const handleCloseTabShortcut = () => {
@@ -94,7 +117,7 @@ const handleCloseTabShortcut = () => {
   }
 };
 
-const handleNewLocalTab = () => {
+const handleNewLocalTab = async () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Local Terminal ${tabCounter}`,
@@ -102,9 +125,12 @@ const handleNewLocalTab = () => {
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
+  
+  await nextTick();
+  scrollToActiveTab();
 };
 
-const handleNewSSHTab = () => {
+const handleNewSSHTab = async () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `SSH ${tabCounter}`,
@@ -112,10 +138,43 @@ const handleNewSSHTab = () => {
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
+  
+  await nextTick();
+  scrollToActiveTab();
 };
 
 const handleNewTabShortcut = () => {
   handleAddTab();
+};
+
+// Scroll to the currently active tab
+const scrollToActiveTab = () => {
+  if (!tabsContainerRef.value) return;
+  
+  const activeTabElement = document.querySelector(`.tab-item[data-id="${activeTabId.value}"]`) as HTMLElement;
+  if (activeTabElement && tabsContainerRef.value) {
+    const containerScrollLeft = tabsContainerRef.value.scrollLeft;
+    const containerWidth = tabsContainerRef.value.clientWidth;
+    const tabOffsetLeft = activeTabElement.offsetLeft;
+    const tabWidth = activeTabElement.offsetWidth;
+    
+    let newScrollLeft = containerScrollLeft;
+    
+    // If the tab is outside the view to the left
+    if (tabOffsetLeft < 0) {
+      newScrollLeft = containerScrollLeft + tabOffsetLeft;
+    } 
+    // If the tab is outside the view to the right
+    else if (tabOffsetLeft + tabWidth > containerWidth) {
+      newScrollLeft = containerScrollLeft + (tabOffsetLeft + tabWidth - containerWidth);
+    }
+    
+    // Scroll to the target position
+    tabsContainerRef.value.scrollTo({
+      left: newScrollLeft,
+      behavior: 'smooth'
+    });
+  }
 };
 
 onMounted(() => {
@@ -123,6 +182,8 @@ onMounted(() => {
   window.addEventListener('app:new-tab', handleNewTabShortcut);
   window.addEventListener('app:new-local-tab', handleNewLocalTab);
   window.addEventListener('app:new-ssh-tab', handleNewSSHTab);
+  
+  window.addEventListener('resize', scrollToActiveTab);
 });
 
 onBeforeUnmount(() => {
@@ -130,19 +191,23 @@ onBeforeUnmount(() => {
   window.removeEventListener('app:new-tab', handleNewTabShortcut);
   window.removeEventListener('app:new-local-tab', handleNewLocalTab);
   window.removeEventListener('app:new-ssh-tab', handleNewSSHTab);
+  
+  window.removeEventListener('resize', scrollToActiveTab);
 });
 </script>
 
 <template>
   <div class="app-tabs glass-light border-bottom">
-    <div class="tabs-container scrollbar-hidden">
+    <div class="tabs-container scrollbar-hidden" ref="tabsContainerRef">
       <TabItem
-        v-for="tab in tabs"
+        v-for="(tab, index) in tabs"
         :id="tab.id"
         :key="tab.id"
         :label="tab.label"
         :active="tab.id === activeTabId"
         :closable="tab.closable"
+        :class="{ 'fixed-tab': index === 0 }"
+        :data-id="tab.id"
         @click="handleTabClick"
         @close="handleTabClose"
       />
@@ -204,6 +269,29 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+/* Hide scrollbar but keep scrolling functionality */
+.tabs-container::-webkit-scrollbar {
+  display: none;
+}
+
+.tabs-container {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Fixed style for the first tab */
+.fixed-tab {
+  flex-shrink: 0;
+  position: sticky;
+  left: 0;
+  z-index: 10;
+  background-color: var(--color-bg-secondary);
+  margin-left: 0;
+  border-left: none;
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  margin-right: 0;
 }
 
 .tab-actions {

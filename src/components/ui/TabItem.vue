@@ -29,7 +29,7 @@ const handleClose = (e: Event) => {
 </script>
 
 <template>
-  <div class="tab-item interactive" :class="{ active }" @click="handleClick">
+  <div class="tab-item interactive" :class="{ active }" :data-id="id" @click="handleClick">
     <span class="tab-label">{{ label }}</span>
     <button
       v-if="closable"

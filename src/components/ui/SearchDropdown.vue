@@ -173,7 +173,7 @@ const searchItems = ref([
     icon: Settings,
     shortcut: 'Cmd+,',
     category: 'settings',
-    action: () => console.log('Open Settings'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-settings')),
   },
   {
     id: 'terminal',
@@ -182,7 +182,7 @@ const searchItems = ref([
     icon: Terminal,
     shortcut: 'Cmd+T',
     category: 'terminal',
-    action: () => console.log('New Terminal'),
+    action: () => window.dispatchEvent(new CustomEvent('app:new-local-tab')),
   },
   {
     id: 'ssh',
@@ -191,7 +191,7 @@ const searchItems = ref([
     icon: Terminal,
     shortcut: 'Cmd+Shift+T',
     category: 'terminal',
-    action: () => console.log('SSH Connection'),
+    action: () => window.dispatchEvent(new CustomEvent('app:new-ssh-tab')),
   },
   {
     id: 'help',
@@ -199,7 +199,7 @@ const searchItems = ref([
     description: 'View help and documentation',
     icon: FileText,
     category: 'help',
-    action: () => console.log('Help Documentation'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-help')),
   },
   {
     id: 'command-palette',
@@ -208,7 +208,7 @@ const searchItems = ref([
     icon: Command,
     shortcut: 'Cmd+Shift+P',
     category: 'commands',
-    action: () => console.log('Command Palette'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-command-palette')),
   },
   {
     id: 'file-manager',
@@ -216,7 +216,7 @@ const searchItems = ref([
     description: 'Browse and manage files',
     icon: Folder,
     category: 'files',
-    action: () => console.log('File Manager'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-file-manager')),
   },
   {
     id: 'web-terminal',
@@ -224,7 +224,7 @@ const searchItems = ref([
     description: 'Use web-based terminal',
     icon: Globe,
     category: 'terminal',
-    action: () => console.log('Web Terminal'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-web-terminal')),
   },
   {
     id: 'code-editor',
@@ -232,7 +232,7 @@ const searchItems = ref([
     description: 'Built-in code editing feature',
     icon: Code,
     category: 'editor',
-    action: () => console.log('Code Editor'),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-code-editor')),
   },
 ] as SearchItem[]);
 
