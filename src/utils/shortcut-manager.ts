@@ -25,7 +25,7 @@ export class ShortcutManager {
   register(config: ShortcutConfig) {
     const key = this.generateKey(config);
     this.shortcuts.set(key, config);
-    
+
     if (!this.listenerBound) {
       this.bindListener();
     }
@@ -76,14 +76,16 @@ export class ShortcutManager {
    */
   private handleKeyDown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
-    const isInputElement = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true';
-    
+    const isInputElement =
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.contentEditable === 'true';
+
     // Global shortcuts that should trigger even in input fields
-    const isGlobalShortcut = (
+    const isGlobalShortcut =
       (event.key === 'k' && (event.metaKey || event.ctrlKey)) ||
-      event.key === 'Escape'
-    );
-    
+      event.key === 'Escape';
+
     if (isInputElement) {
       if (isGlobalShortcut) {
         // Allow global shortcuts to proceed
@@ -91,8 +93,9 @@ export class ShortcutManager {
         // Special handling: allow Tab key in search-related areas
         const isInSearchBox = target.closest('.search-container') !== null;
         const isInSearchDropdown = target.closest('.search-dropdown') !== null;
-        const searchDropdownVisible = document.querySelector('.search-dropdown');
-        
+        const searchDropdownVisible =
+          document.querySelector('.search-dropdown');
+
         if (!(searchDropdownVisible && (isInSearchBox || isInSearchDropdown))) {
           event.preventDefault();
           return;
@@ -107,7 +110,7 @@ export class ShortcutManager {
       const isInSearchBox = target.closest('.search-container') !== null;
       const isInSearchDropdown = target.closest('.search-dropdown') !== null;
       const searchDropdownVisible = document.querySelector('.search-dropdown');
-      
+
       if (!(searchDropdownVisible && (isInSearchBox || isInSearchDropdown))) {
         event.preventDefault();
         return;
@@ -119,7 +122,7 @@ export class ShortcutManager {
       ctrlKey: event.ctrlKey,
       metaKey: event.metaKey,
       shiftKey: event.shiftKey,
-      altKey: event.altKey
+      altKey: event.altKey,
     });
 
     const shortcut = this.shortcuts.get(key);
@@ -141,12 +144,13 @@ export class ShortcutManager {
    */
   static formatShortcut(config: Partial<ShortcutConfig>): string {
     const keys: string[] = [];
-    
+
     if (config.ctrlKey) keys.push('Ctrl');
-    if (config.metaKey) keys.push(navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl');
+    if (config.metaKey)
+      keys.push(navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl');
     if (config.shiftKey) keys.push('Shift');
     if (config.altKey) keys.push('Alt');
-    
+
     if (config.key) {
       let key = config.key;
       if (key === ',') key = ',';
@@ -154,7 +158,7 @@ export class ShortcutManager {
       if (key === 'Escape') key = 'Esc';
       keys.push(key.toUpperCase());
     }
-    
+
     return keys.join('+');
   }
 }
@@ -175,7 +179,7 @@ export const PredefinedShortcuts = {
       } catch (error) {
         console.error('Failed to quit app:', error);
       }
-    }
+    },
   },
   CLOSE_WINDOW: {
     key: 'w',
@@ -190,7 +194,7 @@ export const PredefinedShortcuts = {
       } catch (error) {
         console.error('Failed to close window:', error);
       }
-    }
+    },
   },
   OPEN_SETTINGS: {
     key: ',',
@@ -201,7 +205,7 @@ export const PredefinedShortcuts = {
     description: 'Open settings',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:open-settings'));
-    }
+    },
   },
   NEW_LOCAL_TAB: {
     key: 't',
@@ -212,7 +216,7 @@ export const PredefinedShortcuts = {
     description: 'New local terminal tab',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:new-local-tab'));
-    }
+    },
   },
   NEW_SSH_TAB: {
     key: 't',
@@ -223,7 +227,7 @@ export const PredefinedShortcuts = {
     description: 'New SSH connection tab',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:new-ssh-tab'));
-    }
+    },
   },
   FOCUS_SEARCH: {
     key: 'k',
@@ -234,7 +238,7 @@ export const PredefinedShortcuts = {
     description: 'Focus search box',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:focus-search'));
-    }
+    },
   },
   CLOSE_DIALOG: {
     key: 'Escape',
@@ -245,7 +249,7 @@ export const PredefinedShortcuts = {
     description: 'Close dialog',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:close-dialog'));
-    }
+    },
   },
   CLOSE_CURRENT_TAB: {
     key: 'w',
@@ -256,6 +260,6 @@ export const PredefinedShortcuts = {
     description: 'Close current tab',
     handler: () => {
       window.dispatchEvent(new CustomEvent('app:close-tab'));
-    }
-  }
+    },
+  },
 };

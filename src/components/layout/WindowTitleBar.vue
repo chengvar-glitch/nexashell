@@ -18,6 +18,7 @@ const searchBoxRef = ref<InstanceType<typeof SearchBox> | null>(null);
 const searchDropdownRef = ref<InstanceType<typeof SearchDropdown> | null>(null);
 const showSearchDropdown = ref(false);
 const searchBoxElement = ref<HTMLElement | null>(null);
+const searchQuery = ref('');
 
 const showSettings = inject<Ref<boolean>>('showSettings', ref(false));
 
@@ -54,6 +55,13 @@ const onSearchBoxKeyDown = (event: KeyboardEvent) => {
   (searchDropdownRef.value as any).handleKeyDown(event);
 };
 
+const onSearchBoxInput = () => {
+  // Show dropdown menu if it's currently hidden
+  if (!showSearchDropdown.value) {
+    showSearchDropdown.value = true;
+  }
+};
+
 const onSearchBoxKeyUp = (event: KeyboardEvent) => {
   if (!showSearchDropdown.value || !searchDropdownRef.value) {
     return;
@@ -67,13 +75,13 @@ onMounted(async () => {
     isMacOS_OS.value = isMac;
     isWindowsOS.value = isWin;
     showWindowControls.value = isMac || isWin;
-    
+
     isFullscreen.value = await appWindow.isFullscreen();
-    
+
     const unlistenResize = await appWindow.onResized(async () => {
       isFullscreen.value = await appWindow.isFullscreen();
     });
-    
+
     (window as any).__unlistenResize = unlistenResize;
   } catch (error) {
     console.error('Failed to detect platform:', error);
@@ -83,13 +91,13 @@ onMounted(async () => {
     isWindowsOS.value = isWin;
     showWindowControls.value = isMac || isWin;
   }
-  
+
   window.addEventListener('app:focus-search', handleFocusSearch);
 });
 
 onUnmounted(() => {
   window.removeEventListener('app:focus-search', handleFocusSearch);
-  
+
   if ((window as any).__unlistenResize) {
     (window as any).__unlistenResize();
   }
@@ -139,29 +147,51 @@ const handleOpenSettings = () => {
 </script>
 
 <template>
-  <div class="window-title-bar glass-medium border-bottom" :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }" data-tauri-drag-region>
+  <div
+    class="window-title-bar glass-medium border-bottom"
+    :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }"
+    data-tauri-drag-region
+  >
     <!-- Window controls for macOS -->
-    <div v-if="showWindowControls && isMacOS_OS && !isFullscreen" class="window-controls macos-controls">
-      <button class="window-control-btn close-btn" @click="handleClose" aria-label="Close"></button>
-      <button class="window-control-btn minimize-btn" @click="handleMinimize" aria-label="Minimize"></button>
-      <button class="window-control-btn maximize-btn" @click="handleMaximize" aria-label="Fullscreen"></button>
+    <div
+      v-if="showWindowControls && isMacOS_OS && !isFullscreen"
+      class="window-controls macos-controls"
+    >
+      <button
+        class="window-control-btn close-btn"
+        aria-label="Close"
+        @click="handleClose"
+      />
+      <button
+        class="window-control-btn minimize-btn"
+        aria-label="Minimize"
+        @click="handleMinimize"
+      />
+      <button
+        class="window-control-btn maximize-btn"
+        aria-label="Fullscreen"
+        @click="handleMaximize"
+      />
     </div>
-    
-    <SearchBox 
-      ref="searchBoxRef" 
+
+    <SearchBox
+      ref="searchBoxRef"
+      v-model="searchQuery"
       class="disable-selection"
-      @focus="onSearchBoxFocus" 
+      @focus="onSearchBoxFocus"
       @blur="onSearchBoxBlur"
       @keydown="onSearchBoxKeyDown"
       @keyup="onSearchBoxKeyUp"
+      @input="onSearchBoxInput"
     />
-    
-    <SearchDropdown 
-      ref="searchDropdownRef" 
+
+    <SearchDropdown
+      ref="searchDropdownRef"
       v-model:visible="showSearchDropdown"
       :anchor-element="searchBoxElement"
+      :search-query="searchQuery"
     />
-    
+
     <div class="settings-container">
       <ShortcutHint text="Cmd+," position="bottom">
         <button class="btn-icon" @click="handleOpenSettings">
@@ -169,26 +199,53 @@ const handleOpenSettings = () => {
         </button>
       </ShortcutHint>
     </div>
-    
-    <div v-if="showWindowControls && isWindowsOS" class="window-controls windows-controls">
-      <button class="windows-control-btn minimize-btn" @click="handleMinimize" aria-label="Minimize">
+
+    <div
+      v-if="showWindowControls && isWindowsOS"
+      class="window-controls windows-controls"
+    >
+      <button
+        class="windows-control-btn minimize-btn"
+        aria-label="Minimize"
+        @click="handleMinimize"
+      >
         <svg width="10" height="10" viewBox="0 0 10 10">
           <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
         </svg>
       </button>
-      <button class="windows-control-btn maximize-btn" @click="handleMaximize" aria-label="Maximize">
+      <button
+        class="windows-control-btn maximize-btn"
+        aria-label="Maximize"
+        @click="handleMaximize"
+      >
         <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect x="0" y="0" width="10" height="10" stroke="currentColor" stroke-width="1" fill="none" />
+          <rect
+            x="0"
+            y="0"
+            width="10"
+            height="10"
+            stroke="currentColor"
+            stroke-width="1"
+            fill="none"
+          />
         </svg>
       </button>
-      <button class="windows-control-btn close-btn" @click="handleClose" aria-label="Close">
+      <button
+        class="windows-control-btn close-btn"
+        aria-label="Close"
+        @click="handleClose"
+      >
         <svg width="10" height="10" viewBox="0 0 10 10">
-          <path d="M0,0 L10,10 M10,0 L0,10" stroke="currentColor" stroke-width="1" />
+          <path
+            d="M0,0 L10,10 M10,0 L0,10"
+            stroke="currentColor"
+            stroke-width="1"
+          />
         </svg>
       </button>
     </div>
   </div>
-  
+
   <SettingsPanel v-model:visible="showSettings" />
 </template>
 
@@ -307,7 +364,7 @@ const handleOpenSettings = () => {
   :root:not(.theme-light) .close-btn {
     background-color: var(--color-macos-close);
   }
-  
+
   :root:not(.theme-light) .close-btn:hover {
     background-color: var(--color-macos-close-hover);
   }

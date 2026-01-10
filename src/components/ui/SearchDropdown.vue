@@ -1,60 +1,68 @@
 <template>
   <Teleport to="body">
     <Transition name="search-dropdown-fade">
-      <div 
-        v-show="visible" 
+      <div
+        v-show="visible"
         ref="dropdownRef"
         class="search-dropdown panel"
         :style="dropdownStyle"
       >
-        
         <div class="search-dropdown-content">
-          <div 
+          <div
             v-if="filteredItems.length === 0 && searchQuery"
             class="search-dropdown-empty"
           >
             <p>No matches found</p>
           </div>
-          <div 
-            v-else
-            class="search-dropdown-list"
-          >
+          <div v-else class="search-dropdown-list">
             <div
               v-for="(item, index) in filteredItems"
               :key="item.id"
               class="search-dropdown-item"
-              :class="{ 'active': activeIndex === index, 'hover': lastInteractionType.value !== 'keyboard' && hoverIndex === index }"
+              :class="{
+                active: activeIndex === index,
+                hover:
+                  lastInteractionType.value !== 'keyboard' &&
+                  hoverIndex === index,
+              }"
               @click="selectItem(item)"
-              @mouseenter="() => {
-                if (lastInteractionType.value !== 'keyboard') {
-                  hoverIndex.value = index;
+              @mouseenter="
+                () => {
+                  if (lastInteractionType.value !== 'keyboard') {
+                    hoverIndex.value = index;
+                  }
                 }
-              }"
-              @mouseleave="() => {
-                if (lastInteractionType.value !== 'keyboard') {
-                  hoverIndex.value = -1;
+              "
+              @mouseleave="
+                () => {
+                  if (lastInteractionType.value !== 'keyboard') {
+                    hoverIndex.value = -1;
+                  }
                 }
-              }"
+              "
             >
               <div class="item-icon">
                 <component :is="item.icon" :size="16" />
               </div>
               <div class="item-content">
-                <div class="item-title">{{ item.title }}</div>
-                <div class="item-description">{{ item.description }}</div>
+                <div class="item-title">
+                  {{ item.title }}
+                </div>
+                <div class="item-description">
+                  {{ item.description }}
+                </div>
               </div>
-              <div class="item-shortcut" v-if="item.shortcut">
+              <div v-if="item.shortcut" class="item-shortcut">
                 <span class="shortcut-text">{{ item.shortcut }}</span>
               </div>
             </div>
           </div>
         </div>
-        
+
         <div class="search-dropdown-footer">
           <div class="navigation-hint">
             <span class="shortcut-text">↑↓/Tab</span> Select
             <span class="shortcut-text">Enter</span> Confirm
-            <span class="shortcut-text">Esc</span> Exit
           </div>
         </div>
       </div>
@@ -64,7 +72,15 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { Settings, Terminal, FileText, Code, Folder, Globe, Command } from 'lucide-vue-next';
+import {
+  Settings,
+  Terminal,
+  FileText,
+  Code,
+  Folder,
+  Globe,
+  Command,
+} from 'lucide-vue-next';
 
 interface SearchItem {
   id: string;
@@ -79,13 +95,21 @@ interface SearchItem {
 const props = defineProps<{
   visible: boolean;
   anchorElement?: HTMLElement;
+  searchQuery?: string;
 }>();
 
 const emit = defineEmits<{
   'update:visible': [value: boolean];
 }>();
 
-const searchQuery = ref('');
+// Use search query passed from parent component, otherwise use local state
+const localSearchQuery = ref('');
+const searchQuery = computed({
+  get: () => props.searchQuery ?? localSearchQuery.value,
+  set: value => {
+    localSearchQuery.value = value;
+  },
+});
 const activeIndex = ref(-1);
 const hoverIndex = ref(-1);
 const lastInteractionType = ref<'keyboard' | 'mouse'>('mouse');
@@ -94,40 +118,46 @@ const dropdownStyle = ref({});
 
 const updateDropdownPosition = () => {
   if (!props.anchorElement) return;
-  
+
   const rect = props.anchorElement.getBoundingClientRect();
-  
+
   dropdownStyle.value = {
     position: 'fixed',
     left: `${rect.left}px`,
     top: `${rect.bottom}px`,
     width: `${rect.width}px`,
-    zIndex: 9999
+    zIndex: 9999,
   };
 };
 
-watch(() => props.visible, (newVal) => {
-  if (newVal) {
-    nextTick(() => {
-      updateDropdownPosition();
-      activeIndex.value = 0;
-      lastInteractionType.value = 'keyboard';
-    });
-  } else {
-    searchQuery.value = '';
-    activeIndex.value = -1;
-    hoverIndex.value = -1;
-    lastInteractionType.value = 'mouse';
+watch(
+  () => props.visible,
+  newVal => {
+    if (newVal) {
+      nextTick(() => {
+        updateDropdownPosition();
+        activeIndex.value = 0;
+        lastInteractionType.value = 'keyboard';
+      });
+    } else {
+      searchQuery.value = '';
+      activeIndex.value = -1;
+      hoverIndex.value = -1;
+      lastInteractionType.value = 'mouse';
+    }
   }
-});
+);
 
-watch(() => props.anchorElement, () => {
-  if (props.visible) {
-    nextTick(() => {
-      updateDropdownPosition();
-    });
+watch(
+  () => props.anchorElement,
+  () => {
+    if (props.visible) {
+      nextTick(() => {
+        updateDropdownPosition();
+      });
+    }
   }
-});
+);
 
 const handleResize = () => {
   if (props.visible) {
@@ -143,7 +173,7 @@ const searchItems = ref([
     icon: Settings,
     shortcut: 'Cmd+,',
     category: 'settings',
-    action: () => console.log('Open Settings')
+    action: () => console.log('Open Settings'),
   },
   {
     id: 'terminal',
@@ -152,7 +182,7 @@ const searchItems = ref([
     icon: Terminal,
     shortcut: 'Cmd+T',
     category: 'terminal',
-    action: () => console.log('New Terminal')
+    action: () => console.log('New Terminal'),
   },
   {
     id: 'ssh',
@@ -161,7 +191,7 @@ const searchItems = ref([
     icon: Terminal,
     shortcut: 'Cmd+Shift+T',
     category: 'terminal',
-    action: () => console.log('SSH Connection')
+    action: () => console.log('SSH Connection'),
   },
   {
     id: 'help',
@@ -169,7 +199,7 @@ const searchItems = ref([
     description: 'View help and documentation',
     icon: FileText,
     category: 'help',
-    action: () => console.log('Help Documentation')
+    action: () => console.log('Help Documentation'),
   },
   {
     id: 'command-palette',
@@ -178,7 +208,7 @@ const searchItems = ref([
     icon: Command,
     shortcut: 'Cmd+Shift+P',
     category: 'commands',
-    action: () => console.log('Command Palette')
+    action: () => console.log('Command Palette'),
   },
   {
     id: 'file-manager',
@@ -186,7 +216,7 @@ const searchItems = ref([
     description: 'Browse and manage files',
     icon: Folder,
     category: 'files',
-    action: () => console.log('File Manager')
+    action: () => console.log('File Manager'),
   },
   {
     id: 'web-terminal',
@@ -194,7 +224,7 @@ const searchItems = ref([
     description: 'Use web-based terminal',
     icon: Globe,
     category: 'terminal',
-    action: () => console.log('Web Terminal')
+    action: () => console.log('Web Terminal'),
   },
   {
     id: 'code-editor',
@@ -202,8 +232,8 @@ const searchItems = ref([
     description: 'Built-in code editing feature',
     icon: Code,
     category: 'editor',
-    action: () => console.log('Code Editor')
-  }
+    action: () => console.log('Code Editor'),
+  },
 ] as SearchItem[]);
 
 const filteredItems = computed(() => {
@@ -211,20 +241,24 @@ const filteredItems = computed(() => {
     return searchItems.value;
   }
   const query = searchQuery.value.toLowerCase();
-  return searchItems.value.filter(item => 
-    item.title.toLowerCase().includes(query) ||
-    item.description.toLowerCase().includes(query) ||
-    item.category.toLowerCase().includes(query)
+  return searchItems.value.filter(
+    item =>
+      item.title.toLowerCase().includes(query) ||
+      item.description.toLowerCase().includes(query) ||
+      item.category.toLowerCase().includes(query)
   );
 });
 
 const handleKeyDown = (e: KeyboardEvent) => {
   if (filteredItems.value.length === 0) return;
-  
+
   switch (e.key) {
     case 'ArrowDown':
       e.preventDefault();
-      activeIndex.value = Math.min(activeIndex.value + 1, filteredItems.value.length - 1);
+      activeIndex.value = Math.min(
+        activeIndex.value + 1,
+        filteredItems.value.length - 1
+      );
       lastInteractionType.value = 'keyboard';
       scrollToActiveItem();
       break;
@@ -240,29 +274,27 @@ const handleKeyDown = (e: KeyboardEvent) => {
         selectItem(filteredItems.value[activeIndex.value]);
       }
       break;
-    case 'Escape':
-      e.preventDefault();
-      emit('update:visible', false);
-      break;
+
     case 'Tab':
       e.preventDefault();
-      activeIndex.value = Math.min(activeIndex.value + 1, filteredItems.value.length - 1);
+      activeIndex.value = Math.min(
+        activeIndex.value + 1,
+        filteredItems.value.length - 1
+      );
       lastInteractionType.value = 'keyboard';
       scrollToActiveItem();
       break;
   }
 };
 
-const handleKeyUp = (e: KeyboardEvent) => {
-  if (e.key === 'Escape') {
-    emit('update:visible', false);
-  }
-};
+const handleKeyUp = () => {};
 
 const scrollToActiveItem = () => {
   nextTick(() => {
     if (dropdownRef.value && activeIndex.value >= 0) {
-      const item = dropdownRef.value.querySelector(`.search-dropdown-item:nth-child(${activeIndex.value + 1})`);
+      const item = dropdownRef.value.querySelector(
+        `.search-dropdown-item:nth-child(${activeIndex.value + 1})`
+      );
       if (item) {
         item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       }
@@ -281,7 +313,9 @@ const selectItem = (item: SearchItem) => {
 const handleClickOutside = (event: MouseEvent) => {
   const target = event.target as Node;
   if (dropdownRef.value && !dropdownRef.value.contains(target)) {
-    const parentSearchBox = document.querySelector('.window-title-bar .search-container');
+    const parentSearchBox = document.querySelector(
+      '.window-title-bar .search-container'
+    );
     if (parentSearchBox && parentSearchBox.contains(target)) {
       return;
     }
@@ -302,7 +336,7 @@ onUnmounted(() => {
 defineExpose({
   handleKeyDown,
   handleKeyUp,
-  updatePosition: updateDropdownPosition
+  updatePosition: updateDropdownPosition,
 });
 </script>
 
@@ -400,7 +434,9 @@ defineExpose({
   border-radius: var(--radius-sm);
   font-size: 11px;
   color: var(--color-text-tertiary);
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', Monaco, 'Courier New', monospace;
+  font-family:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', Monaco, 'Courier New',
+    monospace;
   line-height: 1;
 }
 
@@ -440,7 +476,9 @@ defineExpose({
 /* Animation effects - macOS style */
 .search-dropdown-fade-enter-active,
 .search-dropdown-fade-leave-active {
-  transition: opacity var(--transition-base), transform var(--transition-base);
+  transition:
+    opacity var(--transition-base),
+    transform var(--transition-base);
 }
 
 .search-dropdown-fade-enter-from {

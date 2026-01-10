@@ -1,9 +1,7 @@
-<script setup lang="ts">
-</script>
+<script setup lang="ts"></script>
 
 <template>
-  <div class="terminal-view">
-  </div>
+  <div class="terminal-view" />
 </template>
 
 <style scoped>

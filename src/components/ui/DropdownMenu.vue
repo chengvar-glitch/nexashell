@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, CSSProperties } from 'vue';
+import {
+  ref,
+  computed,
+  onMounted,
+  onUnmounted,
+  watch,
+  CSSProperties,
+} from 'vue';
 
 interface MenuItem {
   key: string;
@@ -22,12 +29,12 @@ const props = withDefaults(defineProps<Props>(), {
   visible: false,
   x: 0,
   y: 0,
-  trigger: 'click'
+  trigger: 'click',
 });
 
 const emit = defineEmits<{
   'update:visible': [value: boolean];
-  'select': [key: string];
+  select: [key: string];
 }>();
 
 const menuRef = ref<HTMLElement | null>(null);
@@ -37,7 +44,7 @@ const menuStyle = computed<CSSProperties>(() => {
       position: 'fixed',
       left: `${props.x}px`,
       top: `${props.y}px`,
-      zIndex: 9998
+      zIndex: 9998,
     };
   }
   return {};
@@ -106,18 +113,20 @@ onUnmounted(() => {
       >
         <div class="menu-list">
           <template v-for="item in items" :key="item.key">
-            <div v-if="item.divider" class="menu-divider"></div>
+            <div v-if="item.divider" class="menu-divider" />
             <div
               v-else
               class="menu-item"
               :class="{
                 'menu-item-danger': item.danger,
-                'disabled': item.disabled
+                disabled: item.disabled,
               }"
               @click="handleItemClick(item)"
             >
               <span class="menu-label">{{ item.label }}</span>
-              <span v-if="item.shortcut" class="menu-shortcut">{{ item.shortcut }}</span>
+              <span v-if="item.shortcut" class="menu-shortcut">{{
+                item.shortcut
+              }}</span>
             </div>
           </template>
         </div>
@@ -160,7 +169,9 @@ onUnmounted(() => {
 .menu-shortcut {
   margin-left: 20px;
   font-size: 11px;
-  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', Monaco, 'Courier New', monospace;
+  font-family:
+    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', Monaco, 'Courier New',
+    monospace;
   background-color: var(--color-bg-tertiary);
   padding: 3px 7px;
   border-radius: var(--radius-sm);
@@ -197,7 +208,9 @@ onUnmounted(() => {
 
 .dropdown-fade-enter-active,
 .dropdown-fade-leave-active {
-  transition: opacity var(--transition-base), transform var(--transition-base);
+  transition:
+    opacity var(--transition-base),
+    transform var(--transition-base);
 }
 
 .dropdown-fade-enter-from {
@@ -214,7 +227,7 @@ onUnmounted(() => {
   :root:not(.theme-light) .menu-item-danger {
     color: #ff453a;
   }
-  
+
   :root:not(.theme-light) .menu-item-danger:hover {
     background-color: rgba(255, 69, 58, 0.12);
   }

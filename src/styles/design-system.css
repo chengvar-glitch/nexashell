@@ -6,54 +6,55 @@
   --radius-lg: 12px;
   --radius-xl: 14px;
   --radius-2xl: 20px;
-  
+
   /* macOS style shadows - lighter and more natural */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 4px rgba(0, 0, 0, 0.02);
   --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.04), 0 3px 12px rgba(0, 0, 0, 0.03);
   --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.05), 0 6px 20px rgba(0, 0, 0, 0.04);
   --shadow-xl: 0 8px 20px rgba(0, 0, 0, 0.08), 0 12px 32px rgba(0, 0, 0, 0.06);
-  --shadow-2xl: 0 20px 40px rgba(0, 0, 0, 0.12), 0 30px 60px rgba(0, 0, 0, 0.08);
-  
+  --shadow-2xl:
+    0 20px 40px rgba(0, 0, 0, 0.12), 0 30px 60px rgba(0, 0, 0, 0.08);
+
   --focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.15);
   --focus-ring-intense: 0 0 0 4px rgba(0, 122, 255, 0.25);
-  
+
   /* macOS style transition animations - more natural and smooth */
   --transition-fast: 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --transition-base: 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
   --transition-slow: 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  
+
   /* macOS light mode backgrounds */
   --color-bg-primary: #ffffff;
   --color-bg-secondary: #f7f7f7;
   --color-bg-tertiary: #ebebeb;
   --color-bg-elevated: #ffffff;
   --color-bg-overlay: rgba(0, 0, 0, 0.3);
-  
+
   /* macOS style borders - more refined */
   --color-border-primary: rgba(0, 0, 0, 0.1);
   --color-border-secondary: rgba(0, 0, 0, 0.06);
   --color-border-tertiary: rgba(0, 0, 0, 0.04);
-  
+
   /* macOS text colors */
   --color-text-primary: #1d1d1f;
   --color-text-secondary: #6e6e73;
   --color-text-tertiary: #86868b;
   --color-text-placeholder: #a1a1a6;
-  
+
   /* macOS interactive states - more refined and subtle */
   --color-interactive-hover: rgba(0, 0, 0, 0.05);
   --color-interactive-active: rgba(0, 0, 0, 0.1);
   --color-interactive-selected: rgba(0, 122, 255, 0.1);
-  
+
   --color-primary: #007aff;
   --color-primary-hover: #0051d5;
   --color-accent: #5856d6;
-  
+
   --color-macos-close: #ff5f57;
   --color-macos-close-hover: #ff4136;
   --color-macos-minimize: #febc2e;
   --color-macos-maximize: #28c840;
-  
+
   /* macOS glass effect */
   --blur-light: blur(30px) saturate(180%);
   --blur-medium: blur(50px) saturate(180%);
@@ -68,33 +69,34 @@
     --color-bg-tertiary: #3a3a3c;
     --color-bg-elevated: #2c2c2e;
     --color-bg-overlay: rgba(0, 0, 0, 0.6);
-    
+
     --color-border-primary: rgba(255, 255, 255, 0.15);
     --color-border-secondary: rgba(255, 255, 255, 0.1);
     --color-border-tertiary: rgba(255, 255, 255, 0.05);
-    
+
     --color-text-primary: #f5f5f7;
     --color-text-secondary: #d1d1d6;
     --color-text-tertiary: #98989d;
     --color-text-placeholder: #6e6e73;
-    
+
     --color-interactive-hover: rgba(255, 255, 255, 0.1);
     --color-interactive-active: rgba(255, 255, 255, 0.15);
     --color-interactive-selected: rgba(10, 132, 255, 0.2);
-    
+
     /* macOS dark mode shadows */
     --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 5px rgba(0, 0, 0, 0.4);
     --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.7), 0 4px 16px rgba(0, 0, 0, 0.5);
     --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6);
     --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.9), 0 16px 40px rgba(0, 0, 0, 0.7);
-    --shadow-2xl: 0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
-    
+    --shadow-2xl:
+      0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
+
     --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
     --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
-    
+
     --color-primary: #0a84ff;
     --color-primary-hover: #409cff;
-    
+
     --color-macos-close: #ff5f57;
     --color-macos-close-hover: #ff6b63;
   }
@@ -102,41 +104,40 @@
 
 /* Manual dark theme override */
 :root.theme-dark {
-    --color-bg-primary: #1c1c1e;
-    --color-bg-secondary: #2c2c2e;
-    --color-bg-tertiary: #3a3a3c;
-    --color-bg-elevated: #2c2c2e;
-    --color-bg-overlay: rgba(0, 0, 0, 0.6);
-    
-    --color-border-primary: rgba(255, 255, 255, 0.15);
-    --color-border-secondary: rgba(255, 255, 255, 0.1);
-    --color-border-tertiary: rgba(255, 255, 255, 0.05);
-    
-    --color-text-primary: #f5f5f7;
-    --color-text-secondary: #d1d1d6;
-    --color-text-tertiary: #98989d;
-    --color-text-placeholder: #6e6e73;
-    
-    --color-interactive-hover: rgba(255, 255, 255, 0.1);
-    --color-interactive-active: rgba(255, 255, 255, 0.15);
-    --color-interactive-selected: rgba(10, 132, 255, 0.2);
-    
-    /* macOS dark mode shadows */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 5px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.7), 0 4px 16px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6);
-    --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.9), 0 16px 40px rgba(0, 0, 0, 0.7);
-    --shadow-2xl: 0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
-    
-    --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
-    
-    --color-primary: #0a84ff;
-    --color-primary-hover: #409cff;
-    
-    --color-macos-close: #ff5f57;
-    --color-macos-close-hover: #ff6b63;
-  }
+  --color-bg-primary: #1c1c1e;
+  --color-bg-secondary: #2c2c2e;
+  --color-bg-tertiary: #3a3a3c;
+  --color-bg-elevated: #2c2c2e;
+  --color-bg-overlay: rgba(0, 0, 0, 0.6);
+
+  --color-border-primary: rgba(255, 255, 255, 0.15);
+  --color-border-secondary: rgba(255, 255, 255, 0.1);
+  --color-border-tertiary: rgba(255, 255, 255, 0.05);
+
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #d1d1d6;
+  --color-text-tertiary: #98989d;
+  --color-text-placeholder: #6e6e73;
+
+  --color-interactive-hover: rgba(255, 255, 255, 0.1);
+  --color-interactive-active: rgba(255, 255, 255, 0.15);
+  --color-interactive-selected: rgba(10, 132, 255, 0.2);
+
+  /* macOS dark mode shadows */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 5px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.7), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.9), 0 16px 40px rgba(0, 0, 0, 0.7);
+  --shadow-2xl: 0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
+
+  --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
+  --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
+
+  --color-primary: #0a84ff;
+  --color-primary-hover: #409cff;
+
+  --color-macos-close: #ff5f57;
+  --color-macos-close-hover: #ff6b63;
 }
 
 .btn-base {
@@ -147,15 +148,37 @@
   outline: none;
 }
 
-.rounded-xs { border-radius: var(--radius-xs); }
-.rounded-sm { border-radius: var(--radius-sm); }
-.rounded-md { border-radius: var(--radius-md); }
-.rounded-lg { border-radius: var(--radius-lg); }
-.rounded-xl { border-radius: var(--radius-xl); }
-.rounded-2xl { border-radius: var(--radius-2xl); }
+.rounded-xs {
+  border-radius: var(--radius-xs);
+}
+.rounded-sm {
+  border-radius: var(--radius-sm);
+}
+.rounded-md {
+  border-radius: var(--radius-md);
+}
+.rounded-lg {
+  border-radius: var(--radius-lg);
+}
+.rounded-xl {
+  border-radius: var(--radius-xl);
+}
+.rounded-2xl {
+  border-radius: var(--radius-2xl);
+}
 
-.shadow-sm { box-shadow: var(--shadow-sm); }
-.shadow-md { box-shadow: var(--shadow-md); }
-.shadow-lg { box-shadow: var(--shadow-lg); }
-.shadow-xl { box-shadow: var(--shadow-xl); }
-.shadow-2xl { box-shadow: var(--shadow-2xl); }
+.shadow-sm {
+  box-shadow: var(--shadow-sm);
+}
+.shadow-md {
+  box-shadow: var(--shadow-md);
+}
+.shadow-lg {
+  box-shadow: var(--shadow-lg);
+}
+.shadow-xl {
+  box-shadow: var(--shadow-xl);
+}
+.shadow-2xl {
+  box-shadow: var(--shadow-2xl);
+}

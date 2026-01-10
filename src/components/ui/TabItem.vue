@@ -8,12 +8,12 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   active: false,
-  closable: true
+  closable: true,
 });
 
 const emit = defineEmits<{
-  'click': [id: string];
-  'close': [id: string];
+  click: [id: string];
+  close: [id: string];
 }>();
 
 const handleClick = () => {
@@ -29,20 +29,20 @@ const handleClose = (e: Event) => {
 </script>
 
 <template>
-  <div 
-    class="tab-item interactive" 
-    :class="{ active }"
-    @click="handleClick"
-  >
+  <div class="tab-item interactive" :class="{ active }" @click="handleClick">
     <span class="tab-label">{{ label }}</span>
-    <button 
+    <button
       v-if="closable"
       class="close-btn"
-      @click="handleClose"
       aria-label="Close tab"
+      @click="handleClose"
     >
       <svg width="12" height="12" viewBox="0 0 12 12">
-        <path d="M2,2 L10,10 M10,2 L2,10" stroke="currentColor" stroke-width="1.5" />
+        <path
+          d="M2,2 L10,10 M10,2 L2,10"
+          stroke="currentColor"
+          stroke-width="1.5"
+        />
       </svg>
     </button>
   </div>

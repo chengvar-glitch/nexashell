@@ -9,23 +9,23 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   position: 'top',
-  offset: 8
+  offset: 8,
 });
 
 const tooltipRef = ref<HTMLElement | null>(null);
 const tooltipPosition = ref({ top: '0px', left: '0px' });
 const updatePosition = () => {
   if (!tooltipRef.value) return;
-  
+
   const parentElement = tooltipRef.value.parentElement;
   if (!parentElement) return;
-  
+
   const rect = parentElement.getBoundingClientRect();
   const tooltipRect = tooltipRef.value.getBoundingClientRect();
-  
+
   let top = 0;
   let left = 0;
-  
+
   switch (props.position) {
     case 'top':
       top = rect.top - tooltipRect.height - props.offset;
@@ -44,10 +44,10 @@ const updatePosition = () => {
       left = rect.right + props.offset;
       break;
   }
-  
+
   tooltipPosition.value = {
     top: `${top}px`,
-    left: `${left}px`
+    left: `${left}px`,
   };
 };
 
@@ -63,12 +63,8 @@ onUnmounted(() => {
 
 <template>
   <div class="shortcut-hint-wrapper">
-    <slot></slot>
-    <div 
-      ref="tooltipRef"
-      class="shortcut-hint"
-      :style="{ ...tooltipPosition }"
-    >
+    <slot />
+    <div ref="tooltipRef" class="shortcut-hint" :style="{ ...tooltipPosition }">
       <span class="shortcut-text">{{ text }}</span>
     </div>
   </div>

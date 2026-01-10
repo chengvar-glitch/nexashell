@@ -12,7 +12,7 @@ interface Tab {
 }
 
 const tabs = ref<Tab[]>([
-  { id: 'nexashell-default', label: 'NEXASHELL', closable: false }
+  { id: 'nexashell-default', label: 'NEXASHELL', closable: false },
 ]);
 
 const activeTabId = ref('nexashell-default');
@@ -46,7 +46,7 @@ const handleAddTab = () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Terminal ${tabCounter}`,
-    closable: true
+    closable: true,
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
@@ -71,7 +71,7 @@ const handleMenuSelect = (key: string) => {
     const newTab: Tab = {
       id: `tab-${Date.now()}-${tabCounter++}`,
       label: `Local Terminal ${tabCounter}`,
-      closable: true
+      closable: true,
     };
     tabs.value.push(newTab);
     activeTabId.value = newTab.id;
@@ -79,7 +79,7 @@ const handleMenuSelect = (key: string) => {
     const newTab: Tab = {
       id: `tab-${Date.now()}-${tabCounter++}`,
       label: `SSH ${tabCounter}`,
-      closable: true
+      closable: true,
     };
     tabs.value.push(newTab);
     activeTabId.value = newTab.id;
@@ -98,7 +98,7 @@ const handleNewLocalTab = () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Local Terminal ${tabCounter}`,
-    closable: true
+    closable: true,
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
@@ -108,7 +108,7 @@ const handleNewSSHTab = () => {
   const newTab: Tab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `SSH ${tabCounter}`,
-    closable: true
+    closable: true,
   };
   tabs.value.push(newTab);
   activeTabId.value = newTab.id;
@@ -138,8 +138,8 @@ onBeforeUnmount(() => {
     <div class="tabs-container scrollbar-hidden">
       <TabItem
         v-for="tab in tabs"
-        :key="tab.id"
         :id="tab.id"
+        :key="tab.id"
         :label="tab.label"
         :active="tab.id === activeTabId"
         :closable="tab.closable"
@@ -148,25 +148,35 @@ onBeforeUnmount(() => {
       />
       <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
         <ShortcutHint text="Cmd+Shift+T" position="bottom">
-          <button class="action-btn" :class="{ 'is-active': isDropdownOpen }" @click="handleAddTab" aria-label="Add tab">
+          <button
+            class="action-btn"
+            :class="{ 'is-active': isDropdownOpen }"
+            aria-label="Add tab"
+            @click="handleAddTab"
+          >
             <Plus :size="14" />
           </button>
         </ShortcutHint>
         <ShortcutHint text="More options" position="bottom">
-          <button class="action-btn" :class="{ 'is-active': isDropdownOpen }" @click="toggleDropdown" aria-label="More options">
+          <button
+            class="action-btn"
+            :class="{ 'is-active': isDropdownOpen }"
+            aria-label="More options"
+            @click="toggleDropdown"
+          >
             <ChevronDown v-if="!isDropdownOpen" :size="14" />
             <X v-else :size="14" />
           </button>
         </ShortcutHint>
       </div>
     </div>
-    
+
     <div class="more-container">
       <button class="action-btn" aria-label="More">
         <MoreHorizontal :size="14" />
       </button>
     </div>
-    
+
     <DropdownMenu
       v-model:visible="isDropdownOpen"
       :items="NEW_TAB_MENU"

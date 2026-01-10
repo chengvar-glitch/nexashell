@@ -8,7 +8,7 @@ interface Props {
 }
 
 withDefaults(defineProps<Props>(), {
-  visible: false
+  visible: false,
 });
 
 const emit = defineEmits<{
@@ -49,11 +49,19 @@ onMounted(() => {
 <template>
   <Teleport to="body">
     <Transition name="settings-fade">
-      <div v-if="visible" class="settings-overlay flex-center" @click="handleClose">
+      <div
+        v-if="visible"
+        class="settings-overlay flex-center"
+        @click="handleClose"
+      >
         <div class="settings-panel panel" @click.stop>
           <div class="settings-header border-bottom draggable">
             <div class="macos-controls no-drag">
-              <button class="control-btn close" @click="handleClose" aria-label="Close"></button>
+              <button
+                class="control-btn close"
+                aria-label="Close"
+                @click="handleClose"
+              />
             </div>
             <h2 class="settings-title">Settings</h2>
           </div>
@@ -95,8 +103,8 @@ onMounted(() => {
                 <h3 class="section-title">Appearance Settings</h3>
                 <div class="setting-item">
                   <label class="setting-label">Theme</label>
-                  <select 
-                    class="setting-select" 
+                  <select
+                    class="setting-select"
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
@@ -107,7 +115,13 @@ onMounted(() => {
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Font Size</label>
-                  <input type="number" class="setting-input" value="14" min="10" max="24" />
+                  <input
+                    type="number"
+                    class="setting-input"
+                    value="14"
+                    min="10"
+                    max="24"
+                  />
                 </div>
               </div>
 
@@ -131,11 +145,21 @@ onMounted(() => {
                 <h3 class="section-title">Keyboard Shortcuts</h3>
                 <div class="setting-item">
                   <label class="setting-label">New Tab</label>
-                  <input type="text" class="setting-input" value="Cmd+T" readonly />
+                  <input
+                    type="text"
+                    class="setting-input"
+                    value="Cmd+T"
+                    readonly
+                  />
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Close Tab</label>
-                  <input type="text" class="setting-input" value="Cmd+W" readonly />
+                  <input
+                    type="text"
+                    class="setting-input"
+                    value="Cmd+W"
+                    readonly
+                  />
                 </div>
               </div>
 
@@ -394,7 +418,9 @@ onMounted(() => {
 
 .settings-fade-enter-active .settings-panel,
 .settings-fade-leave-active .settings-panel {
-  transition: transform var(--transition-base), opacity var(--transition-base);
+  transition:
+    transform var(--transition-base),
+    opacity var(--transition-base);
 }
 
 .settings-fade-enter-from .settings-panel {
@@ -413,7 +439,7 @@ onMounted(() => {
     color: #ffffff;
     box-shadow: var(--shadow-sm);
   }
-  
+
   :root:not(.theme-light) .setting-checkbox {
     accent-color: var(--color-primary);
   }

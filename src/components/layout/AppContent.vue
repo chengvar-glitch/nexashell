@@ -1,9 +1,7 @@
-<script setup lang="ts">
-</script>
+<script setup lang="ts"></script>
 
 <template>
-  <div class="app-content">
-  </div>
+  <div class="app-content" />
 </template>
 
 <style scoped>

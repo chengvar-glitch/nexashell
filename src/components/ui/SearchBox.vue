@@ -9,16 +9,16 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   placeholder: 'Quick search (Cmd+K)',
-  modelValue: ''
+  modelValue: '',
 });
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
-  'search': [value: string];
-  'focus': [];
-  'blur': [];
-  'keydown': [event: KeyboardEvent];
-  'keyup': [event: KeyboardEvent];
+  search: [value: string];
+  focus: [];
+  blur: [];
+  keydown: [event: KeyboardEvent];
+  keyup: [event: KeyboardEvent];
 }>();
 
 const searchInputRef = ref<HTMLInputElement | null>(null);
@@ -40,7 +40,7 @@ defineExpose({
     if (searchInputRef.value) {
       searchInputRef.value.focus();
     }
-  }
+  },
 });
 
 const handleFocus = () => {
@@ -93,14 +93,14 @@ const dynamicPlaceholder = computed(() => {
 
 <template>
   <div class="search-container no-drag flex-h-center">
-    <input 
+    <input
       ref="searchInputRef"
-      type="text" 
+      type="text"
       :placeholder="dynamicPlaceholder"
       :value="modelValue"
       :class="['search-input', { 'search-input-focused': isFocused }]"
       @input="onInput"
-      @keypress.enter="onSearch"
+      @keydown.enter="onSearch"
       @focus="handleFocus"
       @blur="handleBlur"
       @keydown="handleKeyDown"
@@ -131,14 +131,15 @@ const dynamicPlaceholder = computed(() => {
   transition: all var(--transition-base);
   box-shadow: var(--shadow-sm);
   backdrop-filter: var(--blur-light);
-  text-align: left;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.3-4.3'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: 14px center;
   background-size: 16px 16px;
+  text-align: left;
 }
 
 .search-input::placeholder {
+  text-align: center;
   color: var(--color-text-placeholder);
   font-weight: 400;
 }
