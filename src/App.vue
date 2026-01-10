@@ -149,4 +149,19 @@ html, body, #app {
   color: #f6f6f6;
   background-color: transparent;
 }
+
+/* Disable text selection across the entire app */
+#app {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
+
+div[role="region"] {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+}
 </style>

@@ -139,8 +139,9 @@ const handleOpenSettings = () => {
 </script>
 
 <template>
-  <div class="window-title-bar draggable glass-medium border-bottom" :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }">
-    <div v-if="showWindowControls && isMacOS_OS && !isFullscreen" class="window-controls macos-controls no-drag">
+  <div class="window-title-bar glass-medium border-bottom" :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }" data-tauri-drag-region>
+    <!-- Window controls for macOS -->
+    <div v-if="showWindowControls && isMacOS_OS && !isFullscreen" class="window-controls macos-controls">
       <button class="window-control-btn close-btn" @click="handleClose" aria-label="Close"></button>
       <button class="window-control-btn minimize-btn" @click="handleMinimize" aria-label="Minimize"></button>
       <button class="window-control-btn maximize-btn" @click="handleMaximize" aria-label="Fullscreen"></button>
@@ -148,6 +149,7 @@ const handleOpenSettings = () => {
     
     <SearchBox 
       ref="searchBoxRef" 
+      class="disable-selection"
       @focus="onSearchBoxFocus" 
       @blur="onSearchBoxBlur"
       @keydown="onSearchBoxKeyDown"
@@ -160,7 +162,7 @@ const handleOpenSettings = () => {
       :anchor-element="searchBoxElement"
     />
     
-    <div class="settings-container no-drag">
+    <div class="settings-container">
       <ShortcutHint text="Cmd+," position="bottom">
         <button class="btn-icon" @click="handleOpenSettings">
           <MoreHorizontal :size="16" />
@@ -168,7 +170,7 @@ const handleOpenSettings = () => {
       </ShortcutHint>
     </div>
     
-    <div v-if="showWindowControls && isWindowsOS" class="window-controls windows-controls no-drag">
+    <div v-if="showWindowControls && isWindowsOS" class="window-controls windows-controls">
       <button class="windows-control-btn minimize-btn" @click="handleMinimize" aria-label="Minimize">
         <svg width="10" height="10" viewBox="0 0 10 10">
           <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
@@ -198,7 +200,7 @@ const handleOpenSettings = () => {
   align-items: center;
   padding: 0 0 0 12px;
   background-color: var(--color-bg-primary);
-  position: sticky;
+  position: relative;
   top: 0;
   z-index: 100;
   border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
@@ -292,6 +294,13 @@ const handleOpenSettings = () => {
 .settings-btn:hover {
   background-color: var(--color-interactive-hover);
   color: var(--color-text-primary);
+}
+
+.disable-selection {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -21,15 +21,17 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 use cocoa::appkit::NSWindow;
-                use cocoa::base::{id, NO};
+                use cocoa::base::{id, NO, YES};
                 
                 let window = app.get_webview_window("main").unwrap();
                 let ns_window = window.ns_window().unwrap() as id;
                 
+                // Configure transparent and movable window for macOS
                 unsafe {
                     ns_window.setOpaque_(NO);
                     ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(cocoa::base::nil));
-                    ns_window.setTitlebarAppearsTransparent_(cocoa::base::YES);
+                    ns_window.setTitlebarAppearsTransparent_(YES);
+                    ns_window.setMovableByWindowBackground_(YES);
                 }
             }
             Ok(())
