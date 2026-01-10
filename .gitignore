@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+pnpm-lock.yaml
+
+# Build outputs
+/dist/
+/dist-electron/
+# Tauri build artifacts
+/src-tauri/target/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment variables
+.env*
+!.env.example
+
+# Local configuration
+*.local
