@@ -1,4 +1,9 @@
-import { quitApp, closeWindow, createNewLocalTab, focusSearch } from '@/utils/app-utils';
+import {
+  quitApp,
+  closeWindow,
+  createNewLocalTab,
+  focusSearch,
+} from '@/utils/app-utils';
 
 export interface ShortcutConfig {
   key: string;

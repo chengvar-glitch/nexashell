@@ -13,4 +13,4 @@ export const APP_EVENTS = {
   FOCUS_SEARCH: 'app:focus-search',
 } as const;
 
-export type AppEventType = typeof APP_EVENTS[keyof typeof APP_EVENTS];
+export type AppEventType = (typeof APP_EVENTS)[keyof typeof APP_EVENTS];

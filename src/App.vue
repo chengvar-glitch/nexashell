@@ -4,22 +4,41 @@ import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
 import SSHConnectionForm from '@/components/ssh/SSHConnectionForm.vue';
+import SettingsPanel from '@/components/settings/SettingsPanel.vue';
 import { shortcutManager, PredefinedShortcuts } from './utils/shortcut-manager';
 import { themeManager } from './utils/theme-manager';
 import { useModal } from '@/composables';
 import { useTabManagement } from '@/composables';
-import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY, CLOSE_SSH_FORM_KEY, SHOW_SSH_FORM_KEY } from '@/types';
+import {
+  TAB_MANAGEMENT_KEY,
+  OPEN_SSH_FORM_KEY,
+  CLOSE_SSH_FORM_KEY,
+  SHOW_SSH_FORM_KEY,
+  SHOW_SETTINGS_KEY,
+} from '@/types';
+import type { SSHConnectionData } from '@/types/ssh';
 import { APP_EVENTS } from '@/constants';
 import { eventBus } from '@/utils/event-bus';
 
-const showSettings = ref(false);
-provide('showSettings', showSettings);
-
 // SSH connection form management
-const { isOpen: showSSHForm, openModal: openSSHForm, closeModal: closeSSHForm } = useModal();
+const {
+  isOpen: showSSHForm,
+  openModal: openSSHForm,
+  closeModal: closeSSHForm,
+} = useModal();
 provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, openSSHForm);
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
+
+// Settings panel management
+const showSettings = ref(false);
+const openSettings = () => {
+  showSettings.value = true;
+};
+const closeSettings = () => {
+  showSettings.value = false;
+};
+provide(SHOW_SETTINGS_KEY, showSettings);
 
 // Tab management
 const tabManagement = useTabManagement();
@@ -39,11 +58,11 @@ onMounted(() => {
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
 
   eventBus.on(APP_EVENTS.OPEN_SETTINGS, () => {
-    showSettings.value = true;
+    openSettings();
   });
 
   eventBus.on(APP_EVENTS.CLOSE_DIALOG, () => {
-    showSettings.value = false;
+    closeSettings();
     closeSSHForm();
   });
 
@@ -57,7 +76,7 @@ onBeforeUnmount(() => {
 });
 
 // Handle SSH connection
-const handleSSHConnect = (data: any) => {
+const handleSSHConnect = (data: SSHConnectionData) => {
   console.log('SSH connection data:', data);
   // TODO: Implement actual SSH connection logic
   closeSSHForm();
@@ -67,29 +86,38 @@ const handleSSHConnect = (data: any) => {
 const handleSSHCancel = () => {
   closeSSHForm();
 };
+
+// Handle settings panel events
+const handleSettingsUpdate = (value: boolean) => {
+  showSettings.value = value;
+};
 </script>
 
 <template>
-  <div
-    id="app"
-    class="app-wrapper"
-  >
+  <div id="app" class="app-wrapper">
     <div class="app-root">
       <WindowTitleBar />
       <AppTabs />
       <AppContent />
     </div>
-    
+
     <!-- SSH connection form modal -->
-    <div
-      v-if="showSSHForm"
-      class="modal-overlay"
-      @click.self="closeSSHForm"
-    >
+    <div v-if="showSSHForm" class="modal-overlay" @click.self="closeSSHForm">
       <div class="modal-content">
-        <SSHConnectionForm 
-          @connect="handleSSHConnect" 
-          @cancel="handleSSHCancel" 
+        <SSHConnectionForm
+          @connect="handleSSHConnect"
+          @cancel="handleSSHCancel"
+        />
+      </div>
+    </div>
+
+    <!-- Settings panel modal -->
+    <div v-if="showSettings" class="modal-overlay" @click.self="closeSettings">
+      <div class="modal-content">
+        <SettingsPanel
+          :visible="showSettings"
+          :use-teleport="false"
+          @update:visible="handleSettingsUpdate"
         />
       </div>
     </div>
@@ -156,13 +184,15 @@ const handleSSHCancel = () => {
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(2px); /* Subtle blur to distinguish modal from background */
+  backdrop-filter: blur(
+    2px
+  ); /* Subtle blur to distinguish modal from background */
 }
 
 /* Modal content with enhanced styling for better visibility */
 .modal-content {
   position: relative;
-  box-shadow: 
+  box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.15),
     0 0 0 1px rgba(0, 0, 0, 0.05);
   border-radius: var(--radius-lg);

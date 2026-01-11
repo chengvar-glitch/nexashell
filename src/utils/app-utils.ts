@@ -8,9 +8,15 @@
 // This file is kept for backward compatibility
 // Temporarily provides backward compatible functions
 
-import { closeWindow as closeWindowImpl, quitApp as quitAppImpl } from './window/window-operations';
+import {
+  closeWindow as closeWindowImpl,
+  quitApp as quitAppImpl,
+} from './window/window-operations';
 import { createNewLocalTab as createNewLocalTabImpl } from './tab/tab-operations';
-import { isMacOS as isMacOSImpl, isWindows as isWindowsImpl } from './platform/platform-detection';
+import {
+  isMacOS as isMacOSImpl,
+  isWindows as isWindowsImpl,
+} from './platform/platform-detection';
 import { eventBus } from './event-bus';
 import { APP_EVENTS } from '@/constants';
 

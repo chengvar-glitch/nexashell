@@ -372,7 +372,7 @@
 /* Modal content container - with shadow and animation effects */
 .modal-content {
   position: relative;
-  box-shadow: 
+  box-shadow:
     0 10px 40px rgba(0, 0, 0, 0.15),
     0 0 0 1px rgba(0, 0, 0, 0.05);
   border-radius: var(--radius-lg);
@@ -419,7 +419,7 @@
   margin: -16px -16px 16px -16px;
 }
 
-.modal-header-left, 
+.modal-header-left,
 .modal-header-right {
   width: 24px;
   height: 24px;

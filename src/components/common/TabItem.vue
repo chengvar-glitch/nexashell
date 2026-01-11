@@ -42,11 +42,7 @@ const handleClose = (e: Event) => {
       aria-label="Close tab"
       @click="handleClose"
     >
-      <svg
-        width="12"
-        height="12"
-        viewBox="0 0 12 12"
-      >
+      <svg width="12" height="12" viewBox="0 0 12 12">
         <path
           d="M2,2 L10,10 M10,2 L2,10"
           stroke="currentColor"

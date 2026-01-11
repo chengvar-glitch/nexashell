@@ -14,10 +14,7 @@
           >
             <p>No matches found</p>
           </div>
-          <div
-            v-else
-            class="search-dropdown-list"
-          >
+          <div v-else class="search-dropdown-list">
             <div
               v-for="(item, index) in filteredItems"
               :key="item.id"
@@ -25,8 +22,7 @@
               :class="{
                 active: activeIndex === index,
                 hover:
-                  lastInteractionType !== 'keyboard' &&
-                  hoverIndex === index,
+                  lastInteractionType !== 'keyboard' && hoverIndex === index,
               }"
               @click="selectItem(item)"
               @mouseenter="
@@ -45,10 +41,7 @@
               "
             >
               <div class="item-icon">
-                <component
-                  :is="item.icon"
-                  :size="16"
-                />
+                <component :is="item.icon" :size="16" />
               </div>
               <div class="item-content">
                 <div class="item-title">
@@ -58,10 +51,7 @@
                   {{ item.description }}
                 </div>
               </div>
-              <div
-                v-if="item.shortcut"
-                class="item-shortcut"
-              >
+              <div v-if="item.shortcut" class="item-shortcut">
                 <span class="shortcut-text">{{ item.shortcut }}</span>
               </div>
             </div>
@@ -217,7 +207,8 @@ const searchItems = ref([
     icon: Command,
     shortcut: 'Cmd+Shift+P',
     category: 'commands',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-command-palette')),
+    action: () =>
+      window.dispatchEvent(new CustomEvent('app:open-command-palette')),
   },
   {
     id: 'file-manager',
@@ -225,7 +216,8 @@ const searchItems = ref([
     description: 'Browse and manage files',
     icon: Folder,
     category: 'files',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-file-manager')),
+    action: () =>
+      window.dispatchEvent(new CustomEvent('app:open-file-manager')),
   },
   {
     id: 'web-terminal',
@@ -233,7 +225,8 @@ const searchItems = ref([
     description: 'Use web-based terminal',
     icon: Globe,
     category: 'terminal',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-web-terminal')),
+    action: () =>
+      window.dispatchEvent(new CustomEvent('app:open-web-terminal')),
   },
   {
     id: 'code-editor',

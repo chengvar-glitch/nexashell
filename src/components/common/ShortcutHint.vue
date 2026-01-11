@@ -64,11 +64,7 @@ onUnmounted(() => {
 <template>
   <div class="shortcut-hint-wrapper">
     <slot />
-    <div
-      ref="tooltipRef"
-      class="shortcut-hint"
-      :style="{ ...tooltipPosition }"
-    >
+    <div ref="tooltipRef" class="shortcut-hint" :style="{ ...tooltipPosition }">
       <span class="shortcut-text">{{ text }}</span>
     </div>
   </div>

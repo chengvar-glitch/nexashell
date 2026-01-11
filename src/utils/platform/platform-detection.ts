@@ -48,12 +48,14 @@ export function isMacOSBrowser(): boolean {
     if ((window as any).__TAURI__) {
       try {
         return (window as any).__TAURI__.os.platform() === 'darwin';
-      } catch (error) {
+      } catch {
         return navigator.userAgent.includes('Mac');
       }
     }
   }
-  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+  return (
+    typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac')
+  );
 }
 
 /**
@@ -65,10 +67,12 @@ export function isWindowsBrowser(): boolean {
     if ((window as any).__TAURI__) {
       try {
         return (window as any).__TAURI__.os.platform() === 'windows';
-      } catch (error) {
+      } catch {
         return navigator.userAgent.includes('Windows');
       }
     }
   }
-  return typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows');
+  return (
+    typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
+  );
 }

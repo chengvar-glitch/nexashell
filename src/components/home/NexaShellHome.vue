@@ -5,34 +5,25 @@
         <h2>NexaShell</h2>
         <p>Welcome to the modern SSH terminal tool</p>
       </div>
-      
+
       <div class="home-content">
         <div class="quick-actions">
-          <button
-            class="action-btn"
-            @click="handleNewConnection"
-          >
+          <button class="action-btn" @click="handleNewConnection">
             <span class="btn-icon">+</span>
             <span class="btn-text">New SSH Connection</span>
           </button>
-          
-          <button
-            class="action-btn"
-            @click="handleOpenRecent"
-          >
+
+          <button class="action-btn" @click="handleOpenRecent">
             <span class="btn-icon">📁</span>
             <span class="btn-text">Open Recent Connection</span>
           </button>
-          
-          <button
-            class="action-btn"
-            @click="handleOpenSettings"
-          >
+
+          <button class="action-btn" @click="handleOpenSettings">
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">Settings</span>
           </button>
         </div>
-        
+
         <div class="recent-connections">
           <h3>Recent Connections</h3>
           <div class="connection-list">
@@ -49,17 +40,11 @@
                   {{ conn.host }}:{{ conn.port }} | {{ conn.username }}
                 </div>
               </div>
-              <button
-                class="connect-btn"
-                @click="handleConnect(conn)"
-              >
+              <button class="connect-btn" @click="handleConnect(conn)">
                 Connect
               </button>
             </div>
-            <div
-              v-if="recentConnections.length === 0"
-              class="no-connections"
-            >
+            <div v-if="recentConnections.length === 0" class="no-connections">
               No recent connections
             </div>
           </div>

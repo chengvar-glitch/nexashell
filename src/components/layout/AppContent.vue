@@ -16,11 +16,11 @@ const currentComponent = computed(() => {
 
   const tabs = tabManagement?.tabs?.value || [];
   const activeTab = tabs.find((tab: any) => tab.id === activeTabId.value);
-  
+
   if (!activeTab) {
     return NexaShellHome;
   }
-  
+
   // Determine which component to display based on tab type (decoupling)
   switch (activeTab.type) {
     case 'terminal':

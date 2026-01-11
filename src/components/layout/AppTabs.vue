@@ -25,14 +25,14 @@ const dropdownX = ref(0);
 const dropdownY = ref(0);
 let tabCounter = 1;
 
-const tabsContainerRef = ref<HTMLDivElement>();
+const tabsContainerRef = ref<HTMLElement>();
 
 // Use constant definitions
 // const NEW_TAB_MENU = NEW_TAB_MENU_ITEMS;
 
 const handleTabClick = async (id: string) => {
   tabManagement.setActiveTab(id);
-  
+
   await nextTick();
   scrollToActiveTab();
 };
@@ -49,7 +49,7 @@ const handleAddTab = async () => {
     closable: true,
   };
   tabManagement.addTab(newTab);
-  
+
   await nextTick();
   scrollToActiveTab();
 };
@@ -61,11 +61,11 @@ const toggleDropdown = (event: MouseEvent) => {
     const container = target.closest('.tab-actions') as HTMLElement;
     if (container) {
       const rect = container.getBoundingClientRect();
-      
+
       // Calculate the available space on the right side
       const availableRightSpace = window.innerWidth - rect.left;
       const menuWidth = 200; // Approximate dropdown menu width
-      
+
       // Adjust x position if menu would go off-screen
       if (availableRightSpace < menuWidth) {
         // Position the menu to appear from the right edge of the button
@@ -73,7 +73,7 @@ const toggleDropdown = (event: MouseEvent) => {
       } else {
         dropdownX.value = rect.left;
       }
-      
+
       dropdownY.value = rect.bottom + 2;
     }
   }
@@ -96,13 +96,13 @@ const handleMenuSelect = async (key: string) => {
     }
   }
   isDropdownOpen.value = false;
-  
+
   await nextTick();
   scrollToActiveTab();
 };
 
 const handleCloseTabShortcut = () => {
-  const currentTab = tabs.value.find((tab: any) => tab.id === activeTabId.value);
+  const currentTab = tabs.value.find(tab => tab.id === activeTabId.value);
   if (currentTab && currentTab.closable) {
     handleTabClose(activeTabId.value);
   }
@@ -116,7 +116,7 @@ const handleNewLocalTab = async () => {
     closable: true,
   };
   tabManagement.addTab(newTab);
-  
+
   await nextTick();
   scrollToActiveTab();
 };
@@ -143,29 +143,32 @@ const openSSHConnectionForm = () => {
 // Scroll to the currently active tab
 const scrollToActiveTab = () => {
   if (!tabsContainerRef.value) return;
-  
-  const activeTabElement = document.querySelector(`.tab-item[data-id="${activeTabId.value}"]`) as HTMLElement;
+
+  const activeTabElement = document.querySelector(
+    `.tab-item[data-id="${activeTabId.value}"]`
+  ) as HTMLElement;
   if (activeTabElement && tabsContainerRef.value) {
     const containerScrollLeft = tabsContainerRef.value.scrollLeft;
     const containerWidth = tabsContainerRef.value.clientWidth;
     const tabOffsetLeft = activeTabElement.offsetLeft;
     const tabWidth = activeTabElement.offsetWidth;
-    
+
     let newScrollLeft = containerScrollLeft;
-    
+
     // If the tab is outside the view to the left
     if (tabOffsetLeft < 0) {
       newScrollLeft = containerScrollLeft + tabOffsetLeft;
-    } 
+    }
     // If the tab is outside the view to the right
     else if (tabOffsetLeft + tabWidth > containerWidth) {
-      newScrollLeft = containerScrollLeft + (tabOffsetLeft + tabWidth - containerWidth);
+      newScrollLeft =
+        containerScrollLeft + (tabOffsetLeft + tabWidth - containerWidth);
     }
-    
+
     // Scroll to the target position
     tabsContainerRef.value.scrollTo({
       left: newScrollLeft,
-      behavior: 'smooth'
+      behavior: 'smooth',
     });
   }
 };
@@ -175,7 +178,7 @@ onMounted(() => {
   eventBus.on(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.on(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.on(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
-  
+
   window.addEventListener('resize', scrollToActiveTab);
 });
 
@@ -184,17 +187,14 @@ onBeforeUnmount(() => {
   eventBus.off(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.off(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.off(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
-  
+
   window.removeEventListener('resize', scrollToActiveTab);
 });
 </script>
 
 <template>
   <div class="app-tabs glass-light border-bottom">
-    <div
-      ref="tabsContainerRef"
-      class="tabs-container scrollbar-hidden"
-    >
+    <div ref="tabsContainerRef" class="tabs-container scrollbar-hidden">
       <TabItem
         v-for="(tab, index) in tabs"
         :id="tab.id"
@@ -207,14 +207,8 @@ onBeforeUnmount(() => {
         @click="handleTabClick"
         @close="handleTabClose"
       />
-      <div
-        class="tab-actions"
-        :class="{ 'is-active': isDropdownOpen }"
-      >
-        <ShortcutHint
-          text="Cmd+T to create SSH connection"
-          position="bottom"
-        >
+      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
+        <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
@@ -224,34 +218,22 @@ onBeforeUnmount(() => {
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint
-          text="More options"
-          position="bottom"
-        >
+        <ShortcutHint text="More options" position="bottom">
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown
-              v-if="!isDropdownOpen"
-              :size="14"
-            />
-            <X
-              v-else
-              :size="14"
-            />
+            <ChevronDown v-if="!isDropdownOpen" :size="14" />
+            <X v-else :size="14" />
           </button>
         </ShortcutHint>
       </div>
     </div>
 
     <div class="more-container">
-      <button
-        class="action-btn"
-        aria-label="More"
-      >
+      <button class="action-btn" aria-label="More">
         <MoreHorizontal :size="14" />
       </button>
     </div>

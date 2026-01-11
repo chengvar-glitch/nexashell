@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, inject, Ref, nextTick, onUnmounted } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { isMacOSBrowser, isWindowsBrowser } from '@/utils/platform/platform-detection';
+import {
+  isMacOSBrowser,
+  isWindowsBrowser,
+} from '@/utils/platform/platform-detection';
 import SearchBox from '@/components/search/SearchBox.vue';
-import SettingsPanel from '@/components/settings/SettingsPanel.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import SearchDropdown from '@/components/search/SearchDropdown.vue';
 import { MoreHorizontal } from 'lucide-vue-next';
@@ -201,14 +203,8 @@ const handleOpenSettings = () => {
     />
 
     <div class="settings-container">
-      <ShortcutHint
-        text="Cmd+,"
-        position="bottom"
-      >
-        <button
-          class="btn-icon"
-          @click="handleOpenSettings"
-        >
+      <ShortcutHint text="Cmd+," position="bottom">
+        <button class="btn-icon" @click="handleOpenSettings">
           <MoreHorizontal :size="16" />
         </button>
       </ShortcutHint>
@@ -223,16 +219,8 @@ const handleOpenSettings = () => {
         aria-label="Minimize"
         @click="handleMinimize"
       >
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-        >
-          <path
-            d="M0,5 L10,5"
-            stroke="currentColor"
-            stroke-width="1"
-          />
+        <svg width="10" height="10" viewBox="0 0 10 10">
+          <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
         </svg>
       </button>
       <button
@@ -240,11 +228,7 @@ const handleOpenSettings = () => {
         aria-label="Maximize"
         @click="handleMaximize"
       >
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-        >
+        <svg width="10" height="10" viewBox="0 0 10 10">
           <rect
             x="0"
             y="0"
@@ -261,11 +245,7 @@ const handleOpenSettings = () => {
         aria-label="Close"
         @click="handleClose"
       >
-        <svg
-          width="10"
-          height="10"
-          viewBox="0 0 10 10"
-        >
+        <svg width="10" height="10" viewBox="0 0 10 10">
           <path
             d="M0,0 L10,10 M10,0 L0,10"
             stroke="currentColor"
@@ -275,8 +255,6 @@ const handleOpenSettings = () => {
       </button>
     </div>
   </div>
-
-  <SettingsPanel v-model:visible="showSettings" />
 </template>
 
 <style scoped>
