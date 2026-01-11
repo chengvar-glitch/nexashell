@@ -25,6 +25,7 @@
             v-model="formData.name"
             type="text"
             placeholder="Name the connection"
+            class="input"
             :class="{ error: validationErrors.name }"
             required
           />
@@ -35,57 +36,41 @@
       </div>
 
       <div class="modal-form-row">
-        <div class="modal-form-group">
-          <label for="host">Host Address *</label>
-          <!-- Host Address Input Field with enhanced UX -->
-          <div
-            class="modal-ip-input-container"
-            :class="{ error: validationErrors.host }"
-          >
+        <div class="input-container">
+          <div class="modal-form-group host-field">
+            <label for="host">Host Address *</label>
             <input
               id="host"
               ref="hostInput"
               v-model="formData.host"
               type="text"
               placeholder="e.g., example.com or hostname"
+              class="input"
               :class="{ error: validationErrors.host }"
               required
-              @blur="validateHostOnBlur"
             />
-            <div
-              v-if="showIPSuggestions && ipSuggestions.length > 0"
-              class="modal-ip-suggestions"
-            >
-              <div
-                v-for="suggestion in ipSuggestions"
-                :key="suggestion"
-                class="modal-ip-suggestion-item"
-                @click="selectIPSuggestion(suggestion)"
-              >
-                {{ suggestion }}
-              </div>
-            </div>
+            <span v-if="validationErrors.host" class="modal-error-message">{{
+              validationErrors.host
+            }}</span>
           </div>
-          <span v-if="validationErrors.host" class="modal-error-message">{{
-            validationErrors.host
-          }}</span>
-        </div>
 
-        <div class="modal-form-group">
-          <label for="port">Port</label>
-          <input
-            id="port"
-            ref="portInput"
-            v-model.number="formData.port"
-            type="number"
-            min="1"
-            max="65535"
-            placeholder="22"
-            :class="{ error: validationErrors.port }"
-          />
-          <span v-if="validationErrors.port" class="modal-error-message">{{
-            validationErrors.port
-          }}</span>
+          <div class="modal-form-group port-field">
+            <label for="port">Port</label>
+            <input
+              id="port"
+              ref="portInput"
+              v-model.number="formData.port"
+              type="number"
+              min="1"
+              max="65535"
+              placeholder="22"
+              class="input short-input"
+              :class="{ error: validationErrors.port }"
+            />
+            <span v-if="validationErrors.port" class="modal-error-message">{{
+              validationErrors.port
+            }}</span>
+          </div>
         </div>
       </div>
 
@@ -98,6 +83,7 @@
             v-model="formData.username"
             type="text"
             placeholder="Username"
+            class="input"
             :class="{ error: validationErrors.username }"
             required
           />
@@ -111,18 +97,18 @@
         <div class="modal-form-group full-width">
           <label for="password">Password</label>
           <!-- Password field with show/hide toggle -->
-          <div class="modal-password-input-container">
+          <div class="password-input-container">
             <input
               id="password"
               ref="passwordInput"
               v-model="formData.password"
               :type="showPassword ? 'text' : 'password'"
               placeholder="Password (leave empty for key authentication)"
-              class="modal-input"
+              class="input"
             />
             <button
               type="button"
-              class="modal-password-toggle-btn"
+              class="password-toggle-btn"
               :aria-label="showPassword ? 'Hide password' : 'Show password'"
               @click="togglePasswordVisibility"
             >
@@ -145,25 +131,25 @@
             v-model="formData.privateKey"
             type="text"
             placeholder="Private key file path"
-            class="modal-input"
+            class="input"
           />
         </div>
 
         <div class="modal-form-group">
           <label for="keyPassphrase">Key Passphrase</label>
           <!-- Key passphrase field with show/hide toggle -->
-          <div class="modal-password-input-container">
+          <div class="password-input-container">
             <input
               id="keyPassphrase"
               ref="keyPassphraseInput"
               v-model="formData.keyPassphrase"
               :type="showKeyPassphrase ? 'text' : 'password'"
-              placeholder="Private key passphrase (optional)"
-              class="modal-input"
+              placeholder="Private key passphrase"
+              class="input"
             />
             <button
               type="button"
-              class="modal-password-toggle-btn"
+              class="password-toggle-btn"
               :aria-label="
                 showKeyPassphrase
                   ? 'Hide key passphrase'
@@ -248,10 +234,6 @@ const isMacOS = ref(false);
 const showPassword = ref(false);
 const showKeyPassphrase = ref(false);
 
-// IP suggestions related variables
-const showIPSuggestions = ref(false);
-const ipSuggestions = ref<string[]>([]);
-
 // Form input references for tab navigation
 const nameInput = ref<HTMLInputElement | null>(null);
 const hostInput = ref<HTMLInputElement | null>(null);
@@ -282,31 +264,6 @@ const toggleKeyPassphraseVisibility = () => {
   showKeyPassphrase.value = !showKeyPassphrase.value;
 };
 
-// Domain validation function
-const isValidDomain = (domain: string): boolean => {
-  const domainRegex =
-    /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$/;
-  return domainRegex.test(domain);
-};
-
-// Validate host on blur to provide immediate feedback
-const validateHostOnBlur = () => {
-  if (formData.host.trim()) {
-    if (!isValidDomain(formData.host)) {
-      validationErrors.host = 'Please enter a valid domain name';
-    } else {
-      delete validationErrors.host; // Clear error if valid
-    }
-  }
-};
-
-// Select a suggestion
-const selectIPSuggestion = (suggestion: string) => {
-  formData.host = suggestion;
-  showIPSuggestions.value = false;
-  validateHostOnBlur(); // Re-validate after selection
-};
-
 // Validate form fields before submission
 const validateForm = (): boolean => {
   // Clear previous errors
@@ -325,9 +282,6 @@ const validateForm = (): boolean => {
   // Validate host address
   if (!formData.host.trim()) {
     validationErrors.host = 'Host address cannot be empty';
-    isValid = false;
-  } else if (!isValidDomain(formData.host)) {
-    validationErrors.host = 'Please enter a valid domain name';
     isValid = false;
   }
 
@@ -361,9 +315,6 @@ const onSubmit = () => {
 };
 
 const onCancel = () => {
-  // Clear any pending suggestions when cancelling
-  showIPSuggestions.value = false;
-  ipSuggestions.value = [];
   emit('cancel');
 };
 
@@ -413,29 +364,90 @@ const handleTabKey = (event: KeyboardEvent) => {
 </script>
 
 <style scoped>
-/* Keep SSH form specific styles that override global styles */
-.form-group input {
+/* Container for host and port inputs */
+.input-container {
+  display: flex;
+  gap: 12px;
   width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--color-border-primary);
+}
+
+.host-field {
+  flex: 2; /* Takes 2/3 of the available space */
+}
+
+.port-field {
+  flex: 1; /* Takes 1/3 of the available space */
+}
+
+/* Password input container */
+.password-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input-container input {
+  flex: 1;
+  padding-right: 30px; /* Space for the eye icon */
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-primary);
+  z-index: 1; /* Make sure it's above the input */
+}
+
+.password-toggle-btn:hover {
+  background: var(--color-interactive-hover);
+  color: var(--color-text-secondary);
+}
+
+/* Enhance form group spacing for better visual hierarchy */
+.modal-form-group {
+  margin-bottom: 8px; /* Consistent spacing between form groups */
+}
+
+/* Style labels consistently */
+.modal-form-group label {
+  display: block;
+  margin-bottom: 4px;
   color: var(--color-text-primary);
   font-size: 0.9em;
-  box-sizing: border-box;
+  font-weight: 500;
 }
 
-.form-group input.error {
-  border-color: #ff4757;
+/* Adjust form row spacing */
+.modal-form-row {
+  margin-bottom: 10px; /* Reduced from 12px by 2px to meet compactness requirement */
 }
 
-.form-group input:focus {
-  outline: none;
-  border-color: var(--color-primary);
+/* Style error messages consistently */
+.modal-error-message {
+  display: block;
+  color: #ff4757;
+  font-size: 0.75em;
+  margin-top: 2px;
+  margin-bottom: 4px;
 }
 
-/* Ensure lucide icons are properly styled in password toggle buttons */
-.modal-password-toggle-btn svg {
-  vertical-align: middle;
+/* Style actions consistently */
+.modal-form-actions {
+  margin-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
+  padding-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
+  gap: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
+}
+
+/* Specific style for short input fields like port */
+.short-input {
+  width: 100%; /* Full width within its container */
 }
 </style>

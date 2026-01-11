@@ -31,19 +31,24 @@ NexaShell is a modern SSH terminal tool based on Tauri 2 + Vue 3 + TypeScript, d
 ## Architecture Principles
 
 ### 1. Single Responsibility Principle
+
 Each component is responsible for a clear functional domain, without taking on additional responsibilities.
 
 ### 2. Dependency Injection Pattern
+
 Decouple components through Vue's `provide/inject` mechanism, avoiding direct dependencies.
 
 ### 3. Unidirectional Data Flow
+
 - **Data flows downward**: From parent components to child components via props
 - **Events propagate upward**: Child components notify parent components via emit
 
 ### 4. Type-Driven
+
 Use TypeScript type identifiers (such as `type` field) instead of string matching to determine logic.
 
 ### 5. Event-Driven Architecture
+
 Prioritize custom events for component communication to reduce coupling.
 
 ---
@@ -162,6 +167,7 @@ src/
 ### 🎯 App.vue (Coordination Layer)
 
 **Responsibilities**:
+
 - Global state management (tabs, popups, settings)
 - Dependency injection providers (provide)
 - Shortcut registration and management
@@ -169,13 +175,19 @@ src/
 - Global event listening and coordination
 
 **Not Responsible For**:
+
 - UI rendering details
 - Business logic implementation
 
 **Key Code**:
+
 ```typescript
 import type { Tab } from '@/types/tab';
-import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY, CLOSE_SSH_FORM_KEY } from '@/types/injection-keys';
+import {
+  TAB_MANAGEMENT_KEY,
+  OPEN_SSH_FORM_KEY,
+  CLOSE_SSH_FORM_KEY,
+} from '@/types/injection-keys';
 
 // Using type-safe injection keys
 provide(TAB_MANAGEMENT_KEY, {
@@ -183,7 +195,7 @@ provide(TAB_MANAGEMENT_KEY, {
   activeTabId,
   setActiveTab,
   addTab,
-  closeTab
+  closeTab,
 });
 
 provide(OPEN_SSH_FORM_KEY, openSSHForm);
@@ -195,12 +207,14 @@ provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 ### 🏠 WindowTitleBar.vue (Title Bar Layer)
 
 **Responsibilities**:
+
 - Window controls (close, minimize, maximize)
 - Search box display
 - Settings button
 - Platform detection (macOS/Windows)
 
 **Dependency Injection**:
+
 - `showSettings` - Settings panel state
 
 ---
@@ -208,20 +222,24 @@ provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 ### 📑 AppTabs.vue (Tab Management Layer)
 
 **Responsibilities**:
+
 - Rendering and displaying tabs
 - Tab switching, closing interactions
 - New tab button and dropdown menu
 - Tab scrolling control
 
 **Dependency Injection**:
+
 - `tabManagement` - Tab management methods
 - `openSSHForm` - SSH form opening method
 
 **Not Responsible For**:
+
 - Tab state storage (managed by App.vue)
 - Popup rendering (managed by App.vue)
 
 **Key Logic**:
+
 ```typescript
 // Creating tabs must specify type
 const newTab = {
@@ -237,17 +255,20 @@ const newTab = {
 ### 📄 AppContent.vue (Content Rendering Layer)
 
 **Responsibilities**:
+
 - Render corresponding components based on the `type` field of the active tab
 - Component switching logic
 
 **Dependency Injection**:
+
 - `tabManagement` - Get active tab information
 
 **Core Logic**:
+
 ```typescript
 const currentComponent = computed(() => {
   const activeTab = tabs.find(tab => tab.id === activeTabId.value);
-  
+
   // ✅ Determine by type field (decoupled)
   switch (activeTab.type) {
     case 'terminal':
@@ -261,6 +282,7 @@ const currentComponent = computed(() => {
 ```
 
 **Not Responsible For**:
+
 - Tab state management
 - Understanding the meaning of tab labels
 
@@ -269,22 +291,26 @@ const currentComponent = computed(() => {
 ### 🏡 NexaShellHome.vue (Home UI Layer)
 
 **Responsibilities**:
+
 - Display welcome interface
 - Quick action buttons (new connection, recent connections, settings)
 - Recent connections list display
 
 **Dependency Injection**:
+
 - `openSSHForm` - Open SSH form method
 
 **Event Passing**:
+
 ```typescript
-emit('newConnection');  // Notify parent component
+emit('newConnection'); // Notify parent component
 emit('openRecent');
 emit('openSettings');
 emit('connect', connection);
 ```
 
 **Not Responsible For**:
+
 - Business logic processing
 - State management
 - Popup control
@@ -294,17 +320,20 @@ emit('connect', connection);
 ### 📝 SSHConnectionForm.vue (Form Component)
 
 **Responsibilities**:
+
 - SSH connection form UI rendering
 - Form validation
 - Platform detection (macOS/Windows style differences)
 
 **Event Passing**:
+
 ```typescript
-emit('connect', formData);  // Submit form data
-emit('cancel');             // Cancel operation
+emit('connect', formData); // Submit form data
+emit('cancel'); // Cancel operation
 ```
 
 **Not Responsible For**:
+
 - Popup display/hide control (managed by App.vue)
 - Actual SSH connection establishment
 
@@ -313,6 +342,7 @@ emit('cancel');             // Cancel operation
 ### 🖥️ TerminalView.vue (Terminal Component)
 
 **Responsibilities**:
+
 - Integrate xterm.js
 - Terminal session management
 - Terminal interaction
@@ -381,9 +411,20 @@ const showSettings = ref(false);
 
 ```typescript
 // Provided to child components
-import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY, CLOSE_SSH_FORM_KEY, SHOW_SETTINGS_KEY } from '@/types/injection-keys';
+import {
+  TAB_MANAGEMENT_KEY,
+  OPEN_SSH_FORM_KEY,
+  CLOSE_SSH_FORM_KEY,
+  SHOW_SETTINGS_KEY,
+} from '@/types/injection-keys';
 
-provide(TAB_MANAGEMENT_KEY, { tabs, activeTabId, setActiveTab, addTab, closeTab });
+provide(TAB_MANAGEMENT_KEY, {
+  tabs,
+  activeTabId,
+  setActiveTab,
+  addTab,
+  closeTab,
+});
 provide(OPEN_SSH_FORM_KEY, openSSHForm);
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 provide(SHOW_SETTINGS_KEY, showSettings);
@@ -467,7 +508,7 @@ const currentComponent = computed(() => {
     case 'terminal':
     case 'ssh':
       return TerminalView;
-    case 'editor':  // Added
+    case 'editor': // Added
       return CodeEditor;
     case 'home':
     default:
@@ -515,7 +556,7 @@ import { eventBus } from '@/utils/event-bus';
 
 onMounted(() => {
   shortcutManager.register(PredefinedShortcuts.NEW_FEATURE);
-  
+
   eventBus.on(APP_EVENTS.NEW_FEATURE, () => {
     // Handle new feature
   });
@@ -527,7 +568,11 @@ onMounted(() => {
 #### 1. Define state in App.vue
 
 ```typescript
-const { isOpen: showNewModal, openModal: openNewModal, closeModal: closeNewModal } = useModal();
+const {
+  isOpen: showNewModal,
+  openModal: openNewModal,
+  closeModal: closeNewModal,
+} = useModal();
 provide('openNewModal', openNewModal);
 provide('closeNewModal', closeNewModal);
 ```
@@ -536,9 +581,9 @@ provide('closeNewModal', closeNewModal);
 
 ```
 <div v-if="showNewModal" class="modal-overlay" @click.self="closeNewModal">
-  <NewModalComponent 
-    @confirm="handleNewModalConfirm" 
-    @cancel="closeNewModal" 
+  <NewModalComponent
+    @confirm="handleNewModalConfirm"
+    @cancel="closeNewModal"
   />
 </div>
 ```
@@ -625,22 +670,27 @@ export const NEW_TAB_MENU_ITEMS = [
 ## Architecture Advantages
 
 ### Low Coupling
+
 - Components communicate via interfaces (provide/inject)
 - Modifying one component doesn't affect others
 
 ### High Cohesion
+
 - Each component has clear responsibilities
 - Related functions aggregated together
 
 ### Extensible
+
 - Adding new features requires minimal modifications
 - Complies with open/closed principle
 
 ### Maintainable
+
 - Clear code structure
 - Easy to locate and fix issues
 
 ### Testable
+
 - Single component responsibilities, easy to write unit tests
 - Injectable dependencies, easy to mock
 

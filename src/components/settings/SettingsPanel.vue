@@ -1,53 +1,3 @@
-<script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { Settings, Palette, Terminal, Keyboard, Info } from 'lucide-vue-next';
-import { themeManager, type ThemeMode } from '@/utils/theme-manager';
-
-interface Props {
-  visible?: boolean;
-  useTeleport?: boolean; // Add prop to control teleport usage
-}
-
-withDefaults(defineProps<Props>(), {
-  visible: false,
-  useTeleport: true, // Default to true for backward compatibility
-});
-
-const emit = defineEmits<{
-  'update:visible': [value: boolean];
-}>();
-
-const activeMenu = ref('general');
-const selectedTheme = ref<ThemeMode>('auto');
-
-const menuItems = [
-  { key: 'general', label: 'General', icon: Settings },
-  { key: 'appearance', label: 'Appearance', icon: Palette },
-  { key: 'terminal', label: 'Terminal', icon: Terminal },
-  { key: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-  { key: 'about', label: 'About', icon: Info },
-];
-
-const handleClose = () => {
-  emit('update:visible', false);
-};
-
-const handleMenuClick = (key: string) => {
-  activeMenu.value = key;
-};
-
-const handleThemeChange = (event: Event) => {
-  const target = event.target as HTMLSelectElement;
-  const theme = target.value as ThemeMode;
-  selectedTheme.value = theme;
-  themeManager.setTheme(theme);
-};
-
-onMounted(() => {
-  selectedTheme.value = themeManager.getTheme();
-});
-</script>
-
 <template>
   <Teleport v-if="useTeleport" to="body">
     <Transition name="settings-fade">
@@ -93,7 +43,7 @@ onMounted(() => {
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Default Shell</label>
-                  <select class="setting-select">
+                  <select class="setting-select modal-input">
                     <option>Bash</option>
                     <option>Zsh</option>
                     <option>Fish</option>
@@ -106,7 +56,7 @@ onMounted(() => {
                 <div class="setting-item">
                   <label class="setting-label">Theme</label>
                   <select
-                    class="setting-select"
+                    class="setting-select modal-input"
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
@@ -119,7 +69,7 @@ onMounted(() => {
                   <label class="setting-label">Font Size</label>
                   <input
                     type="number"
-                    class="setting-input"
+                    class="setting-input modal-input"
                     value="14"
                     min="10"
                     max="24"
@@ -131,7 +81,7 @@ onMounted(() => {
                 <h3 class="section-title">Terminal Settings</h3>
                 <div class="setting-item">
                   <label class="setting-label">Cursor Style</label>
-                  <select class="setting-select">
+                  <select class="setting-select modal-input">
                     <option>Block</option>
                     <option>Underline</option>
                     <option>Bar</option>
@@ -149,7 +99,7 @@ onMounted(() => {
                   <label class="setting-label">New Tab</label>
                   <input
                     type="text"
-                    class="setting-input"
+                    class="setting-input modal-input"
                     value="Cmd+T"
                     readonly
                   />
@@ -158,7 +108,7 @@ onMounted(() => {
                   <label class="setting-label">Close Tab</label>
                   <input
                     type="text"
-                    class="setting-input"
+                    class="setting-input modal-input"
                     value="Cmd+W"
                     readonly
                   />
@@ -223,7 +173,7 @@ onMounted(() => {
               </div>
               <div class="setting-item">
                 <label class="setting-label">Default Shell</label>
-                <select class="setting-select">
+                <select class="setting-select modal-input">
                   <option>Bash</option>
                   <option>Zsh</option>
                   <option>Fish</option>
@@ -236,7 +186,7 @@ onMounted(() => {
               <div class="setting-item">
                 <label class="setting-label">Theme</label>
                 <select
-                  class="setting-select"
+                  class="setting-select modal-input"
                   :value="selectedTheme"
                   @change="handleThemeChange"
                 >
@@ -249,7 +199,7 @@ onMounted(() => {
                 <label class="setting-label">Font Size</label>
                 <input
                   type="number"
-                  class="setting-input"
+                  class="setting-input modal-input"
                   value="14"
                   min="10"
                   max="24"
@@ -261,7 +211,7 @@ onMounted(() => {
               <h3 class="section-title">Terminal Settings</h3>
               <div class="setting-item">
                 <label class="setting-label">Cursor Style</label>
-                <select class="setting-select">
+                <select class="setting-select modal-input">
                   <option>Block</option>
                   <option>Underline</option>
                   <option>Bar</option>
@@ -279,7 +229,7 @@ onMounted(() => {
                 <label class="setting-label">New Tab</label>
                 <input
                   type="text"
-                  class="setting-input"
+                  class="setting-input modal-input"
                   value="Cmd+T"
                   readonly
                 />
@@ -288,7 +238,7 @@ onMounted(() => {
                 <label class="setting-label">Close Tab</label>
                 <input
                   type="text"
-                  class="setting-input"
+                  class="setting-input modal-input"
                   value="Cmd+W"
                   readonly
                 />
@@ -309,6 +259,56 @@ onMounted(() => {
     </div>
   </Transition>
 </template>
+
+<script setup lang="ts">
+import { ref, onMounted } from 'vue';
+import { Settings, Palette, Terminal, Keyboard, Info } from 'lucide-vue-next';
+import { themeManager, type ThemeMode } from '@/utils/theme-manager';
+
+interface Props {
+  visible?: boolean;
+  useTeleport?: boolean; // Add prop to control teleport usage
+}
+
+withDefaults(defineProps<Props>(), {
+  visible: false,
+  useTeleport: true, // Default to true for backward compatibility
+});
+
+const emit = defineEmits<{
+  'update:visible': [value: boolean];
+}>();
+
+const activeMenu = ref('general');
+const selectedTheme = ref<ThemeMode>('auto');
+
+const menuItems = [
+  { key: 'general', label: 'General', icon: Settings },
+  { key: 'appearance', label: 'Appearance', icon: Palette },
+  { key: 'terminal', label: 'Terminal', icon: Terminal },
+  { key: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+  { key: 'about', label: 'About', icon: Info },
+];
+
+const handleClose = () => {
+  emit('update:visible', false);
+};
+
+const handleMenuClick = (key: string) => {
+  activeMenu.value = key;
+};
+
+const handleThemeChange = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const theme = target.value as ThemeMode;
+  selectedTheme.value = theme;
+  themeManager.setTheme(theme);
+};
+
+onMounted(() => {
+  selectedTheme.value = themeManager.getTheme();
+});
+</script>
 
 <style scoped>
 .settings-overlay {
@@ -496,30 +496,16 @@ onMounted(() => {
   font-weight: 400;
 }
 
+/* Remove custom input styles - use common modal styles instead */
 .setting-input,
 .setting-select {
-  padding: 6px 12px;
-  border: 0.5px solid var(--color-border-secondary);
-  border-radius: var(--radius-md);
-  font-size: 13px;
-  color: var(--color-text-primary);
-  background-color: var(--color-bg-primary);
-  outline: none;
-  transition: all var(--transition-base);
+  /* Apply common modal input styles */
+  width: 160px;
 }
 
 .setting-input:focus,
 .setting-select:focus {
-  border-color: var(--color-primary);
-  box-shadow: var(--focus-ring);
-}
-
-.setting-input {
-  width: 160px;
-}
-
-.setting-select {
-  width: 160px;
+  /* Use common modal input focus styles */
 }
 
 .setting-checkbox {
