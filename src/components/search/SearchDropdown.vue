@@ -14,7 +14,10 @@
           >
             <p>No matches found</p>
           </div>
-          <div v-else class="search-dropdown-list">
+          <div
+            v-else
+            class="search-dropdown-list"
+          >
             <div
               v-for="(item, index) in filteredItems"
               :key="item.id"
@@ -22,27 +25,30 @@
               :class="{
                 active: activeIndex === index,
                 hover:
-                  lastInteractionType.value !== 'keyboard' &&
+                  lastInteractionType !== 'keyboard' &&
                   hoverIndex === index,
               }"
               @click="selectItem(item)"
               @mouseenter="
                 () => {
-                  if (lastInteractionType.value !== 'keyboard') {
-                    hoverIndex.value = index;
+                  if (lastInteractionType !== 'keyboard') {
+                    hoverIndex = index;
                   }
                 }
               "
               @mouseleave="
                 () => {
-                  if (lastInteractionType.value !== 'keyboard') {
-                    hoverIndex.value = -1;
+                  if (lastInteractionType !== 'keyboard') {
+                    hoverIndex = -1;
                   }
                 }
               "
             >
               <div class="item-icon">
-                <component :is="item.icon" :size="16" />
+                <component
+                  :is="item.icon"
+                  :size="16"
+                />
               </div>
               <div class="item-content">
                 <div class="item-title">
@@ -52,7 +58,10 @@
                   {{ item.description }}
                 </div>
               </div>
-              <div v-if="item.shortcut" class="item-shortcut">
+              <div
+                v-if="item.shortcut"
+                class="item-shortcut"
+              >
                 <span class="shortcut-text">{{ item.shortcut }}</span>
               </div>
             </div>
@@ -191,7 +200,7 @@ const searchItems = ref([
     icon: Terminal,
     shortcut: 'Cmd+Shift+T',
     category: 'terminal',
-    action: () => window.dispatchEvent(new CustomEvent('app:new-ssh-tab')),
+    action: () => window.dispatchEvent(new CustomEvent('app:open-ssh-form')),
   },
   {
     id: 'help',

@@ -27,3 +27,7 @@ Thumbs.db
 
 # Local configuration
 *.local
+
+# Architecture documentation (auto-generated)
+ARCHITECTURE.md
+ARCHITECTURE.en.md

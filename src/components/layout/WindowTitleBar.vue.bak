@@ -2,10 +2,10 @@
 import { ref, onMounted, inject, Ref, nextTick, onUnmounted } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { isMacOSBrowser, isWindowsBrowser } from '@/utils/platform/platform-detection';
-import SearchBox from '@/components/search/SearchBox.vue';
-import SettingsPanel from '@/components/settings/SettingsPanel.vue';
-import ShortcutHint from '@/components/common/ShortcutHint.vue';
-import SearchDropdown from '@/components/search/SearchDropdown.vue';
+import SearchBox from '../search/SearchBox.vue';
+import SettingsPanel from '../settings/SettingsPanel.vue';
+import ShortcutHint from '../common/ShortcutHint.vue';
+import SearchDropdown from '../search/SearchDropdown.vue';
 import { MoreHorizontal } from 'lucide-vue-next';
 import { SHOW_SETTINGS_KEY } from '@/types';
 import { APP_EVENTS } from '@/constants';
@@ -100,8 +100,7 @@ onMounted(async () => {
     showWindowControls.value = isMac || isWin;
   }
 
-  eventBus.on(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
-});
+  window.addEventListener('app:focus-search', handleFocusSearch);
 
 onUnmounted(() => {
   eventBus.off(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { isMacOS, isWindows } from '../../utils/tauri-system';
+import { isMacOSBrowser, isWindowsBrowser } from '@/utils/app-utils';
 
 interface Props {
   placeholder?: string;
@@ -66,13 +66,12 @@ const handleKeyUp = (event: KeyboardEvent) => {
 
 onMounted(async () => {
   try {
-    const [isMac, isWin] = await Promise.all([isMacOS(), isWindows()]);
-    isMacOS_OS.value = isMac;
-    isWindowsOS.value = isWin;
+    isMacOS_OS.value = await isMacOSBrowser();
+    isWindowsOS.value = await isWindowsBrowser();
   } catch (error) {
     console.error('Failed to detect platform:', error);
-    isMacOS_OS.value = navigator.userAgent.includes('Mac');
-    isWindowsOS.value = navigator.userAgent.includes('Windows');
+    isMacOS_OS.value = false;
+    isWindowsOS.value = false;
   }
 });
 
@@ -105,7 +104,7 @@ const dynamicPlaceholder = computed(() => {
       @blur="handleBlur"
       @keydown="handleKeyDown"
       @keyup="handleKeyUp"
-    />
+    >
   </div>
 </template>
 

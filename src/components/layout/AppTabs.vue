@@ -1,21 +1,25 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick } from 'vue';
-import TabItem from '../ui/TabItem.vue';
-import DropdownMenu from '../ui/DropdownMenu.vue';
-import ShortcutHint from '../ui/ShortcutHint.vue';
+import { ref, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
+import TabItem from '@/components/common/TabItem.vue';
+import DropdownMenu from '@/components/common/DropdownMenu.vue';
+import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import { Plus, ChevronDown, X, MoreHorizontal } from 'lucide-vue-next';
+import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/types';
+import { NEW_TAB_MENU_ITEMS } from '@/constants';
+import { APP_EVENTS } from '@/constants';
+import { eventBus } from '@/utils/event-bus';
 
-interface Tab {
-  id: string;
-  label: string;
-  closable: boolean;
+// 注入标签管理功能
+const tabManagement = inject(TAB_MANAGEMENT_KEY);
+if (!tabManagement) {
+  throw new Error('tabManagement not provided');
 }
+const tabs = tabManagement.tabs;
+const activeTabId = tabManagement.activeTabId;
 
-const tabs = ref<Tab[]>([
-  { id: 'nexashell-default', label: 'NEXASHELL', closable: false },
-]);
+// 注入SSH表单控制方法
+const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 
-const activeTabId = ref('nexashell-default');
 const isDropdownOpen = ref(false);
 const dropdownX = ref(0);
 const dropdownY = ref(0);
@@ -23,38 +27,28 @@ let tabCounter = 1;
 
 const tabsContainerRef = ref<HTMLDivElement>();
 
-const NEW_TAB_MENU = [
-  { key: 'local', label: 'Local Terminal', shortcut: 'Cmd+Shift+T' },
-  { key: 'ssh', label: 'Remote Connection', shortcut: 'Cmd+T' },
-];
+// 使用常量定义
+// const NEW_TAB_MENU = NEW_TAB_MENU_ITEMS;
 
 const handleTabClick = async (id: string) => {
-  activeTabId.value = id;
+  tabManagement.setActiveTab(id);
   
   await nextTick();
   scrollToActiveTab();
 };
 
 const handleTabClose = (id: string) => {
-  const index = tabs.value.findIndex(tab => tab.id === id);
-  if (index === -1) return;
-
-  tabs.value.splice(index, 1);
-
-  if (id === activeTabId.value && tabs.value.length > 0) {
-    const newIndex = Math.min(index, tabs.value.length - 1);
-    activeTabId.value = tabs.value[newIndex].id;
-  }
+  tabManagement.closeTab(id);
 };
 
 const handleAddTab = async () => {
-  const newTab: Tab = {
+  const newTab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Terminal ${tabCounter}`,
+    type: 'terminal' as const,
     closable: true,
   };
-  tabs.value.push(newTab);
-  activeTabId.value = newTab.id;
+  tabManagement.addTab(newTab);
   
   await nextTick();
   scrollToActiveTab();
@@ -88,21 +82,18 @@ const toggleDropdown = (event: MouseEvent) => {
 
 const handleMenuSelect = async (key: string) => {
   if (key === 'local') {
-    const newTab: Tab = {
+    const newTab = {
       id: `tab-${Date.now()}-${tabCounter++}`,
       label: `Local Terminal ${tabCounter}`,
+      type: 'terminal' as const,
       closable: true,
     };
-    tabs.value.push(newTab);
-    activeTabId.value = newTab.id;
+    tabManagement.addTab(newTab);
   } else if (key === 'ssh') {
-    const newTab: Tab = {
-      id: `tab-${Date.now()}-${tabCounter++}`,
-      label: `SSH ${tabCounter}`,
-      closable: true,
-    };
-    tabs.value.push(newTab);
-    activeTabId.value = newTab.id;
+    // 打开SSH表单弹窗而不是创建标签页
+    if (openSSHForm) {
+      openSSHForm();
+    }
   }
   isDropdownOpen.value = false;
   
@@ -111,40 +102,42 @@ const handleMenuSelect = async (key: string) => {
 };
 
 const handleCloseTabShortcut = () => {
-  const currentTab = tabs.value.find(tab => tab.id === activeTabId.value);
+  const currentTab = tabs.value.find((tab: any) => tab.id === activeTabId.value);
   if (currentTab && currentTab.closable) {
     handleTabClose(activeTabId.value);
   }
 };
 
 const handleNewLocalTab = async () => {
-  const newTab: Tab = {
+  const newTab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
     label: `Local Terminal ${tabCounter}`,
+    type: 'terminal' as const,
     closable: true,
   };
-  tabs.value.push(newTab);
-  activeTabId.value = newTab.id;
+  tabManagement.addTab(newTab);
   
   await nextTick();
   scrollToActiveTab();
 };
 
 const handleNewSSHTab = async () => {
-  const newTab: Tab = {
-    id: `tab-${Date.now()}-${tabCounter++}`,
-    label: `SSH ${tabCounter}`,
-    closable: true,
-  };
-  tabs.value.push(newTab);
-  activeTabId.value = newTab.id;
-  
-  await nextTick();
-  scrollToActiveTab();
+  // 打开SSH表单弹窗而不是创建标签页
+  if (openSSHForm) {
+    openSSHForm();
+  }
 };
 
 const handleNewTabShortcut = () => {
   handleAddTab();
+};
+
+// Open SSH connection form when clicking the plus button
+const openSSHConnectionForm = () => {
+  // 打开SSH表单弹窗
+  if (openSSHForm) {
+    openSSHForm();
+  }
 };
 
 // Scroll to the currently active tab
@@ -178,19 +171,19 @@ const scrollToActiveTab = () => {
 };
 
 onMounted(() => {
-  window.addEventListener('app:close-tab', handleCloseTabShortcut);
-  window.addEventListener('app:new-tab', handleNewTabShortcut);
-  window.addEventListener('app:new-local-tab', handleNewLocalTab);
-  window.addEventListener('app:new-ssh-tab', handleNewSSHTab);
+  eventBus.on(APP_EVENTS.CLOSE_TAB, handleCloseTabShortcut);
+  eventBus.on(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
+  eventBus.on(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
+  eventBus.on(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   
   window.addEventListener('resize', scrollToActiveTab);
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('app:close-tab', handleCloseTabShortcut);
-  window.removeEventListener('app:new-tab', handleNewTabShortcut);
-  window.removeEventListener('app:new-local-tab', handleNewLocalTab);
-  window.removeEventListener('app:new-ssh-tab', handleNewSSHTab);
+  eventBus.off(APP_EVENTS.CLOSE_TAB, handleCloseTabShortcut);
+  eventBus.off(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
+  eventBus.off(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
+  eventBus.off(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   
   window.removeEventListener('resize', scrollToActiveTab);
 });
@@ -198,7 +191,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-tabs glass-light border-bottom">
-    <div class="tabs-container scrollbar-hidden" ref="tabsContainerRef">
+    <div
+      ref="tabsContainerRef"
+      class="tabs-container scrollbar-hidden"
+    >
       <TabItem
         v-for="(tab, index) in tabs"
         :id="tab.id"
@@ -211,40 +207,58 @@ onBeforeUnmount(() => {
         @click="handleTabClick"
         @close="handleTabClose"
       />
-      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
-        <ShortcutHint text="Cmd+Shift+T" position="bottom">
+      <div
+        class="tab-actions"
+        :class="{ 'is-active': isDropdownOpen }"
+      >
+        <ShortcutHint
+          text="Cmd+T to create SSH connection"
+          position="bottom"
+        >
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
-            aria-label="Add tab"
-            @click="handleAddTab"
+            aria-label="Add SSH connection"
+            @click="openSSHConnectionForm"
           >
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint text="More options" position="bottom">
+        <ShortcutHint
+          text="More options"
+          position="bottom"
+        >
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown v-if="!isDropdownOpen" :size="14" />
-            <X v-else :size="14" />
+            <ChevronDown
+              v-if="!isDropdownOpen"
+              :size="14"
+            />
+            <X
+              v-else
+              :size="14"
+            />
           </button>
         </ShortcutHint>
       </div>
     </div>
 
     <div class="more-container">
-      <button class="action-btn" aria-label="More">
+      <button
+        class="action-btn"
+        aria-label="More"
+      >
         <MoreHorizontal :size="14" />
       </button>
     </div>
 
     <DropdownMenu
       v-model:visible="isDropdownOpen"
-      :items="NEW_TAB_MENU"
+      :items="NEW_TAB_MENU_ITEMS"
       :x="dropdownX"
       :y="dropdownY"
       @select="handleMenuSelect"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
 import { Settings, Palette, Terminal, Keyboard, Info } from 'lucide-vue-next';
-import { themeManager, type ThemeMode } from '../../utils/theme-manager';
+import { themeManager, type ThemeMode } from '@/utils/theme-manager';
 
 interface Props {
   visible?: boolean;
@@ -54,7 +54,10 @@ onMounted(() => {
         class="settings-overlay flex-center"
         @click="handleClose"
       >
-        <div class="settings-panel panel" @click.stop>
+        <div
+          class="settings-panel panel"
+          @click.stop
+        >
           <div class="settings-header border-bottom draggable">
             <div class="macos-controls no-drag">
               <button
@@ -63,7 +66,9 @@ onMounted(() => {
                 @click="handleClose"
               />
             </div>
-            <h2 class="settings-title">Settings</h2>
+            <h2 class="settings-title">
+              Settings
+            </h2>
           </div>
 
           <div class="settings-body">
@@ -76,18 +81,30 @@ onMounted(() => {
                   :class="{ active: activeMenu === item.key }"
                   @click="handleMenuClick(item.key)"
                 >
-                  <component :is="item.icon" :size="16" class="menu-icon" />
+                  <component
+                    :is="item.icon"
+                    :size="16"
+                    class="menu-icon"
+                  />
                   <span class="menu-label">{{ item.label }}</span>
                 </button>
               </nav>
             </div>
 
             <div class="settings-content">
-              <div v-if="activeMenu === 'general'" class="content-section">
-                <h3 class="section-title">General Settings</h3>
+              <div
+                v-if="activeMenu === 'general'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  General Settings
+                </h3>
                 <div class="setting-item">
                   <label class="setting-label">Launch on Startup</label>
-                  <input type="checkbox" class="setting-checkbox" />
+                  <input
+                    type="checkbox"
+                    class="setting-checkbox"
+                  >
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Default Shell</label>
@@ -99,8 +116,13 @@ onMounted(() => {
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'appearance'" class="content-section">
-                <h3 class="section-title">Appearance Settings</h3>
+              <div
+                v-if="activeMenu === 'appearance'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  Appearance Settings
+                </h3>
                 <div class="setting-item">
                   <label class="setting-label">Theme</label>
                   <select
@@ -108,9 +130,15 @@ onMounted(() => {
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
-                    <option value="auto">Auto</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
+                    <option value="auto">
+                      Auto
+                    </option>
+                    <option value="light">
+                      Light
+                    </option>
+                    <option value="dark">
+                      Dark
+                    </option>
                   </select>
                 </div>
                 <div class="setting-item">
@@ -121,12 +149,17 @@ onMounted(() => {
                     value="14"
                     min="10"
                     max="24"
-                  />
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'terminal'" class="content-section">
-                <h3 class="section-title">Terminal Settings</h3>
+              <div
+                v-if="activeMenu === 'terminal'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  Terminal Settings
+                </h3>
                 <div class="setting-item">
                   <label class="setting-label">Cursor Style</label>
                   <select class="setting-select">
@@ -137,12 +170,21 @@ onMounted(() => {
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Enable Cursor Blink</label>
-                  <input type="checkbox" class="setting-checkbox" checked />
+                  <input
+                    type="checkbox"
+                    class="setting-checkbox"
+                    checked
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'shortcuts'" class="content-section">
-                <h3 class="section-title">Keyboard Shortcuts</h3>
+              <div
+                v-if="activeMenu === 'shortcuts'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  Keyboard Shortcuts
+                </h3>
                 <div class="setting-item">
                   <label class="setting-label">New Tab</label>
                   <input
@@ -150,7 +192,7 @@ onMounted(() => {
                     class="setting-input"
                     value="Cmd+T"
                     readonly
-                  />
+                  >
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">Close Tab</label>
@@ -159,12 +201,17 @@ onMounted(() => {
                     class="setting-input"
                     value="Cmd+W"
                     readonly
-                  />
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'about'" class="content-section">
-                <h3 class="section-title">About</h3>
+              <div
+                v-if="activeMenu === 'about'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  About
+                </h3>
                 <div class="about-info">
                   <p><strong>NexaShell</strong></p>
                   <p>Version 1.0.0</p>

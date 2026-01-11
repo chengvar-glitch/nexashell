@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { quitApp, closeWindow, createNewLocalTab, focusSearch } from '@/utils/app-utils';
 
 export interface ShortcutConfig {
   key: string;
@@ -174,11 +174,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Quit application',
     handler: async () => {
-      try {
-        await invoke('quit_app');
-      } catch (error) {
-        console.error('Failed to quit app:', error);
-      }
+      await quitApp();
     },
   },
   CLOSE_WINDOW: {
@@ -189,11 +185,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Close window',
     handler: async () => {
-      try {
-        await invoke('close_window');
-      } catch (error) {
-        console.error('Failed to close window:', error);
-      }
+      await closeWindow();
     },
   },
   OPEN_SETTINGS: {
@@ -215,7 +207,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'New local terminal tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:new-local-tab'));
+      createNewLocalTab();
     },
   },
   NEW_SSH_TAB: {
@@ -226,7 +218,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'New SSH connection tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:new-ssh-tab'));
+      window.dispatchEvent(new CustomEvent('app:open-ssh-form'));
     },
   },
   FOCUS_SEARCH: {
@@ -237,7 +229,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Focus search box',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:focus-search'));
+      focusSearch();
     },
   },
   CLOSE_DIALOG: {
