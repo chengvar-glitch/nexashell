@@ -16,7 +16,15 @@ import {
   SHOW_SSH_FORM_KEY,
   SHOW_SETTINGS_KEY,
 } from '@/types';
-import type { SSHConnectionData } from '@/types/ssh';
+interface SSHConnectionFormData {
+  name: string;
+  host: string;
+  port: number | null;
+  username: string;
+  password: string;
+  privateKey: string;
+  keyPassphrase: string;
+}
 import { APP_EVENTS } from '@/constants';
 import { eventBus } from '@/utils/event-bus';
 
@@ -76,7 +84,7 @@ onBeforeUnmount(() => {
 });
 
 // Handle SSH connection
-const handleSSHConnect = (data: SSHConnectionData) => {
+const handleSSHConnect = (data: SSHConnectionFormData) => {
   console.log('SSH connection data:', data);
   // TODO: Implement actual SSH connection logic
   closeSSHForm();
