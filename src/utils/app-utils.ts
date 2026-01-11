@@ -1,12 +1,12 @@
-// 此文件已废弃，请使用以下模块:
+// This file is deprecated, please use the following modules:
 // - @/composables/use-modal
 // - @/utils/window/window-operations
 // - @/utils/tab/tab-operations
 // - @/utils/platform/platform-detection
 // - @/utils/event-bus
 
-// 保留此文件是为了向后兼容
-// 临时提供向后兼容的函数
+// This file is kept for backward compatibility
+// Temporarily provides backward compatible functions
 
 import { closeWindow as closeWindowImpl, quitApp as quitAppImpl } from './window/window-operations';
 import { createNewLocalTab as createNewLocalTabImpl } from './tab/tab-operations';

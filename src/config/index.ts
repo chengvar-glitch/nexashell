@@ -1,5 +1,5 @@
 /**
- * 配置导出入口
+ * Configuration export entry
  */
 
 export * from './env';

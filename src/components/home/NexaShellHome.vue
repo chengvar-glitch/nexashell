@@ -3,7 +3,7 @@
     <div class="home-content-wrapper">
       <div class="home-header">
         <h2>NexaShell</h2>
-        <p>欢迎使用现代化SSH终端工具</p>
+        <p>Welcome to the modern SSH terminal tool</p>
       </div>
       
       <div class="home-content">
@@ -13,7 +13,7 @@
             @click="handleNewConnection"
           >
             <span class="btn-icon">+</span>
-            <span class="btn-text">新建SSH连接</span>
+            <span class="btn-text">New SSH Connection</span>
           </button>
           
           <button
@@ -21,7 +21,7 @@
             @click="handleOpenRecent"
           >
             <span class="btn-icon">📁</span>
-            <span class="btn-text">打开最近连接</span>
+            <span class="btn-text">Open Recent Connection</span>
           </button>
           
           <button
@@ -29,12 +29,12 @@
             @click="handleOpenSettings"
           >
             <span class="btn-icon">⚙️</span>
-            <span class="btn-text">设置</span>
+            <span class="btn-text">Settings</span>
           </button>
         </div>
         
         <div class="recent-connections">
-          <h3>最近的连接</h3>
+          <h3>Recent Connections</h3>
           <div class="connection-list">
             <div
               v-for="conn in recentConnections"
@@ -53,14 +53,14 @@
                 class="connect-btn"
                 @click="handleConnect(conn)"
               >
-                连接
+                Connect
               </button>
             </div>
             <div
               v-if="recentConnections.length === 0"
               class="no-connections"
             >
-              暂无最近连接
+              No recent connections
             </div>
           </div>
         </div>
@@ -86,7 +86,7 @@ const props = defineProps<{
   connections?: SSHConnection[];
 }>();
 
-// Emits - 向父组件发送事件，不处理具体业务逻辑
+// Emits - Send events to parent component, no specific business logic handled here
 const emit = defineEmits<{
   newConnection: [];
   openRecent: [];
@@ -94,13 +94,13 @@ const emit = defineEmits<{
   connect: [connection: SSHConnection];
 }>();
 
-// 使用传入的连接列表或空数组
+// Use the passed connection list or an empty array
 const recentConnections = ref<SSHConnection[]>(props.connections || []);
 
-// 从App.vue注入SSH表单控制方法
+// Inject SSH form control method from App.vue
 const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
 
-// 事件处理函数 - 仅向上传递事件
+// Event handlers - only pass events upward
 const handleNewConnection = () => {
   if (openSSHForm) {
     openSSHForm();

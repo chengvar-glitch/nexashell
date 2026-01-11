@@ -1,5 +1,5 @@
 /**
- * SSH 连接相关类型定义
+ * SSH connection related type definitions
  */
 
 export interface SSHConnectionData {

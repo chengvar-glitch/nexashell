@@ -4,11 +4,11 @@ import NexaShellHome from '@/components/home/NexaShellHome.vue';
 import TerminalView from '@/components/terminal/TerminalView.vue';
 import { TAB_MANAGEMENT_KEY } from '@/types';
 
-// 注入标签管理功能
+// Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
 const activeTabId = tabManagement?.activeTabId;
 
-// 根据标签类型决定显示哪个组件
+// Determine which component to display based on tab type
 const currentComponent = computed(() => {
   if (!activeTabId?.value) {
     return NexaShellHome;
@@ -21,7 +21,7 @@ const currentComponent = computed(() => {
     return NexaShellHome;
   }
   
-  // 根据标签type字段决定显示哪个组件（解耦）
+  // Determine which component to display based on tab type (decoupling)
   switch (activeTab.type) {
     case 'terminal':
     case 'ssh':

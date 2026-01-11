@@ -1,5 +1,5 @@
 /**
- * 应用事件常量定义
+ * Application event constants definition
  */
 
 export const APP_EVENTS = {

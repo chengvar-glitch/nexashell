@@ -1,5 +1,5 @@
 /**
- * 常量定义导出入口
+ * Constants definition export entry
  */
 
 export * from './events';

@@ -1,5 +1,5 @@
 /**
- * 标签页类型定义
+ * Tab type definitions
  */
 
 export type TabType = 'home' | 'terminal' | 'ssh';

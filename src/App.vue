@@ -15,13 +15,13 @@ import { eventBus } from '@/utils/event-bus';
 const showSettings = ref(false);
 provide('showSettings', showSettings);
 
-// SSH连接表单管理
+// SSH connection form management
 const { isOpen: showSSHForm, openModal: openSSHForm, closeModal: closeSSHForm } = useModal();
 provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, openSSHForm);
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 
-// 标签管理
+// Tab management
 const tabManagement = useTabManagement();
 provide(TAB_MANAGEMENT_KEY, tabManagement);
 
@@ -56,14 +56,14 @@ onBeforeUnmount(() => {
   shortcutManager.unregisterAll();
 });
 
-// 处理SSH连接
+// Handle SSH connection
 const handleSSHConnect = (data: any) => {
-  console.log('SSH连接数据:', data);
-  // TODO: 实现实际的SSH连接逻辑
+  console.log('SSH connection data:', data);
+  // TODO: Implement actual SSH connection logic
   closeSSHForm();
 };
 
-// 处理取消SSH连接
+// Handle SSH connection cancellation
 const handleSSHCancel = () => {
   closeSSHForm();
 };
@@ -80,16 +80,18 @@ const handleSSHCancel = () => {
       <AppContent />
     </div>
     
-    <!-- SSH连接表单弹窗 -->
+    <!-- SSH connection form modal -->
     <div
       v-if="showSSHForm"
       class="modal-overlay"
       @click.self="closeSSHForm"
     >
-      <SSHConnectionForm 
-        @connect="handleSSHConnect" 
-        @cancel="handleSSHCancel" 
-      />
+      <div class="modal-content">
+        <SSHConnectionForm 
+          @connect="handleSSHConnect" 
+          @cancel="handleSSHCancel" 
+        />
+      </div>
     </div>
   </div>
 </template>
@@ -143,30 +145,39 @@ const handleSSHCancel = () => {
     var(--shadow-2xl);
 }
 
-/* Modal overlay */
+/* Modal overlay - removing black overlay for desktop app but keeping focus */
 .modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(2px); /* Subtle blur to distinguish modal from background */
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not(.theme-light) .modal-overlay {
-    background: rgba(0, 0, 0, 0.7);
+/* Modal content with enhanced styling for better visibility */
+.modal-content {
+  position: relative;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-lg);
+  animation: modal-appear 0.2s ease-out forwards;
+}
+
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
   }
-}
-
-:root.theme-dark .modal-overlay {
-  background: rgba(0, 0, 0, 0.7);
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 </style>
 <style>

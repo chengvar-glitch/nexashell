@@ -1,5 +1,5 @@
 /**
- * 标签页常量定义
+ * Tab constants definition
  */
 
 export const DEFAULT_TAB = {

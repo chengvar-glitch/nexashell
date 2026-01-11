@@ -1,18 +1,18 @@
 /**
- * 工具函数导出入口
+ * Utility functions export entry
  */
 
-// 窗口操作
+// Window operations
 export * from './window/window-operations';
 
-// 平台检测
+// Platform detection
 export * from './platform/platform-detection';
 
-// 标签操作
+// Tab operations
 export * from './tab/tab-operations';
 
-// 错误处理
+// Error handling
 export { AppError, safeInvoke, logError } from './error-handler';
 
-// 事件总线
+// Event bus
 export { eventBus, APP_EVENTS } from './event-bus';

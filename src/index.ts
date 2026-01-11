@@ -1,6 +1,6 @@
 /**
- * NexaShell 主入口文件
- * 整合所有模块化的组件和功能
+ * NexaShell main entry file
+ * Integrates all modularized components and functions
  */
 
 // Composables

@@ -1,6 +1,6 @@
 /**
- * 事件总线工具
- * 提供类型安全的事件发布订阅机制
+ * Event bus utility
+ * Provides type-safe event publishing and subscription mechanism
  */
 
 import { APP_EVENTS, type AppEventType } from '@/constants';
@@ -8,18 +8,18 @@ import { APP_EVENTS, type AppEventType } from '@/constants';
 type EventHandler = (...args: any[]) => void;
 
 /**
- * 事件总线类
+ * Event bus class
  */
 class EventBus {
   /**
-   * 发送事件
+   * Emit event
    */
   emit(event: AppEventType, ...args: any[]): void {
     window.dispatchEvent(new CustomEvent(event, { detail: args }));
   }
 
   /**
-   * 监听事件
+   * Listen to event
    */
   on(event: AppEventType, handler: EventHandler): void {
     const wrappedHandler = (e: Event) => {
@@ -31,7 +31,7 @@ class EventBus {
   }
 
   /**
-   * 取消监听事件
+   * Remove event listener
    */
   off(event: AppEventType, handler: EventHandler): void {
     window.removeEventListener(event, handler as any);
@@ -40,5 +40,5 @@ class EventBus {
 
 export const eventBus = new EventBus();
 
-// 便捷方法导出
+// Convenient method exports
 export { APP_EVENTS };

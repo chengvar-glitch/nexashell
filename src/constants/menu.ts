@@ -1,5 +1,5 @@
 /**
- * 菜单项常量定义
+ * Menu item constants definition
  */
 
 export const NEW_TAB_MENU_ITEMS = [

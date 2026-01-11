@@ -1,6 +1,6 @@
 /**
- * 模态框管理 Composable
- * 提供模态框的打开/关闭状态管理
+ * Modal management Composable
+ * Provides modal open/close state management
  */
 
 import { ref } from 'vue';

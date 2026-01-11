@@ -9,7 +9,7 @@ import { NEW_TAB_MENU_ITEMS } from '@/constants';
 import { APP_EVENTS } from '@/constants';
 import { eventBus } from '@/utils/event-bus';
 
-// 注入标签管理功能
+// Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
 if (!tabManagement) {
   throw new Error('tabManagement not provided');
@@ -17,7 +17,7 @@ if (!tabManagement) {
 const tabs = tabManagement.tabs;
 const activeTabId = tabManagement.activeTabId;
 
-// 注入SSH表单控制方法
+// Inject SSH form control method
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 
 const isDropdownOpen = ref(false);
@@ -27,7 +27,7 @@ let tabCounter = 1;
 
 const tabsContainerRef = ref<HTMLDivElement>();
 
-// 使用常量定义
+// Use constant definitions
 // const NEW_TAB_MENU = NEW_TAB_MENU_ITEMS;
 
 const handleTabClick = async (id: string) => {
@@ -90,7 +90,7 @@ const handleMenuSelect = async (key: string) => {
     };
     tabManagement.addTab(newTab);
   } else if (key === 'ssh') {
-    // 打开SSH表单弹窗而不是创建标签页
+    // Open SSH form modal instead of creating a tab
     if (openSSHForm) {
       openSSHForm();
     }
@@ -122,7 +122,7 @@ const handleNewLocalTab = async () => {
 };
 
 const handleNewSSHTab = async () => {
-  // 打开SSH表单弹窗而不是创建标签页
+  // Open SSH form modal instead of creating a tab
   if (openSSHForm) {
     openSSHForm();
   }
@@ -134,7 +134,7 @@ const handleNewTabShortcut = () => {
 
 // Open SSH connection form when clicking the plus button
 const openSSHConnectionForm = () => {
-  // 打开SSH表单弹窗
+  // Open SSH form modal
   if (openSSHForm) {
     openSSHForm();
   }

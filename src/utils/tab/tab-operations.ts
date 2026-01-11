@@ -1,18 +1,18 @@
 /**
- * 标签操作工具函数
+ * Tab operation utility functions
  */
 
 import { APP_EVENTS } from '@/constants';
 
 /**
- * 创建新的本地终端标签
+ * Create new local terminal tab
  */
 export function createNewLocalTab(): void {
   window.dispatchEvent(new CustomEvent(APP_EVENTS.NEW_LOCAL_TAB));
 }
 
 /**
- * 聚焦搜索框
+ * Focus search box
  */
 export function focusSearch(): void {
   window.dispatchEvent(new CustomEvent(APP_EVENTS.FOCUS_SEARCH));

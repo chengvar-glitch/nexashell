@@ -1,50 +1,50 @@
 /**
- * 平台检测工具函数
+ * Platform detection utility functions
  */
 
 import { safeInvoke } from '@/utils/error-handler';
 
 /**
- * 检测是否为 macOS 系统（通过 Tauri）
+ * Detect if it's a macOS system (via Tauri)
  */
 export async function isMacOS(): Promise<boolean> {
   return await safeInvoke<boolean>('is_macos');
 }
 
 /**
- * 检测是否为 Windows 系统（通过 Tauri）
+ * Detect if it's a Windows system (via Tauri)
  */
 export async function isWindows(): Promise<boolean> {
   return await safeInvoke<boolean>('is_windows');
 }
 
 /**
- * 检测是否为 Linux 系统（通过 Tauri）
+ * Detect if it's a Linux system (via Tauri)
  */
 export async function isLinux(): Promise<boolean> {
   return await safeInvoke<boolean>('is_linux');
 }
 
 /**
- * 获取平台名称
+ * Get platform name
  */
 export async function getPlatform(): Promise<string> {
   return await safeInvoke<string>('get_platform');
 }
 
 /**
- * 获取系统架构
+ * Get system architecture
  */
 export async function getArch(): Promise<string> {
   return await safeInvoke<string>('get_arch');
 }
 
 /**
- * 检测是否为 macOS 系统（浏览器环境）
+ * Detect if it's a macOS system (browser environment)
  */
 export function isMacOSBrowser(): boolean {
   if (typeof window !== 'undefined') {
-    // 检查是否在 Tauri 环境中
+    // Check if in Tauri environment
     if ((window as any).__TAURI__) {
       try {
         return (window as any).__TAURI__.os.platform() === 'darwin';
@@ -57,11 +57,11 @@ export function isMacOSBrowser(): boolean {
 }
 
 /**
- * 检测是否为 Windows 系统（浏览器环境）
+ * Detect if it's a Windows system (browser environment)
  */
 export function isWindowsBrowser(): boolean {
   if (typeof window !== 'undefined') {
-    // 检查是否在 Tauri 环境中
+    // Check if in Tauri environment
     if ((window as any).__TAURI__) {
       try {
         return (window as any).__TAURI__.os.platform() === 'windows';

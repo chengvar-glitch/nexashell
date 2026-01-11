@@ -1,5 +1,5 @@
 /**
- * 类型定义导出入口
+ * Type definitions export entry
  */
 
 export * from './tab';

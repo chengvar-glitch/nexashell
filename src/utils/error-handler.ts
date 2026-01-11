@@ -1,12 +1,12 @@
 /**
- * 错误处理工具
- * 提供统一的错误处理和 Tauri invoke 封装
+ * Error handling utility
+ * Provides unified error handling and Tauri invoke wrapper
  */
 
 import { invoke } from '@tauri-apps/api/core';
 
 /**
- * 应用错误类
+ * Application error class
  */
 export class AppError extends Error {
   constructor(
@@ -20,8 +20,8 @@ export class AppError extends Error {
 }
 
 /**
- * 安全的 Tauri invoke 调用
- * 统一处理错误并提供类型安全
+ * Safe Tauri invoke call
+ * Unifies error handling and provides type safety
  */
 export async function safeInvoke<T>(
   command: string,
@@ -41,7 +41,7 @@ export async function safeInvoke<T>(
 }
 
 /**
- * 错误日志记录
+ * Error logging
  */
 export function logError(error: Error | AppError, context?: string): void {
   const errorInfo = {

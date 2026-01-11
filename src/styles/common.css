@@ -339,3 +339,323 @@
 .no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* 
+ * Common modal design system
+ * Based on desktop application modal design philosophy
+ */
+
+/* Modal overlay - for desktop applications, maintains slight blur effect without black mask */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+  animation: overlay-appear 0.2s ease-out;
+}
+
+@keyframes overlay-appear {
+  from {
+    backdrop-filter: blur(0px);
+  }
+  to {
+    backdrop-filter: blur(2px);
+  }
+}
+
+/* Modal content container - with shadow and animation effects */
+.modal-content {
+  position: relative;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.15),
+    0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: var(--radius-lg);
+  animation: modal-appear 0.2s ease-out forwards;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+}
+
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Common modal form styles */
+.modal-form {
+  width: 100%;
+  max-width: 480px;
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  position: relative;
+  border: 1px solid var(--color-border-primary);
+  overflow: hidden;
+}
+
+/* Modal header - supports macOS and Windows style close buttons */
+.modal-header {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  margin-bottom: 16px;
+  gap: 8px;
+  padding: 8px 12px 12px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  margin: -16px -16px 16px -16px;
+}
+
+.modal-header-left, 
+.modal-header-right {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal-title {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: 1.1em;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Close button styles - macOS style */
+.modal-close-btn {
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.modal-macos-close {
+  background: #ff5f57;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.modal-macos-close .close-icon {
+  color: transparent;
+  font-size: 0;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Close button styles - Windows style */
+.modal-windows-close {
+  background: transparent;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 16px;
+}
+
+.modal-windows-close .close-icon {
+  color: var(--color-text-secondary);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.modal-close-btn:hover {
+  opacity: 0.8;
+}
+
+.modal-windows-close:hover {
+  background: var(--color-interactive-hover);
+}
+
+/* Form row layout */
+.modal-form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+/* Form group */
+.modal-form-group {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.modal-form-group.full-width {
+  flex: 1 0 100%;
+}
+
+.modal-form-group label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--color-text-primary);
+  font-size: 0.9em;
+  font-weight: 500;
+}
+
+/* Input field styles */
+.modal-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 0.9em;
+  box-sizing: border-box;
+}
+
+.modal-input.error {
+  border-color: #ff4757;
+}
+
+.modal-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+/* Error message */
+.modal-error-message {
+  display: block;
+  color: #ff4757;
+  font-size: 0.75em;
+  margin-top: 2px;
+  margin-bottom: 4px;
+}
+
+/* Form action buttons */
+.modal-form-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+.modal-btn {
+  padding: 6px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9em;
+  transition: var(--transition-fast);
+}
+
+.modal-btn-primary {
+  background: var(--color-primary);
+  color: white;
+}
+
+.modal-btn-primary:hover {
+  background: var(--color-primary-hover);
+}
+
+.modal-btn-secondary {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.modal-btn-secondary:hover {
+  background: var(--color-interactive-hover);
+}
+
+/* Password input container */
+.modal-password-input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.modal-password-input-container input {
+  width: 100%;
+  padding: 6px 30px 6px 8px; /* Space reserved for eye icon */
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 0.9em;
+  box-sizing: border-box;
+}
+
+.modal-password-toggle-btn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+.modal-password-toggle-btn:hover {
+  background: var(--color-interactive-hover);
+  color: var(--color-text-secondary);
+}
+
+/* IP suggestion dropdown */
+.modal-ip-input-container {
+  position: relative;
+}
+
+.modal-ip-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-primary);
+  border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  max-height: 150px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: var(--shadow-sm);
+}
+
+.modal-ip-suggestion-item {
+  padding: 8px;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-size: 0.9em;
+  border-bottom: 1px solid var(--color-border-secondary);
+}
+
+.modal-ip-suggestion-item:hover {
+  background: var(--color-interactive-hover);
+}
+
+.modal-ip-suggestion-item:last-child {
+  border-bottom: none;
+}

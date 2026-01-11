@@ -1,5 +1,5 @@
 /**
- * Composables 导出入口
+ * Composables export entry
  */
 
 export * from './use-tab-management';

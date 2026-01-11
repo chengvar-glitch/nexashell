@@ -1,36 +1,68 @@
 <template>
-  <div class="ssh-connection-form">
-    <div class="form-header">
-      <div class="header-left" v-if="isMacOS">
-        <button class="close-btn macos-close" @click="onCancel">
+  <div class="modal-form" @keydown.tab="handleTabKey">
+    <div class="modal-header">
+      <div class="modal-header-left" v-if="isMacOS">
+        <button class="modal-close-btn modal-macos-close" @click="onCancel">
           <span class="close-icon">●</span>
         </button>
       </div>
-      <h3 class="form-title">新建SSH连接</h3>
-      <div class="header-right" v-if="!isMacOS">
-        <button class="close-btn windows-close" @click="onCancel">
+      <h3 class="modal-title">New SSH Connection</h3>
+      <div class="modal-header-right" v-if="!isMacOS">
+        <button class="modal-close-btn modal-windows-close" @click="onCancel">
           <span class="close-icon">×</span>
         </button>
       </div>
     </div>
     
     <form @submit.prevent="onSubmit">
-      <div class="form-row">
-        <div class="form-group">
-          <label for="host">主机地址 *</label>
+      <!-- Connection name field moved to the top and marked as required -->
+      <div class="modal-form-row">
+        <div class="modal-form-group full-width">
+          <label for="name">Connection Name *</label>
           <input 
-            id="host" 
-            v-model="formData.host" 
+            id="name" 
+            v-model="formData.name" 
             type="text" 
-            placeholder="例如: 192.168.1.100"
-            :class="{ 'error': validationErrors.host }"
+            placeholder="Name the connection"
+            :class="{ 'error': validationErrors.name }"
             required
+            ref="nameInput"
           />
-          <span v-if="validationErrors.host" class="error-message">{{ validationErrors.host }}</span>
+          <span v-if="validationErrors.name" class="modal-error-message">{{ validationErrors.name }}</span>
+        </div>
+      </div>
+      
+      <div class="modal-form-row">
+        <div class="modal-form-group">
+          <label for="host">Host Address *</label>
+          <!-- Host Address Input Field with enhanced UX -->
+          <div class="modal-ip-input-container" :class="{ 'error': validationErrors.host }">
+            <input 
+              id="host" 
+              v-model="formData.host" 
+              type="text" 
+              placeholder="e.g., example.com or hostname"
+              :class="{ 'error': validationErrors.host }"
+              @blur="validateHostOnBlur"
+              required
+              ref="hostInput"
+            />
+            <div class="modal-ip-suggestions" v-if="showIPSuggestions && ipSuggestions.length > 0">
+              <div 
+                v-for="suggestion in ipSuggestions" 
+                :key="suggestion"
+                class="modal-ip-suggestion-item"
+                @click="selectIPSuggestion(suggestion)"
+              >
+                {{ suggestion }}
+              </div>
+            </div>
+          </div>
+          <span v-if="validationErrors.host" class="modal-error-message">{{ validationErrors.host }}</span>
         </div>
         
-        <div class="form-group">
-          <label for="port">端口</label>
+        <div class="modal-form-group">
+          <label for="port">Port</label>
           <input 
             id="port" 
             v-model.number="formData.port" 
@@ -39,75 +71,101 @@
             max="65535" 
             placeholder="22"
             :class="{ 'error': validationErrors.port }"
+            ref="portInput"
           />
-          <span v-if="validationErrors.port" class="error-message">{{ validationErrors.port }}</span>
+          <span v-if="validationErrors.port" class="modal-error-message">{{ validationErrors.port }}</span>
         </div>
       </div>
       
-      <div class="form-row">
-        <div class="form-group full-width">
-          <label for="username">用户名 *</label>
+      <div class="modal-form-row">
+        <div class="modal-form-group full-width">
+          <label for="username">Username *</label>
           <input 
             id="username" 
             v-model="formData.username" 
             type="text" 
-            placeholder="用户名"
+            placeholder="Username"
             :class="{ 'error': validationErrors.username }"
             required
+            ref="usernameInput"
           />
-          <span v-if="validationErrors.username" class="error-message">{{ validationErrors.username }}</span>
+          <span v-if="validationErrors.username" class="modal-error-message">{{ validationErrors.username }}</span>
         </div>
       </div>
       
-      <div class="form-row">
-        <div class="form-group full-width">
-          <label for="password">密码</label>
-          <input 
-            id="password" 
-            v-model="formData.password" 
-            type="password" 
-            placeholder="密码(留空使用密钥认证)"
-          />
+      <div class="modal-form-row">
+        <div class="modal-form-group full-width">
+          <label for="password">Password</label>
+          <!-- Password field with show/hide toggle -->
+          <div class="modal-password-input-container">
+            <input 
+              id="password" 
+              v-model="formData.password" 
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Password (leave empty for key authentication)"
+              class="modal-input"
+              ref="passwordInput"
+            />
+            <button 
+              type="button" 
+              class="modal-password-toggle-btn"
+              @click="togglePasswordVisibility"
+              :aria-label="showPassword ? 'Hide password' : 'Show password'"
+            >
+              <component
+                :is="showPassword ? EyeOff : Eye"
+                :size="16"
+                :stroke-width="1.5"
+              />
+            </button>
+          </div>
         </div>
       </div>
       
-      <div class="form-row">
-        <div class="form-group">
-          <label for="privateKey">私钥文件</label>
+      <div class="modal-form-row">
+        <div class="modal-form-group">
+          <label for="privateKey">Private Key File</label>
           <input 
             id="privateKey" 
             v-model="formData.privateKey" 
             type="text" 
-            placeholder="私钥文件路径"
+            placeholder="Private key file path"
+            class="modal-input"
+            ref="privateKeyInput"
           />
         </div>
         
-        <div class="form-group">
-          <label for="keyPassphrase">密钥密码</label>
-          <input 
-            id="keyPassphrase" 
-            v-model="formData.keyPassphrase" 
-            type="password" 
-            placeholder="私钥密码(可选)"
-          />
+        <div class="modal-form-group">
+          <label for="keyPassphrase">Key Passphrase</label>
+          <!-- Key passphrase field with show/hide toggle -->
+          <div class="modal-password-input-container">
+            <input 
+              id="keyPassphrase" 
+              v-model="formData.keyPassphrase" 
+              :type="showKeyPassphrase ? 'text' : 'password'"
+              placeholder="Private key passphrase (optional)"
+              class="modal-input"
+              ref="keyPassphraseInput"
+            />
+            <button 
+              type="button" 
+              class="modal-password-toggle-btn"
+              @click="toggleKeyPassphraseVisibility"
+              :aria-label="showKeyPassphrase ? 'Hide key passphrase' : 'Show key passphrase'"
+            >
+              <component
+                :is="showKeyPassphrase ? EyeOff : Eye"
+                :size="16"
+                :stroke-width="1.5"
+              />
+            </button>
+          </div>
         </div>
       </div>
       
-      <div class="form-row">
-        <div class="form-group full-width">
-          <label for="name">连接名称</label>
-          <input 
-            id="name" 
-            v-model="formData.name" 
-            type="text" 
-            placeholder="为连接命名(可选)"
-          />
-        </div>
-      </div>
-      
-      <div class="form-actions">
-        <button type="submit" class="btn-connect">连接</button>
-        <button type="button" @click="onCancel" class="btn-cancel">取消</button>
+      <div class="modal-form-actions">
+        <button type="submit" class="modal-btn modal-btn-primary" ref="connectButton">Connect</button>
+        <button type="button" @click="onCancel" class="modal-btn modal-btn-secondary" ref="cancelButton">Cancel</button>
       </div>
     </form>
   </div>
@@ -115,32 +173,34 @@
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue';
+import { Eye, EyeOff } from 'lucide-vue-next';
 import { isMacOSBrowser } from '@/utils/app-utils';
 
 interface SSHConnectionFormData {
+  name: string; // Connection name is now required and at the top
   host: string;
   port: number | null;
   username: string;
   password: string;
   privateKey: string;
   keyPassphrase: string;
-  name: string;
 }
 
 interface ValidationErrors {
+  name?: string; // Add name validation error
   host?: string;
   port?: string;
   username?: string;
 }
 
 const formData = reactive<SSHConnectionFormData>({
+  name: '', // Initialize with empty string
   host: '',
   port: 22,
   username: '',
   password: '',
   privateKey: '',
-  keyPassphrase: '',
-  name: ''
+  keyPassphrase: ''
 });
 
 const validationErrors = reactive<ValidationErrors>({});
@@ -150,8 +210,27 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
-// 检测是否为macOS系统
+// Detect if it's a macOS system
 const isMacOS = ref(false);
+
+// Password visibility state
+const showPassword = ref(false);
+const showKeyPassphrase = ref(false);
+
+// IP suggestions related variables
+const showIPSuggestions = ref(false);
+const ipSuggestions = ref<string[]>([]);
+
+// Form input references for tab navigation
+const nameInput = ref<HTMLInputElement | null>(null);
+const hostInput = ref<HTMLInputElement | null>(null);
+const portInput = ref<HTMLInputElement | null>(null);
+const usernameInput = ref<HTMLInputElement | null>(null);
+const passwordInput = ref<HTMLInputElement | null>(null);
+const privateKeyInput = ref<HTMLInputElement | null>(null);
+const keyPassphraseInput = ref<HTMLInputElement | null>(null);
+const connectButton = ref<HTMLButtonElement | null>(null);
+const cancelButton = ref<HTMLButtonElement | null>(null);
 
 onMounted(async () => {
   try {
@@ -162,44 +241,104 @@ onMounted(async () => {
   }
 });
 
+// Toggle password visibility
+const togglePasswordVisibility = () => {
+  showPassword.value = !showPassword.value;
+};
+
+// Toggle key passphrase visibility
+const toggleKeyPassphraseVisibility = () => {
+  showKeyPassphrase.value = !showKeyPassphrase.value;
+};
+
+// Domain validation function
+const isValidDomain = (domain: string): boolean => {
+  const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)+$/;
+  return domainRegex.test(domain);
+};
+
+// Validate host on blur to provide immediate feedback
+const validateHostOnBlur = () => {
+  if (formData.host.trim()) {
+    if (!isValidDomain(formData.host)) {
+      validationErrors.host = 'Please enter a valid domain name';
+    } else {
+      delete validationErrors.host; // Clear error if valid
+    }
+  }
+};
+
+// Generate domain suggestions as user types
+const updateIPSuggestions = (value: string) => {
+  if (value.length > 0) {
+    // Provide common domain suggestions based on what user has typed
+    const suggestions = [];
+    
+    // Add common domain suggestions
+    if (value.toLowerCase().includes('local')) {
+      suggestions.push('localhost', 'localhost.localdomain');
+    } else if (value.toLowerCase().includes('example')) {
+      suggestions.push('example.com', 'example.org', 'example.net');
+    } else if (value.toLowerCase().includes('test')) {
+      suggestions.push('test.com', 'test.local');
+    }
+    
+    ipSuggestions.value = suggestions.filter(s => s.startsWith(value));
+    showIPSuggestions.value = ipSuggestions.value.length > 0;
+  } else {
+    showIPSuggestions.value = false;
+  }
+};
+
+// Select a suggestion
+const selectIPSuggestion = (suggestion: string) => {
+  formData.host = suggestion;
+  showIPSuggestions.value = false;
+  validateHostOnBlur(); // Re-validate after selection
+};
+
+// Validate form fields before submission
 const validateForm = (): boolean => {
-  // 清除之前的错误
+  // Clear previous errors
   Object.keys(validationErrors).forEach(key => {
     delete validationErrors[key as keyof ValidationErrors];
   });
   
   let isValid = true;
   
-  // 验证主机地址
+  // Validate connection name
+  if (!formData.name.trim()) {
+    validationErrors.name = 'Connection name cannot be empty';
+    isValid = false;
+  }
+  
+  // Validate host address
   if (!formData.host.trim()) {
-    validationErrors.host = '主机地址不能为空';
+    validationErrors.host = 'Host address cannot be empty';
     isValid = false;
-  } else if (!isValidHost(formData.host)) {
-    validationErrors.host = '请输入有效的主机地址(IP或域名)';
+  } else if (!isValidDomain(formData.host)) {
+    validationErrors.host = 'Please enter a valid domain name';
     isValid = false;
   }
   
-  // 验证端口
+  // Validate port
   if (formData.port !== null && (formData.port < 1 || formData.port > 65535)) {
-    validationErrors.port = '端口号必须在1-65535之间';
+    validationErrors.port = 'Port number must be between 1-65535';
     isValid = false;
   }
   
-  // 验证用户名
+  // Validate username
   if (!formData.username.trim()) {
-    validationErrors.username = '用户名不能为空';
+    validationErrors.username = 'Username cannot be empty';
     isValid = false;
   }
   
   return isValid;
 };
 
+// Check if host is a valid domain
 const isValidHost = (host: string): boolean => {
-  // 检查是否为IP地址或有效域名
-  const ipRegex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-  const domainRegex = /^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$/;
-  
-  return ipRegex.test(host) || domainRegex.test(host);
+  return isValidDomain(host);
 };
 
 const onSubmit = () => {
@@ -207,7 +346,7 @@ const onSubmit = () => {
     return;
   }
   
-  // 使用默认端口22，如果未指定的话
+  // Use default port 22 if not specified
   const submitData = {
     ...formData,
     port: formData.port || 22
@@ -217,124 +356,53 @@ const onSubmit = () => {
 };
 
 const onCancel = () => {
+  // Clear any pending suggestions when cancelling
+  showIPSuggestions.value = false;
+  ipSuggestions.value = [];
   emit('cancel');
+};
+
+// Handle Tab key navigation
+const handleTabKey = (event: KeyboardEvent) => {
+  // Only handle Tab key
+  if (event.key !== 'Tab') return;
+  
+  // Get all focusable elements in the form
+  const focusableElements = [
+    nameInput.value,
+    hostInput.value,
+    portInput.value,
+    usernameInput.value,
+    passwordInput.value,
+    privateKeyInput.value,
+    keyPassphraseInput.value,
+    connectButton.value,
+    cancelButton.value
+  ].filter(element => element !== null) as HTMLElement[];
+  
+  // Find the currently focused element
+  const currentIndex = focusableElements.findIndex(element => element === document.activeElement);
+  
+  let nextIndex;
+  
+  if (event.shiftKey) {
+    // Shift + Tab: move to previous element
+    nextIndex = currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1;
+  } else {
+    // Tab: move to next element
+    nextIndex = currentIndex < 0 || currentIndex >= focusableElements.length - 1 ? 0 : currentIndex + 1;
+  }
+  
+  // Focus the next element
+  if (focusableElements[nextIndex]) {
+    event.preventDefault(); // Prevent default tab behavior
+    focusableElements[nextIndex].focus();
+  }
 };
 </script>
 
 <style scoped>
-.ssh-connection-form {
-  width: 100%;
-  max-width: 480px;
-  padding: 16px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-md);
-}
-
-.form-header {
-  display: grid;
-  grid-template-columns: 24px 1fr 24px;
-  align-items: center;
-  margin-bottom: 16px;
-  gap: 8px;
-}
-
-.header-left, .header-right {
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.form-title {
-  margin: 0;
-  color: var(--color-text-primary);
-  font-size: 1.1em;
-  font-weight: 600;
-  text-align: center;
-}
-
-.close-btn {
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  margin: 0;
-  transition: var(--transition-fast);
-  flex-shrink: 0;
-}
-
-.macos-close {
-  background: #ff5f57;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-}
-
-.macos-close .close-icon {
-  color: transparent;
-  font-size: 0;
-  width: 12px;
-  height: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.windows-close {
-  background: transparent;
-  width: 24px;
-  height: 24px;
-  border-radius: var(--radius-sm);
-  font-size: 16px;
-}
-
-.windows-close .close-icon {
-  color: var(--color-text-secondary);
-  width: 24px;
-  height: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  line-height: 1;
-}
-
-.close-btn:hover {
-  opacity: 0.8;
-}
-
-.windows-close:hover {
-  background: var(--color-interactive-hover);
-}
-
-.form-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.form-group {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.form-group.full-width {
-  flex: 1 0 100%;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--color-text-primary);
-  font-size: 0.9em;
-  font-weight: 500;
-}
-
+/* Keep SSH form specific styles that override global styles */
 .form-group input {
   width: 100%;
   padding: 6px 8px;
@@ -355,47 +423,8 @@ const onCancel = () => {
   border-color: var(--color-primary);
 }
 
-.error-message {
-  display: block;
-  color: #ff4757;
-  font-size: 0.75em;
-  margin-top: 2px;
-  margin-bottom: 4px;
-}
-
-.form-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border-secondary);
-}
-
-.btn-connect, .btn-cancel {
-  padding: 6px 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-size: 0.9em;
-  transition: var(--transition-fast);
-}
-
-.btn-connect {
-  background: var(--color-primary);
-  color: white;
-}
-
-.btn-connect:hover {
-  background: var(--color-primary-hover);
-}
-
-.btn-cancel {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-}
-
-.btn-cancel:hover {
-  background: var(--color-interactive-hover);
+/* Ensure lucide icons are properly styled in password toggle buttons */
+.modal-password-toggle-btn svg {
+  vertical-align: middle;
 }
 </style>

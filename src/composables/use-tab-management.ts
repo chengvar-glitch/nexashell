@@ -1,6 +1,6 @@
 /**
- * 标签管理 Composable
- * 提供标签页的状态管理和操作方法
+ * Tab management Composable
+ * Provides tab state management and operation methods
  */
 
 import { ref } from 'vue';
@@ -34,7 +34,7 @@ export function useTabManagement() {
 
     tabs.value.splice(index, 1);
 
-    // 如果关闭的是当前活动标签，切换到相邻标签
+    // If closing the active tab, switch to adjacent tab
     if (id === activeTabId.value && tabs.value.length > 0) {
       const newIndex = Math.min(index, tabs.value.length - 1);
       activeTabId.value = tabs.value[newIndex].id as string;
