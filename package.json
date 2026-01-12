@@ -12,7 +12,10 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "lint": "eslint src --ext .vue,.js,.ts,.jsx,.tsx --fix",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
@@ -24,18 +27,23 @@
   "devDependencies": {
     "@eslint/js": "^9.39.2",
     "@tauri-apps/cli": "^2",
+    "@types/node": "^25.0.6",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "^4.0.17",
+    "@vitest/ui": "^4.0.17",
+    "@vue/test-utils": "^2.4.6",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-vue": "^10.6.2",
+    "happy-dom": "^20.1.0",
     "prettier": "^3.7.4",
     "typescript": "~5.6.2",
     "vite": "^6.0.3",
+    "vitest": "^4.0.17",
     "vue-eslint-parser": "^10.2.0",
-    "vue-tsc": "^2.1.10",
-    "@types/node": "^25.0.6"
+    "vue-tsc": "^2.1.10"
   }
 }
