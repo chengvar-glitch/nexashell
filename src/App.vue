@@ -1,32 +1,44 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
+import { v4 as uuidv4 } from 'uuid';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
 import SSHConnectionForm from '@/components/ssh/SSHConnectionForm.vue';
 import SettingsPanel from '@/components/settings/SettingsPanel.vue';
-import { shortcutManager, PredefinedShortcuts } from './utils/shortcut-manager';
-import { themeManager } from './utils/theme-manager';
+import {
+  shortcutManager,
+  PredefinedShortcuts,
+} from '@/core/utils/shortcut-manager';
+import { themeManager } from '@/core/utils/theme-manager';
 import { useModal } from '@/composables';
 import { useTabManagement } from '@/composables';
+import { useSessionStore } from '@/features/session';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
   CLOSE_SSH_FORM_KEY,
   SHOW_SSH_FORM_KEY,
   SHOW_SETTINGS_KEY,
-} from '@/types';
+} from '@/core/types';
 interface SSHConnectionFormData {
   name: string;
   host: string;
   port: number | null;
   username: string;
-  password: string;
-  privateKey: string;
-  keyPassphrase: string;
+  password?: string;
+  privateKey?: string;
+  keyPassphrase?: string;
 }
-import { APP_EVENTS } from '@/constants';
-import { eventBus } from '@/utils/event-bus';
+import { APP_EVENTS } from '@/core/constants';
+import { eventBus } from '@/core/utils/event-bus';
+import { createLogger } from '@/core/utils/logger';
+import { TAB_TYPE } from '@/features/tabs';
+
+const logger = createLogger('APP');
+
+// Session management with Pinia
+const sessionStore = useSessionStore();
 
 // SSH connection form management
 const {
@@ -34,8 +46,15 @@ const {
   openModal: openSSHForm,
   closeModal: closeSSHForm,
 } = useModal();
+const isConnecting = ref(false);
+const sshErrorMessage = ref<string | null>(null);
+
 provide(SHOW_SSH_FORM_KEY, showSSHForm);
-provide(OPEN_SSH_FORM_KEY, openSSHForm);
+provide(OPEN_SSH_FORM_KEY, () => {
+  sshErrorMessage.value = null;
+  isConnecting.value = false;
+  openSSHForm();
+});
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 
 // Settings panel management
@@ -81,13 +100,80 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   shortcutManager.unregisterAll();
+
+  // Clean up all sessions using Pinia store
+  sessionStore.cleanupAllSessions().catch(error => {
+    logger.error('Error cleaning up sessions on app close', error);
+  });
 });
 
-// Handle SSH connection
-const handleSSHConnect = (data: SSHConnectionFormData) => {
-  console.log('SSH connection data:', data);
-  // TODO: Implement actual SSH connection logic
-  closeSSHForm();
+// Handle SSH connection with improved error handling
+const handleSSHConnect = async (data: SSHConnectionFormData) => {
+  logger.info('Initiating SSH connection', {
+    name: data.name,
+    host: data.host,
+    port: data.port,
+  });
+
+  sshErrorMessage.value = null;
+  isConnecting.value = true;
+
+  // 1. Generate a unique session ID
+  const sessionId = uuidv4();
+
+  // 2. Initiate backend connection via Pinia store
+  try {
+    await sessionStore.createSSHSession(
+      sessionId,
+      sessionId, // Use sessionId as tabId for now
+      data.name,
+      data.host,
+      data.port || 22,
+      data.username,
+      data.password || '',
+      80, // Default columns
+      24 // Default rows
+    );
+    logger.info('SSH session created successfully', { sessionId });
+
+    // 3. Create and add a new tab ONLY after successful connection
+    tabManagement.addTab({
+      id: sessionId,
+      label: data.name || data.host,
+      type: TAB_TYPE.SSH,
+      closable: true,
+    });
+
+    closeSSHForm();
+  } catch (error) {
+    logger.error('Failed to create SSH session', error);
+    
+    // Enhanced error handling with structured error information
+    if (error instanceof Error) {
+      const errorMessage = error.message;
+      
+      // Check for specific Tauri error patterns (structured SshError)
+      if (typeof error === 'object' && error !== null) {
+        const err = error as Record<string, any>;
+        
+        if (err.connectionFailed) {
+          sshErrorMessage.value = `Connection failed: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
+        } else if (err.authenticationFailed) {
+          sshErrorMessage.value = `Authentication failed: please check username and password`;
+        } else if (err.channelError) {
+          sshErrorMessage.value = `Channel error: ${err.channelError}`;
+        } else {
+          sshErrorMessage.value = errorMessage;
+        }
+      } else {
+        sshErrorMessage.value = errorMessage;
+      }
+    } else {
+      sshErrorMessage.value = String(error);
+    }
+  } finally {
+    isConnecting.value = false;
+  }
 };
 
 // Handle SSH connection cancellation
@@ -99,20 +185,37 @@ const handleSSHCancel = () => {
 const handleSettingsUpdate = (value: boolean) => {
   showSettings.value = value;
 };
+
+// Handle creating a new tab
+const handleCreateTab = (tab: any) => {
+  tabManagement.addTab(tab);
+};
 </script>
 
 <template>
-  <div id="app" class="app-wrapper">
+  <div
+    id="app"
+    class="app-wrapper"
+  >
     <div class="app-root">
       <WindowTitleBar />
       <AppTabs />
-      <AppContent />
+      <AppContent
+        @create-tab="handleCreateTab"
+        @connect="handleSSHConnect"
+      />
     </div>
 
     <!-- SSH connection form modal -->
-    <div v-if="showSSHForm" class="modal-overlay" @click.self="closeSSHForm">
+    <div
+      v-if="showSSHForm"
+      class="modal-overlay"
+      @click.self="closeSSHForm"
+    >
       <div class="modal-content">
         <SSHConnectionForm
+          :is-loading="isConnecting"
+          :error-message="sshErrorMessage"
           @connect="handleSSHConnect"
           @cancel="handleSSHCancel"
         />
@@ -120,7 +223,11 @@ const handleSettingsUpdate = (value: boolean) => {
     </div>
 
     <!-- Settings panel modal -->
-    <div v-if="showSettings" class="modal-overlay" @click.self="closeSettings">
+    <div
+      v-if="showSettings"
+      class="modal-overlay"
+      @click.self="closeSettings"
+    >
       <div class="modal-content">
         <SettingsPanel
           :visible="showSettings"
@@ -150,7 +257,7 @@ const handleSettingsUpdate = (value: boolean) => {
   width: 100%;
   border-radius: var(--radius-2xl);
   overflow: hidden;
-  background-color: transparent;
+  background-color: var(--color-bg-primary);
   box-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.1),
     var(--shadow-2xl);
@@ -288,6 +395,8 @@ body,
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
+  /* 取消全局拖拽功能 */
+  -webkit-app-region: no-drag;
 }
 
 div[role='region'] {
@@ -295,5 +404,7 @@ div[role='region'] {
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
+  /* 确保这些区域也不可拖拽 */
+  -webkit-app-region: no-drag;
 }
 </style>

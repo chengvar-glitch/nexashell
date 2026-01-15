@@ -3,7 +3,7 @@ import {
   closeWindow,
   createNewLocalTab,
   focusSearch,
-} from '@/utils/app-utils';
+} from '@/core/utils/app-utils';
 
 export interface ShortcutConfig {
   key: string;

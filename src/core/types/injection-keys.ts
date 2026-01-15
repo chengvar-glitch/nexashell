@@ -4,7 +4,7 @@
  */
 
 import type { InjectionKey, Ref } from 'vue';
-import type { TabManagement } from './tab';
+import type { TabManagement } from '@/features/tabs';
 
 // Tab management injection key
 export const TAB_MANAGEMENT_KEY: InjectionKey<TabManagement> =

@@ -2,7 +2,7 @@
  * Platform detection utility functions
  */
 
-import { safeInvoke } from '@/utils/error-handler';
+import { safeInvoke } from '@/core/utils/error-handler';
 
 /**
  * Detect if it's a macOS system (via Tauri)

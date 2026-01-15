@@ -8,17 +8,26 @@
 
       <div class="home-content">
         <div class="quick-actions">
-          <button class="action-btn" @click="handleNewConnection">
+          <button
+            class="action-btn"
+            @click="handleNewConnection"
+          >
             <span class="btn-icon">+</span>
             <span class="btn-text">New SSH Connection</span>
           </button>
 
-          <button class="action-btn" @click="handleOpenRecent">
+          <button
+            class="action-btn"
+            @click="handleOpenRecent"
+          >
             <span class="btn-icon">📁</span>
             <span class="btn-text">Open Recent Connection</span>
           </button>
 
-          <button class="action-btn" @click="handleOpenSettings">
+          <button
+            class="action-btn"
+            @click="handleOpenSettings"
+          >
             <span class="btn-icon">⚙️</span>
             <span class="btn-text">Settings</span>
           </button>
@@ -40,11 +49,17 @@
                   {{ conn.host }}:{{ conn.port }} | {{ conn.username }}
                 </div>
               </div>
-              <button class="connect-btn" @click="handleConnect(conn)">
+              <button
+                class="connect-btn"
+                @click="handleConnect(conn)"
+              >
                 Connect
               </button>
             </div>
-            <div v-if="recentConnections.length === 0" class="no-connections">
+            <div
+              v-if="recentConnections.length === 0"
+              class="no-connections"
+            >
               No recent connections
             </div>
           </div>
@@ -56,7 +71,7 @@
 
 <script setup lang="ts">
 import { ref, inject } from 'vue';
-import { OPEN_SSH_FORM_KEY } from '@/types';
+import { OPEN_SSH_FORM_KEY } from '@/core/types';
 
 interface SSHConnection {
   id: string;
@@ -144,6 +159,7 @@ const handleConnect = (conn: SSHConnection) => {
   display: flex;
   gap: 20px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 .action-btn {

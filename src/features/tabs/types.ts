@@ -18,3 +18,10 @@ export interface TabManagement {
   addTab: (tab: Tab) => void;
   closeTab: (id: string) => void;
 }
+
+// Export constants for tab types
+export const TAB_TYPE = {
+  HOME: 'home' as const,
+  TERMINAL: 'terminal' as const,
+  SSH: 'ssh' as const,
+};

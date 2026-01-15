@@ -8,7 +8,16 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [vue()],
-
+  test: {
+    environment: 'happy-dom',
+    globals: true,
+    setupFiles: ['./tests/setup.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'html', 'lcov'],
+      exclude: ['node_modules/', 'src-tauri/', 'tests/'],
+    },
+  },
   resolve: {
     alias: {
       '@': dirname(fileURLToPath(import.meta.url)) + '/src',

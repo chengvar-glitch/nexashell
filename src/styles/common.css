@@ -338,10 +338,10 @@
   pointer-events: none;
 }
 
-/* Tauri drag region */
-.draggable {
+/* Tauri drag region - DISABLED */
+/* .draggable {
   -webkit-app-region: drag;
-}
+} */
 
 .no-drag {
   -webkit-app-region: no-drag;

@@ -2,26 +2,36 @@
 import { computed, inject } from 'vue';
 import NexaShellHome from '@/components/home/NexaShellHome.vue';
 import TerminalView from '@/components/terminal/TerminalView.vue';
-import { TAB_MANAGEMENT_KEY } from '@/types';
+import { TAB_MANAGEMENT_KEY } from '@/core/types';
+
+// Emit createTab event to parent
+const emit = defineEmits(['createTab', 'connect']);
 
 // Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
-const activeTabId = tabManagement?.activeTabId;
+if (!tabManagement) {
+  throw new Error(
+    'TAB_MANAGEMENT_KEY must be provided by parent component. ' +
+      'Ensure App.vue provides this key via provide(TAB_MANAGEMENT_KEY, tabManagement)'
+  );
+}
+
+const tabs = tabManagement.tabs;
+const activeTabId = tabManagement.activeTabId;
 
 // Determine which component to display based on tab type
 const currentComponent = computed(() => {
-  if (!activeTabId?.value) {
+  if (!activeTabId.value) {
     return NexaShellHome;
   }
 
-  const tabs = tabManagement?.tabs?.value || [];
-  const activeTab = tabs.find((tab: any) => tab.id === activeTabId.value);
+  const activeTab = tabs.value.find(tab => tab.id === activeTabId.value);
 
   if (!activeTab) {
     return NexaShellHome;
   }
 
-  // Determine which component to display based on tab type (decoupling)
+  // Determine which component to display based on tab type (type-driven)
   switch (activeTab.type) {
     case 'terminal':
     case 'ssh':
@@ -31,11 +41,29 @@ const currentComponent = computed(() => {
       return NexaShellHome;
   }
 });
+
+// Handle createTab event from child components
+const handleCreateTab = (tab: any) => {
+  emit('createTab', tab);
+};
+
+// Handle connect event from child components
+const handleConnect = (data: any) => {
+  emit('connect', data);
+};
 </script>
 
 <template>
   <div class="app-content">
-    <component :is="currentComponent" />
+    <KeepAlive :max="10">
+      <component
+        :is="currentComponent"
+        :key="activeTabId"
+        :session-id="activeTabId"
+        @create-tab="handleCreateTab"
+        @connect="handleConnect"
+      />
+    </KeepAlive>
   </div>
 </template>
 
