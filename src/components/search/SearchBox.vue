@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { isMacOSBrowser, isWindowsBrowser } from '@/utils/app-utils';
+import { isMacOSBrowser, isWindowsBrowser } from '@/core/utils/app-utils';
 
 interface Props {
   placeholder?: string;
@@ -104,7 +104,7 @@ const dynamicPlaceholder = computed(() => {
       @blur="handleBlur"
       @keydown="handleKeyDown"
       @keyup="handleKeyUp"
-    />
+    >
   </div>
 </template>
 

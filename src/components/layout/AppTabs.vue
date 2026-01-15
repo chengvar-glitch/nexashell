@@ -4,10 +4,10 @@ import TabItem from '@/components/common/TabItem.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import { Plus, ChevronDown, X, MoreHorizontal } from 'lucide-vue-next';
-import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/types';
-import { NEW_TAB_MENU_ITEMS } from '@/constants';
-import { APP_EVENTS } from '@/constants';
-import { eventBus } from '@/utils/event-bus';
+import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
+import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
+import { APP_EVENTS } from '@/core/constants';
+import { eventBus } from '@/core/utils/event-bus';
 
 // Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
@@ -19,6 +19,9 @@ const activeTabId = tabManagement.activeTabId;
 
 // Inject SSH form control method
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
+if (!openSSHForm) {
+  console.warn('[AppTabs] openSSHForm not provided by parent component');
+}
 
 const isDropdownOpen = ref(false);
 const dropdownX = ref(0);
@@ -37,8 +40,8 @@ const handleTabClick = async (id: string) => {
   scrollToActiveTab();
 };
 
-const handleTabClose = (id: string) => {
-  tabManagement.closeTab(id);
+const handleTabClose = async (id: string) => {
+  await tabManagement.closeTab(id);
 };
 
 const handleAddTab = async () => {
@@ -194,7 +197,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-tabs glass-light border-bottom">
-    <div ref="tabsContainerRef" class="tabs-container scrollbar-hidden">
+    <div
+      ref="tabsContainerRef"
+      class="tabs-container scrollbar-hidden"
+    >
       <TabItem
         v-for="(tab, index) in tabs"
         :id="tab.id"
@@ -207,8 +213,14 @@ onBeforeUnmount(() => {
         @click="handleTabClick"
         @close="handleTabClose"
       />
-      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
-        <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
+      <div
+        class="tab-actions"
+        :class="{ 'is-active': isDropdownOpen }"
+      >
+        <ShortcutHint
+          text="Cmd+T to create SSH connection"
+          position="bottom"
+        >
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
@@ -218,22 +230,34 @@ onBeforeUnmount(() => {
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint text="More options" position="bottom">
+        <ShortcutHint
+          text="More options"
+          position="bottom"
+        >
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown v-if="!isDropdownOpen" :size="14" />
-            <X v-else :size="14" />
+            <ChevronDown
+              v-if="!isDropdownOpen"
+              :size="14"
+            />
+            <X
+              v-else
+              :size="14"
+            />
           </button>
         </ShortcutHint>
       </div>
     </div>
 
     <div class="more-container">
-      <button class="action-btn" aria-label="More">
+      <button
+        class="action-btn"
+        aria-label="More"
+      >
         <MoreHorizontal :size="14" />
       </button>
     </div>

@@ -4,4 +4,3 @@
 
 export * from './events';
 export * from './menu';
-export * from './tab';

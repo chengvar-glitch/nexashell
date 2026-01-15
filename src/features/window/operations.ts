@@ -3,7 +3,7 @@
  * Encapsulates operations related to Tauri window controls
  */
 
-import { safeInvoke } from '@/utils/error-handler';
+import { safeInvoke } from '@/core/utils/error-handler';
 
 /**
  * Quit application

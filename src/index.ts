@@ -3,17 +3,16 @@
  * Integrates all modularized components and functions
  */
 
+// Core Infrastructure
+export * from './core/config';
+export * from './core/constants';
+export * from './core/types';
+export * from './core/utils';
+
+// Features (Exposing public APIs)
+export * from './features/session';
+export * from './features/tabs';
+export * from './features/window';
+
 // Composables
 export * from './composables';
-
-// Constants
-export * from './constants';
-
-// Types
-export * from './types';
-
-// Utils
-export * from './utils';
-
-// Config
-export * from './config';

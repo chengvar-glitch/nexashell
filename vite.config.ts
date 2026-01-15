@@ -15,8 +15,8 @@ export default defineConfig(async () => ({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
-      exclude: ['node_modules/', 'src-tauri/', 'tests/']
-    }
+      exclude: ['node_modules/', 'src-tauri/', 'tests/'],
+    },
   },
   resolve: {
     alias: {

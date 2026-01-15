@@ -1,17 +1,12 @@
 <template>
-  <div class="modal-form" @keydown.tab="handleTabKey">
+  <div
+    class="modal-form"
+    @keydown.tab="handleTabKey"
+  >
     <div class="modal-header">
-      <div v-if="isMacOS" class="modal-header-left">
-        <button class="modal-close-btn modal-macos-close" @click="onCancel">
-          <span class="close-icon">●</span>
-        </button>
-      </div>
-      <h3 class="modal-title">New SSH Connection</h3>
-      <div v-if="!isMacOS" class="modal-header-right">
-        <button class="modal-close-btn modal-windows-close" @click="onCancel">
-          <span class="close-icon">×</span>
-        </button>
-      </div>
+      <h3 class="modal-title">
+        New SSH Connection
+      </h3>
     </div>
 
     <form @submit.prevent="onSubmit">
@@ -28,8 +23,11 @@
             class="input"
             :class="{ error: validationErrors.name }"
             required
-          />
-          <span v-if="validationErrors.name" class="modal-error-message">{{
+          >
+          <span
+            v-if="validationErrors.name"
+            class="modal-error-message"
+          >{{
             validationErrors.name
           }}</span>
         </div>
@@ -48,8 +46,11 @@
               class="input"
               :class="{ error: validationErrors.host }"
               required
-            />
-            <span v-if="validationErrors.host" class="modal-error-message">{{
+            >
+            <span
+              v-if="validationErrors.host"
+              class="modal-error-message"
+            >{{
               validationErrors.host
             }}</span>
           </div>
@@ -66,8 +67,11 @@
               placeholder="22"
               class="input short-input"
               :class="{ error: validationErrors.port }"
-            />
-            <span v-if="validationErrors.port" class="modal-error-message">{{
+            >
+            <span
+              v-if="validationErrors.port"
+              class="modal-error-message"
+            >{{
               validationErrors.port
             }}</span>
           </div>
@@ -86,8 +90,11 @@
             class="input"
             :class="{ error: validationErrors.username }"
             required
-          />
-          <span v-if="validationErrors.username" class="modal-error-message">{{
+          >
+          <span
+            v-if="validationErrors.username"
+            class="modal-error-message"
+          >{{
             validationErrors.username
           }}</span>
         </div>
@@ -105,7 +112,7 @@
               :type="showPassword ? 'text' : 'password'"
               placeholder="Password (leave empty for key authentication)"
               class="input"
-            />
+            >
             <button
               type="button"
               class="password-toggle-btn"
@@ -132,7 +139,7 @@
             type="text"
             placeholder="Private key file path"
             class="input"
-          />
+          >
         </div>
 
         <div class="modal-form-group">
@@ -146,7 +153,7 @@
               :type="showKeyPassphrase ? 'text' : 'password'"
               placeholder="Private key passphrase"
               class="input"
-            />
+            >
             <button
               type="button"
               class="password-toggle-btn"
@@ -168,17 +175,25 @@
       </div>
 
       <div class="modal-form-actions">
+        <div
+          v-if="errorMessage"
+          class="form-general-error"
+        >
+          {{ errorMessage }}
+        </div>
         <button
           ref="connectButton"
           type="submit"
           class="modal-btn modal-btn-primary"
+          :disabled="isLoading"
         >
-          Connect
+          {{ isLoading ? 'Connecting...' : 'Connect' }}
         </button>
         <button
           ref="cancelButton"
           type="button"
           class="modal-btn modal-btn-secondary"
+          :disabled="isLoading"
           @click="onCancel"
         >
           Cancel
@@ -189,9 +204,15 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { reactive, ref } from 'vue';
 import { Eye, EyeOff } from 'lucide-vue-next';
-import { isMacOSBrowser } from '@/utils/app-utils';
+
+interface Props {
+  isLoading?: boolean;
+  errorMessage?: string | null;
+}
+
+defineProps<Props>();
 
 interface SSHConnectionFormData {
   name: string; // Connection name is now required and at the top
@@ -227,9 +248,6 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
-// Detect if it's a macOS system
-const isMacOS = ref(false);
-
 // Password visibility state
 const showPassword = ref(false);
 const showKeyPassphrase = ref(false);
@@ -245,14 +263,7 @@ const keyPassphraseInput = ref<HTMLInputElement | null>(null);
 const connectButton = ref<HTMLElement | null>(null);
 const cancelButton = ref<HTMLElement | null>(null);
 
-onMounted(async () => {
-  try {
-    isMacOS.value = await isMacOSBrowser();
-  } catch (error) {
-    console.error('Failed to detect platform:', error);
-    isMacOS.value = false;
-  }
-});
+// Platform-specific UI detection removed; header is now platform-agnostic
 
 // Toggle password visibility
 const togglePasswordVisibility = () => {
@@ -364,6 +375,14 @@ const handleTabKey = (event: KeyboardEvent) => {
 </script>
 
 <style scoped>
+/* Center the header title and align vertically */
+.modal-header {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 8px 0;
+}
+
 /* Container for host and port inputs */
 .input-container {
   display: flex;
@@ -444,6 +463,19 @@ const handleTabKey = (event: KeyboardEvent) => {
   margin-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
   padding-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
   gap: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
+  flex-direction: column;
+}
+
+.form-general-error {
+  width: 100%;
+  padding: 8px;
+  background-color: rgba(255, 71, 87, 0.1);
+  border: 1px solid #ff4757;
+  border-radius: var(--radius-sm);
+  color: #ff4757;
+  font-size: 0.85em;
+  margin-bottom: 8px;
+  text-align: center;
 }
 
 /* Specific style for short input fields like port */

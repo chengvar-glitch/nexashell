@@ -2,7 +2,7 @@
  * Tab operation utility functions
  */
 
-import { APP_EVENTS } from '@/constants';
+import { APP_EVENTS } from '@/core/constants';
 
 /**
  * Create new local terminal tab
