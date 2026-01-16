@@ -48,8 +48,13 @@ pub enum SshError {
 const SSH_BUFFER_SIZE: usize = 4096;
 
 /// Initial batch threshold (welcome banner, login prompts)
+/// Increased initial time to ensure welcome banner is fully received
 const INITIAL_BATCH_SIZE_THRESHOLD: usize = 200;
-const INITIAL_BATCH_TIME_MS: u64 = 5;
+const INITIAL_BATCH_TIME_MS: u64 = 100;  // Increased from 5ms to 100ms
+
+/// Timeout for initial buffering phase (after connection established)
+/// After this time, stop buffering initial output
+const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000;  // 2 seconds to capture all initial output
 
 /// Normal operation batch threshold
 const NORMAL_BATCH_SIZE_THRESHOLD: usize = 1024;
@@ -350,6 +355,8 @@ impl SshManager {
             let mut pending_output = String::new();
             let mut last_emit = std::time::Instant::now();
             let mut seen_first_output = false;
+            let mut initial_buffering_start = std::time::Instant::now();
+            let mut in_initial_buffering = true;
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
@@ -381,8 +388,25 @@ impl SshManager {
                     }
                 }
 
+                // Check if initial buffering phase has ended
+                if in_initial_buffering && initial_buffering_start.elapsed() > Duration::from_millis(INITIAL_BUFFERING_TIMEOUT_MS) {
+                    in_initial_buffering = false;
+                    // Flush any remaining pending output
+                    if !pending_output.is_empty() {
+                        let seq = next_seq.fetch_add(1, Ordering::SeqCst);
+                        let chunk = OutputChunk::new(seq, pending_output.clone());
+                        if let Some(h) = &app_handle {
+                            let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
+                        }
+                        let _ = output_sender.send(chunk);
+                        pending_output.clear();
+                        last_emit = std::time::Instant::now();
+                        seen_first_output = true;
+                    }
+                }
+
                 // Batch and emit output
-                let (size_threshold, time_threshold_ms) = if !seen_first_output && !pending_output.is_empty() {
+                let (size_threshold, time_threshold_ms) = if in_initial_buffering && !seen_first_output {
                     (INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
                 } else {
                     (NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
@@ -396,7 +420,7 @@ impl SshManager {
                     let chunk = OutputChunk::new(seq, pending_output.clone());
 
                     // Cache initial outputs for late-joining clients
-                    if !seen_first_output {
+                    if in_initial_buffering {
                         let mut cache = initial_outputs.lock().await;
                         cache.push(chunk.clone());
                     }

@@ -93,15 +93,19 @@ const connectSSH = async (cols: number, rows: number): Promise<void> => {
     );
 
     // ✅ Get buffered initial output (welcome banner, etc.)
-    // Small delay to ensure backend has cached initial output
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for backend to complete initial buffering phase (2 seconds)
+    // This ensures SSH welcome banner and login prompts are fully captured
+    await new Promise(resolve => setTimeout(resolve, 2100));
 
     const bufferedOutput = await sessionApi.getBufferedSSHOutput(props.sessionId);
     if (terminal && bufferedOutput.length > 0) {
+      logger.info('Writing buffered SSH output to terminal', { chunks: bufferedOutput.length });
       for (const chunk of bufferedOutput) {
         terminal.write(chunk.output);
         lastSeq = Math.max(lastSeq, chunk.seq);
       }
+    } else {
+      logger.debug('No buffered SSH output available');
     }
   } catch (error) {
     logger.error('SSH connection failed', error);
