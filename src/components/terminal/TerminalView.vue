@@ -190,7 +190,7 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value);
-  
+
   // Use ResizeObserver for robust layout management
   const resizeObserver = new ResizeObserver(() => {
     if (fitAddon) {
@@ -225,12 +225,12 @@ onMounted(async () => {
       if (fitAddon) {
         fitAddon.fit();
         terminal?.focus();
-        
+
         // Force a sync after activation
         if (terminal && props.sessionId) {
-          emit(`ssh-resize-${props.sessionId}`, { 
-            cols: terminal.cols, 
-            rows: terminal.rows 
+          emit(`ssh-resize-${props.sessionId}`, {
+            cols: terminal.cols,
+            rows: terminal.rows,
           });
         }
       }
@@ -300,16 +300,16 @@ onMounted(async () => {
             if (fitAddon) {
               fitAddon.fit();
             }
-            
+
             await connectSSH(terminal.cols, terminal.rows);
-            
+
             // Re-sync after a short delay to ensure backend is ready and listener is active
             setTimeout(() => {
               if (fitAddon && props.sessionId === newSessionId) {
                 fitAddon.fit();
-                emit(`ssh-resize-${newSessionId}`, { 
-                  cols: terminal!.cols, 
-                  rows: terminal!.rows 
+                emit(`ssh-resize-${newSessionId}`, {
+                  cols: terminal!.cols,
+                  rows: terminal!.rows,
                 });
               }
             }, 500);

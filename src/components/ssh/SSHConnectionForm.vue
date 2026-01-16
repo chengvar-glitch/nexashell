@@ -157,6 +157,17 @@
         </div>
       </div>
 
+      <div class="modal-form-row checkbox-row">
+        <label class="checkbox-container">
+          <input
+            ref="saveSessionInput"
+            v-model="formData.saveSession"
+            type="checkbox"
+          />
+          <span class="checkbox-label">Save this session for later</span>
+        </label>
+      </div>
+
       <div class="modal-form-actions">
         <div v-if="errorMessage" class="form-general-error">
           {{ errorMessage }}
@@ -202,6 +213,7 @@ interface SSHConnectionFormData {
   password: string;
   privateKey: string;
   keyPassphrase: string;
+  saveSession: boolean;
 }
 
 interface ValidationErrors {
@@ -219,6 +231,7 @@ const formData = reactive<SSHConnectionFormData>({
   password: '',
   privateKey: '',
   keyPassphrase: '',
+  saveSession: true,
 });
 
 const validationErrors = reactive<ValidationErrors>({});
@@ -240,6 +253,7 @@ const usernameInput = ref<HTMLInputElement | null>(null);
 const passwordInput = ref<HTMLInputElement | null>(null);
 const privateKeyInput = ref<HTMLInputElement | null>(null);
 const keyPassphraseInput = ref<HTMLInputElement | null>(null);
+const saveSessionInput = ref<HTMLInputElement | null>(null);
 const connectButton = ref<HTMLElement | null>(null);
 const cancelButton = ref<HTMLElement | null>(null);
 
@@ -323,6 +337,7 @@ const handleTabKey = (event: KeyboardEvent) => {
     passwordInput.value,
     privateKeyInput.value,
     keyPassphraseInput.value,
+    saveSessionInput.value,
     connectButton.value,
     cancelButton.value,
   ].filter(element => element !== null) as HTMLElement[];
@@ -461,5 +476,38 @@ const handleTabKey = (event: KeyboardEvent) => {
 /* Specific style for short input fields like port */
 .short-input {
   width: 100%; /* Full width within its container */
+}
+
+/* Checkbox specific styles */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 0 2px;
+}
+
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.85em;
+  color: var(--color-text-secondary);
+}
+
+.checkbox-container input {
+  margin-right: 8px;
+  cursor: pointer;
+  width: auto;
+  accent-color: var(--color-primary);
+}
+
+.checkbox-label {
+  transition: color 0.2s ease;
+}
+
+.checkbox-container:hover .checkbox-label {
+  color: var(--color-text-primary);
 }
 </style>

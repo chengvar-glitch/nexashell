@@ -2,8 +2,17 @@
 import { ref, onMounted, computed } from 'vue';
 import { isMacOSBrowser, isWindowsBrowser } from '@/core/utils/app-utils';
 
+/**
+ * SearchBox Component
+ *
+ * A reusable search input component with platform-specific shortcut hints
+ * and visual states for integration with complex search interfaces.
+ */
+
 interface Props {
+  /** Placeholder text for the input */
   placeholder?: string;
+  /** Reactive model value for search query */
   modelValue?: string;
 }
 
@@ -14,6 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:modelValue': [value: string];
+  /** Triggered when the user presses Enter */
   search: [value: string];
   focus: [];
   blur: [];
@@ -26,16 +36,24 @@ const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
 const isFocused = ref(false);
 
+/**
+ * Updates the model value on every input event.
+ */
 const onInput = (event: Event) => {
   const target = event.target as HTMLInputElement;
   emit('update:modelValue', target.value);
 };
 
+/**
+ * Emits search event when Enter key is pressed.
+ */
 const onSearch = () => {
   emit('search', props.modelValue);
 };
 
+// Expose methods to parent components
 defineExpose({
+  /** Provides programmatic focus to the input element */
   focus: () => {
     if (searchInputRef.value) {
       searchInputRef.value.focus();
@@ -43,6 +61,9 @@ defineExpose({
   },
 });
 
+/**
+ * Handles input focus state and selects text for quick replacement.
+ */
 const handleFocus = () => {
   isFocused.value = true;
   if (searchInputRef.value) {
@@ -51,6 +72,9 @@ const handleFocus = () => {
   emit('focus');
 };
 
+/**
+ * Handles input blur state.
+ */
 const handleBlur = () => {
   isFocused.value = false;
   emit('blur');
@@ -75,6 +99,9 @@ onMounted(async () => {
   }
 });
 
+/**
+ * Computes platform-aware shortcut text for the placeholder.
+ */
 const shortcutText = computed(() => {
   if (isMacOS_OS.value) {
     return 'Cmd+K';
@@ -85,6 +112,9 @@ const shortcutText = computed(() => {
   }
 });
 
+/**
+ * Generates the final placeholder string including the shortcut key.
+ */
 const dynamicPlaceholder = computed(() => {
   return `Quick search (${shortcutText.value})`;
 });
@@ -116,24 +146,24 @@ const dynamicPlaceholder = computed(() => {
 
 .search-input {
   width: 100%;
-  max-width: 520px;
-  min-width: 300px;
-  padding: 9px 18px;
-  padding-left: 40px;
-  border-radius: var(--radius-2xl);
+  max-width: 720px;
+  min-width: 400px;
+  padding: 4px 18px;
+  padding-left: 36px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--color-border-secondary);
   background-color: var(--color-bg-elevated);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--color-text-primary);
   font-family: inherit;
   outline: none;
   transition: all var(--transition-base);
   box-shadow: var(--shadow-sm);
   backdrop-filter: var(--blur-light);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.3-4.3'%3E%3C/path%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.3-4.3'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: 14px center;
-  background-size: 16px 16px;
+  background-position: 12px center;
+  background-size: 14px 14px;
   text-align: left;
 }
 

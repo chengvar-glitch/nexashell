@@ -131,11 +131,7 @@
   </Teleport>
   <!-- Render without teleport when useTeleport is false -->
   <Transition v-else name="settings-fade">
-    <div
-      v-if="visible"
-      class="modal-system-overlay"
-      @click="handleClose"
-    >
+    <div v-if="visible" class="modal-system-overlay" @click="handleClose">
       <div class="settings-panel modal-system-panel" @click.stop>
         <div class="settings-header border-bottom draggable">
           <div class="macos-controls no-drag">

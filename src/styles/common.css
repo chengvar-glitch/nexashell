@@ -62,8 +62,8 @@
   background-color: var(--color-bg-secondary);
   /* Remove physical border and use 0.5px spread shadow to completely eliminate gaps */
   border: none !important;
-  box-shadow: 
-    0 0 0 0.5px var(--color-border-secondary), 
+  box-shadow:
+    0 0 0 0.5px var(--color-border-secondary),
     var(--shadow-xl);
   border-radius: var(--radius-2xl);
   backdrop-filter: var(--blur-medium);
@@ -74,7 +74,7 @@
   clip-path: none !important;
   background-clip: padding-box;
   isolation: isolate;
-  transform: translateZ(0); 
+  transform: translateZ(0);
 }
 
 /* Button base styles - macOS style */
@@ -394,7 +394,7 @@
   border-radius: var(--radius-2xl);
   /* Use spread shadow to simulate border, completely solving the corner gap issue */
   border: none !important;
-  box-shadow: 
+  box-shadow:
     0 0 0 0.5px var(--color-border-primary),
     var(--shadow-2xl);
   /* Force hardware acceleration to eliminate rendering artifacts */
@@ -406,13 +406,25 @@
 }
 
 @keyframes modal-overlay-fade {
-  from { opacity: 0; backdrop-filter: blur(0); }
-  to { opacity: 1; backdrop-filter: blur(4px) saturate(150%); }
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(4px) saturate(150%);
+  }
 }
 
 @keyframes modal-panel-appear {
-  from { opacity: 0; transform: scale(0.95) translateY(10px); }
-  to { opacity: 1; transform: scale(1) translateY(0); }
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 /* Backward compatibility for legacy code */

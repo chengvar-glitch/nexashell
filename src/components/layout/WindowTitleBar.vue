@@ -1,36 +1,45 @@
 <script setup lang="ts">
-import { ref, onMounted, inject, Ref, nextTick, onUnmounted } from 'vue';
+import { ref, onMounted, nextTick, onUnmounted } from 'vue';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isMacOSBrowser,
   isWindowsBrowser,
 } from '@/core/utils/platform/platform-detection';
 import SearchBox from '@/components/search/SearchBox.vue';
-import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import SearchDropdown from '@/components/search/SearchDropdown.vue';
-import { MoreHorizontal } from 'lucide-vue-next';
-import { SHOW_SETTINGS_KEY } from '@/core/types';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
 
+/**
+ * WindowTitleBar Component
+ *
+ * Provides a custom title bar with platform-specific window controls (macOS traffic lights,
+ * Windows control buttons) and a centralized search functionality.
+ */
+
 const appWindow = getCurrentWindow();
+
+// --- Reactive State ---
 const showWindowControls = ref(false);
 const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
 const isFullscreen = ref(false);
 
+// --- Search Functionality Refs ---
 const searchBoxRef = ref<InstanceType<typeof SearchBox> | null>(null);
 const searchDropdownRef = ref<InstanceType<typeof SearchDropdown> | null>(null);
 const showSearchDropdown = ref(false);
 const searchBoxElement = ref<HTMLElement | undefined>(undefined);
 const searchQuery = ref('');
 
-const showSettings = inject<Ref<boolean>>(SHOW_SETTINGS_KEY, ref(false));
-
+/**
+ * Handles search box focus to display the dropdown and update its position.
+ */
 const onSearchBoxFocus = () => {
   showSearchDropdown.value = true;
   nextTick(() => {
     if (searchBoxRef.value) {
+      // Synchronize input element for dropdown anchoring
       const inputElement = searchBoxRef.value.$el.querySelector('input');
       if (inputElement) {
         searchBoxElement.value = inputElement;
@@ -44,12 +53,15 @@ const onSearchBoxFocus = () => {
   });
 };
 
+/**
+ * Handles search box blur with a delay to allow interaction with dropdown items.
+ */
 const onSearchBoxBlur = () => {
   // Delay closing to allow user to click dropdown options
   setTimeout(() => {
-    // Check if focus is within dropdown menu
     const activeElement = document.activeElement;
     const dropdownElement = document.querySelector('.search-dropdown');
+    // Prevent closing if focus moved into the dropdown itself
     if (dropdownElement && dropdownElement.contains(activeElement)) {
       return;
     }
@@ -57,6 +69,9 @@ const onSearchBoxBlur = () => {
   }, 150);
 };
 
+/**
+ * Forwards KeyboardEvent to the SearchDropdown component.
+ */
 const onSearchBoxKeyDown = (event: KeyboardEvent) => {
   if (!showSearchDropdown.value || !searchDropdownRef.value) {
     return;
@@ -64,13 +79,18 @@ const onSearchBoxKeyDown = (event: KeyboardEvent) => {
   (searchDropdownRef.value as any).handleKeyDown(event);
 };
 
+/**
+ * Opens the dropdown when the user starts typing.
+ */
 const onSearchBoxInput = () => {
-  // Show dropdown menu if it's currently hidden
   if (!showSearchDropdown.value) {
     showSearchDropdown.value = true;
   }
 };
 
+/**
+ * Forwards KeyUp events to the SearchDropdown component.
+ */
 const onSearchBoxKeyUp = (event: KeyboardEvent) => {
   if (!showSearchDropdown.value || !searchDropdownRef.value) {
     return;
@@ -80,6 +100,7 @@ const onSearchBoxKeyUp = (event: KeyboardEvent) => {
 
 onMounted(async () => {
   try {
+    // Detect platform for layout adjustments
     const isMac = isMacOSBrowser();
     const isWin = isWindowsBrowser();
     isMacOS_OS.value = isMac;
@@ -88,6 +109,7 @@ onMounted(async () => {
 
     isFullscreen.value = await appWindow.isFullscreen();
 
+    // Listen for resize events to update fullscreen state
     const unlistenResize = await appWindow.onResized(async () => {
       isFullscreen.value = await appWindow.isFullscreen();
     });
@@ -102,6 +124,7 @@ onMounted(async () => {
     showWindowControls.value = isMac || isWin;
   }
 
+  // Listen for global search focus events
   eventBus.on(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
 });
 
@@ -113,6 +136,9 @@ onUnmounted(() => {
   }
 });
 
+/**
+ * Programmatically focuses the search box.
+ */
 const handleFocusSearch = () => {
   nextTick(() => {
     if (searchBoxRef.value) {
@@ -122,6 +148,9 @@ const handleFocusSearch = () => {
   });
 };
 
+/**
+ * Closes the application window.
+ */
 const handleClose = async () => {
   try {
     await appWindow.close();
@@ -130,6 +159,9 @@ const handleClose = async () => {
   }
 };
 
+/**
+ * Minimizes the application window.
+ */
 const handleMinimize = async () => {
   try {
     await appWindow.minimize();
@@ -138,6 +170,9 @@ const handleMinimize = async () => {
   }
 };
 
+/**
+ * Toggles window maximization or macOS fullscreen mode.
+ */
 const handleMaximize = async () => {
   try {
     if (isMacOS_OS.value) {
@@ -150,49 +185,97 @@ const handleMaximize = async () => {
     console.error('Failed to maximize window:', error);
   }
 };
-
-const handleOpenSettings = () => {
-  showSettings.value = true;
-};
 </script>
 
 <template>
   <div
     class="window-title-bar glass-medium border-bottom"
     :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }"
+    data-tauri-drag-region
   >
-    <!-- Window controls for macOS -->
-    <div
-      v-if="showWindowControls && isMacOS_OS && !isFullscreen"
-      class="window-controls macos-controls"
-    >
-      <button
-        class="window-control-btn close-btn"
-        aria-label="Close"
-        @click="handleClose"
-      />
-      <button
-        class="window-control-btn minimize-btn"
-        aria-label="Minimize"
-        @click="handleMinimize"
-      />
-      <button
-        class="window-control-btn maximize-btn"
-        aria-label="Fullscreen"
-        @click="handleMaximize"
+    <div class="left-section" data-tauri-drag-region>
+      <!-- Window controls for macOS -->
+      <div
+        v-if="showWindowControls && isMacOS_OS && !isFullscreen"
+        class="window-controls macos-controls"
+      >
+        <button
+          class="window-control-btn close-btn"
+          aria-label="Close"
+          @click="handleClose"
+        />
+        <button
+          class="window-control-btn minimize-btn"
+          aria-label="Minimize"
+          @click="handleMinimize"
+        />
+        <button
+          class="window-control-btn maximize-btn"
+          aria-label="Fullscreen"
+          @click="handleMaximize"
+        />
+      </div>
+    </div>
+
+    <div class="center-section" data-tauri-drag-region>
+      <SearchBox
+        ref="searchBoxRef"
+        v-model="searchQuery"
+        class="disable-selection"
+        @focus="onSearchBoxFocus"
+        @blur="onSearchBoxBlur"
+        @keydown="onSearchBoxKeyDown"
+        @keyup="onSearchBoxKeyUp"
+        @input="onSearchBoxInput"
       />
     </div>
 
-    <SearchBox
-      ref="searchBoxRef"
-      v-model="searchQuery"
-      class="disable-selection"
-      @focus="onSearchBoxFocus"
-      @blur="onSearchBoxBlur"
-      @keydown="onSearchBoxKeyDown"
-      @keyup="onSearchBoxKeyUp"
-      @input="onSearchBoxInput"
-    />
+    <div class="right-section" data-tauri-drag-region>
+      <div
+        v-if="showWindowControls && isWindowsOS"
+        class="window-controls windows-controls"
+      >
+        <button
+          class="windows-control-btn minimize-btn"
+          aria-label="Minimize"
+          @click="handleMinimize"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
+          </svg>
+        </button>
+        <button
+          class="windows-control-btn maximize-btn"
+          aria-label="Maximize"
+          @click="handleMaximize"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <rect
+              x="0"
+              y="0"
+              width="10"
+              height="10"
+              stroke="currentColor"
+              stroke-width="1"
+              fill="none"
+            />
+          </svg>
+        </button>
+        <button
+          class="windows-control-btn close-btn"
+          aria-label="Close"
+          @click="handleClose"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10">
+            <path
+              d="M0,0 L10,10 M10,0 L0,10"
+              stroke="currentColor"
+              stroke-width="1"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
 
     <SearchDropdown
       ref="searchDropdownRef"
@@ -200,69 +283,15 @@ const handleOpenSettings = () => {
       :anchor-element="searchBoxElement"
       :search-query="searchQuery"
     />
-
-    <div class="settings-container">
-      <ShortcutHint text="Cmd+," position="bottom">
-        <button class="btn-icon" @click="handleOpenSettings">
-          <MoreHorizontal :size="16" />
-        </button>
-      </ShortcutHint>
-    </div>
-
-    <div
-      v-if="showWindowControls && isWindowsOS"
-      class="window-controls windows-controls"
-    >
-      <button
-        class="windows-control-btn minimize-btn"
-        aria-label="Minimize"
-        @click="handleMinimize"
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
-        </svg>
-      </button>
-      <button
-        class="windows-control-btn maximize-btn"
-        aria-label="Maximize"
-        @click="handleMaximize"
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <rect
-            x="0"
-            y="0"
-            width="10"
-            height="10"
-            stroke="currentColor"
-            stroke-width="1"
-            fill="none"
-          />
-        </svg>
-      </button>
-      <button
-        class="windows-control-btn close-btn"
-        aria-label="Close"
-        @click="handleClose"
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10">
-          <path
-            d="M0,0 L10,10 M10,0 L0,10"
-            stroke="currentColor"
-            stroke-width="1"
-          />
-        </svg>
-      </button>
-    </div>
   </div>
 </template>
 
 <style scoped>
 .window-title-bar {
-  height: 40px;
+  height: 38px;
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 0 0 12px;
   background-color: var(--color-bg-primary);
   position: relative;
   top: 0;
@@ -272,11 +301,30 @@ const handleOpenSettings = () => {
 
 .window-title-bar.fullscreen-mode {
   /* Adjust layout in fullscreen mode, remove traffic light buttons spacing */
-  grid-template-columns: 1fr auto auto;
-  padding-left: 16px;
   border-radius: 0;
   /* Reserve space for native system title bar in fullscreen mode */
   padding-top: env(safe-area-inset-top, 0);
+}
+
+.left-section,
+.right-section {
+  display: flex;
+  align-items: center;
+  height: 100%;
+}
+
+.left-section {
+  padding-left: 12px;
+}
+
+.right-section {
+  justify-content: flex-end;
+}
+
+.center-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .window-controls {
@@ -314,34 +362,9 @@ const handleOpenSettings = () => {
   background-color: var(--color-macos-maximize);
 }
 
-.settings-container {
-  display: flex;
-  align-items: center;
-  padding-right: 8px;
-}
-
-.btn-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  background: transparent;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  transition: all var(--transition-base);
-}
-
-.btn-icon:hover {
-  background-color: var(--color-bg-hover);
-  color: var(--color-text-primary);
-}
-
 .windows-control-btn {
   width: 46px;
-  height: 32px;
+  height: 100%;
   border: none;
   background: transparent;
   cursor: pointer;

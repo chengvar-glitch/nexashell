@@ -196,20 +196,27 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-tabs glass-light border-bottom">
-    <div ref="tabsContainerRef" class="tabs-container scrollbar-hidden">
-      <TabItem
-        v-for="(tab, index) in tabs"
-        :id="tab.id"
-        :key="tab.id"
-        :label="tab.label"
-        :active="tab.id === activeTabId"
-        :closable="tab.closable"
-        :class="{ 'fixed-tab': index === 0 }"
-        :data-id="tab.id"
-        @click="handleTabClick"
-        @close="handleTabClose"
-      />
+  <div class="app-tabs glass-light border-bottom" data-tauri-drag-region>
+    <div
+      ref="tabsContainerRef"
+      class="tabs-container scrollbar-hidden"
+      data-tauri-drag-region
+    >
+      <TransitionGroup name="tab-list">
+        <TabItem
+          v-for="tab in tabs"
+          :id="tab.id"
+          :key="tab.id"
+          :label="tab.label"
+          :type="tab.type"
+          :active="tab.id === activeTabId"
+          :closable="tab.closable"
+          :data-id="tab.id"
+          @click="handleTabClick"
+          @close="handleTabClose"
+        />
+      </TransitionGroup>
+
       <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
         <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
           <button
@@ -223,7 +230,7 @@ onBeforeUnmount(() => {
         </ShortcutHint>
         <ShortcutHint text="More options" position="bottom">
           <button
-            class="action-btn"
+            class="action-btn dropdown-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
@@ -235,10 +242,12 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="more-container">
-      <button class="action-btn" aria-label="More">
-        <MoreHorizontal :size="14" />
-      </button>
+    <div class="right-actions" data-tauri-drag-region>
+      <ShortcutHint text="Window Actions" position="bottom">
+        <button class="action-btn more-btn" aria-label="More">
+          <MoreHorizontal :size="16" />
+        </button>
+      </ShortcutHint>
     </div>
 
     <DropdownMenu
@@ -253,21 +262,24 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .app-tabs {
-  display: grid;
-  grid-template-columns: 1fr auto;
+  display: flex;
   align-items: center;
   background-color: var(--color-bg-secondary);
-  padding: 0;
-  height: 44px;
+  padding: 0 4px;
+  height: 36px;
   overflow: hidden;
+  position: relative;
 }
 
 .tabs-container {
   display: flex;
+  align-items: center;
   height: 100%;
+  flex: 1;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
+  padding: 0 4px;
 }
 
 /* Hide scrollbar but keep scrolling functionality */
@@ -280,31 +292,32 @@ onBeforeUnmount(() => {
   scrollbar-width: none;
 }
 
-/* Fixed style for the first tab */
-.fixed-tab {
-  flex-shrink: 0;
-  position: sticky;
-  left: 0;
-  z-index: 10;
-  background-color: var(--color-bg-secondary);
-  margin-left: 0;
-  border-left: none;
-  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
-  margin-right: 0;
+/* Tab animations */
+.tab-list-enter-active,
+.tab-list-leave-active {
+  transition: all 0.3s ease;
+}
+.tab-list-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.tab-list-leave-to {
+  opacity: 0;
+  transform: scale(0.9);
+}
+.tab-list-move {
+  transition: transform 0.3s ease;
 }
 
 .tab-actions {
   display: flex;
   align-items: center;
-  gap: 0;
-  height: calc(100% - 12px);
-  margin-top: 6px;
-  margin-bottom: 6px;
-  padding: 0 4px;
-  flex-shrink: 0;
-  background-color: transparent;
+  gap: 2px;
+  margin-left: 8px;
+  padding: 2px;
+  background-color: var(--color-bg-tertiary);
   border-radius: var(--radius-md);
-  transition: all var(--transition-base);
+  flex-shrink: 0;
 }
 
 .tab-actions.is-active {
@@ -315,58 +328,40 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  margin: 0;
+  width: 24px;
+  height: 24px;
   border: none;
   background-color: transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-secondary);
   transition: all var(--transition-base);
 }
 
 .action-btn:hover {
-  background-color: var(--color-interactive-hover);
+  background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
 }
 
-.action-btn.is-active {
-  background-color: transparent;
-}
-
-.more-container {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 16px;
-}
-
-.more-container .action-btn {
-  padding: 6px;
-  border-radius: var(--radius-md);
-  border: none;
-  background-color: transparent;
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  transition: all var(--transition-base);
+.right-actions {
   display: flex;
   align-items: center;
-  justify-content: center;
+  padding: 0 8px;
+  margin-left: auto;
+  border-left: 1px solid var(--color-border-tertiary);
 }
 
-.more-container .action-btn:hover {
-  background-color: var(--color-interactive-hover);
-  color: var(--color-text-primary);
+.more-btn {
+  color: var(--color-text-tertiary);
+}
+
+.dropdown-btn {
+  border-radius: var(--radius-md);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not(.theme-light) .action-btn:hover {
-    background-color: var(--color-interactive-hover);
+    background-color: var(--color-bg-hover);
   }
-}
-
-:root.theme-dark .action-btn:hover {
-  background-color: var(--color-interactive-hover);
 }
 </style>
