@@ -133,10 +133,10 @@
   <Transition v-else name="settings-fade">
     <div
       v-if="visible"
-      class="settings-overlay flex-center"
+      class="modal-system-overlay"
       @click="handleClose"
     >
-      <div class="settings-panel panel" @click.stop>
+      <div class="settings-panel modal-system-panel" @click.stop>
         <div class="settings-header border-bottom draggable">
           <div class="macos-controls no-drag">
             <button
@@ -312,14 +312,7 @@ onMounted(() => {
 
 <style scoped>
 .settings-overlay {
-  /* Base styles for overlay */
-  z-index: 1000;
-  /* Position will be handled differently based on teleport usage */
-}
-
-/* When used without teleport (directly in parent), apply full screen overlay styles */
-.settings-overlay:deep(.flex-center) {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -328,14 +321,16 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 .settings-panel {
   width: 760px;
   height: 540px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  /* Base styles provided by .modal-system-panel */
 }
 
 .settings-header {
@@ -348,6 +343,10 @@ onMounted(() => {
   position: relative;
   height: 48px;
   min-height: 48px;
+  /* Explicitly apply top rounded corners and use negative margins to eliminate border gaps */
+  margin: -1px -1px 0 -1px;
+  border-top-left-radius: var(--radius-2xl);
+  border-top-right-radius: var(--radius-2xl);
 }
 
 .macos-controls {
@@ -397,6 +396,8 @@ onMounted(() => {
   background-color: var(--color-bg-tertiary);
   padding: 20px 16px;
   flex-shrink: 0;
+  /* Explicitly apply bottom-left rounded corners to align with the parent container */
+  border-bottom-left-radius: var(--radius-2xl);
 }
 
 .settings-menu {
@@ -452,6 +453,8 @@ onMounted(() => {
   padding: 24px 28px;
   overflow-y: auto;
   background-color: var(--color-bg-primary);
+  /* Explicitly apply bottom-right rounded corners to align with the parent container */
+  border-bottom-right-radius: var(--radius-2xl);
 }
 
 .content-section {

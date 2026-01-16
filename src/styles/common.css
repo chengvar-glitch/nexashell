@@ -60,11 +60,21 @@
 
 .panel {
   background-color: var(--color-bg-secondary);
-  border: 0.5px solid var(--color-border-secondary);
+  /* Remove physical border and use 0.5px spread shadow to completely eliminate gaps */
+  border: none !important;
+  box-shadow: 
+    0 0 0 0.5px var(--color-border-secondary), 
+    var(--shadow-xl);
   border-radius: var(--radius-2xl);
-  box-shadow: var(--shadow-xl);
   backdrop-filter: var(--blur-medium);
   transition: all var(--transition-base);
+  /* Basic overflow hidden */
+  overflow: hidden;
+  /* Shadow simulation mode doesn't need clip-path, avoiding cutting off simulated border lines */
+  clip-path: none !important;
+  background-clip: padding-box;
+  isolation: isolate;
+  transform: translateZ(0); 
 }
 
 /* Button base styles - macOS style */
@@ -352,9 +362,16 @@
  * Based on desktop application modal design philosophy
  */
 
-/* Modal overlay - for desktop applications, maintains slight blur effect without black mask */
-.modal-overlay {
-  position: fixed;
+/* 
+ * 🛠️ NexaShell Standard Modal System
+ * Usage:
+ * <div class="modal-system-overlay">
+ *   <div class="modal-system-panel"> Content </div>
+ * </div>
+ */
+
+.modal-system-overlay {
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -363,41 +380,47 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(2px);
-  animation: overlay-appear 0.2s ease-out;
-}
-
-@keyframes overlay-appear {
-  from {
-    backdrop-filter: blur(0px);
-  }
-  to {
-    backdrop-filter: blur(2px);
-  }
-}
-
-/* Modal content container - with shadow and animation effects */
-.modal-content {
-  position: relative;
-  box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.15),
-    0 0 0 1px rgba(0, 0, 0, 0.05);
-  border-radius: var(--radius-lg);
-  animation: modal-appear 0.2s ease-out forwards;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
+  backdrop-filter: blur(4px) saturate(150%);
+  background-color: var(--color-bg-overlay);
+  /* CRITICAL: Inherit main container radius to prevent corner gaps */
+  border-radius: inherit;
   overflow: hidden;
+  animation: modal-overlay-fade 0.2s ease-out;
 }
 
-@keyframes modal-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+.modal-system-panel {
+  position: relative;
+  background-color: var(--color-bg-secondary);
+  border-radius: var(--radius-2xl);
+  /* Use spread shadow to simulate border, completely solving the corner gap issue */
+  border: none !important;
+  box-shadow: 
+    0 0 0 0.5px var(--color-border-primary),
+    var(--shadow-2xl);
+  /* Force hardware acceleration to eliminate rendering artifacts */
+  transform: translateZ(0);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: modal-panel-appear 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes modal-overlay-fade {
+  from { opacity: 0; backdrop-filter: blur(0); }
+  to { opacity: 1; backdrop-filter: blur(4px) saturate(150%); }
+}
+
+@keyframes modal-panel-appear {
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Backward compatibility for legacy code */
+.modal-overlay {
+  @extend .modal-system-overlay;
+}
+.modal-content {
+  @extend .modal-system-panel;
 }
 
 /* Common modal form styles */

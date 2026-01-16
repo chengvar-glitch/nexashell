@@ -198,29 +198,25 @@ const handleCreateTab = (tab: any) => {
       <WindowTitleBar />
       <AppTabs />
       <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
-    </div>
 
-    <!-- SSH connection form modal -->
-    <div v-if="showSSHForm" class="modal-overlay" @click.self="closeSSHForm">
-      <div class="modal-content">
-        <SSHConnectionForm
-          :is-loading="isConnecting"
-          :error-message="sshErrorMessage"
-          @connect="handleSSHConnect"
-          @cancel="handleSSHCancel"
-        />
+      <!-- SSH connection form modal -->
+      <div v-if="showSSHForm" class="modal-system-overlay" @click.self="closeSSHForm">
+        <div class="modal-system-panel">
+          <SSHConnectionForm
+            :is-loading="isConnecting"
+            :error-message="sshErrorMessage"
+            @connect="handleSSHConnect"
+            @cancel="handleSSHCancel"
+          />
+        </div>
       </div>
-    </div>
 
-    <!-- Settings panel modal -->
-    <div v-if="showSettings" class="modal-overlay" @click.self="closeSettings">
-      <div class="modal-content">
-        <SettingsPanel
-          :visible="showSettings"
-          :use-teleport="false"
-          @update:visible="handleSettingsUpdate"
-        />
-      </div>
+      <!-- Settings panel modal -->
+      <SettingsPanel
+        :visible="showSettings"
+        :use-teleport="false"
+        @update:visible="handleSettingsUpdate"
+      />
     </div>
   </div>
 </template>
@@ -237,6 +233,7 @@ const handleCreateTab = (tab: any) => {
 }
 
 .app-root {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -249,6 +246,8 @@ const handleCreateTab = (tab: any) => {
     var(--shadow-2xl);
   border: none;
   transition: all var(--transition-base);
+  /* Use clip-path to force cropping and prevent black edges from rendering overflow */
+  clip-path: inset(0 round var(--radius-2xl));
 }
 
 /* Fullscreen mode: remove rounded corners and borders */
@@ -256,6 +255,7 @@ const handleCreateTab = (tab: any) => {
   .app-root {
     border-radius: 0;
     border: none;
+    clip-path: none;
   }
 }
 
@@ -276,7 +276,7 @@ const handleCreateTab = (tab: any) => {
 
 /* Modal overlay - removing black overlay for desktop app but keeping focus */
 .modal-overlay {
-  position: fixed;
+  position: absolute;
   top: 0;
   left: 0;
   right: 0;
@@ -288,15 +288,21 @@ const handleCreateTab = (tab: any) => {
   backdrop-filter: blur(
     2px
   ); /* Subtle blur to distinguish modal from background */
+  border-radius: inherit;
+  overflow: hidden;
 }
 
 /* Modal content with enhanced styling for better visibility */
 .modal-content {
   position: relative;
+  /* Remove physical border and clip-path, switch to shadow simulation */
+  border: none;
   box-shadow:
-    0 10px 40px rgba(0, 0, 0, 0.15),
-    0 0 0 1px rgba(0, 0, 0, 0.05);
+    0 0 0 1px rgba(0, 0, 0, 0.05),
+    0 10px 40px rgba(0, 0, 0, 0.15);
   border-radius: var(--radius-lg);
+  overflow: hidden;
+  clip-path: none;
   animation: modal-appear 0.2s ease-out forwards;
 }
 

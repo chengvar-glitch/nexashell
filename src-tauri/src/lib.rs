@@ -16,6 +16,9 @@ pub fn run() {
                 use cocoa::base::{id, NO, YES};
                 
                 if let Some(window) = app.get_webview_window("main") {
+                    // Ensure the webview itself is transparent
+                    let _ = window.set_shadow(true);
+                    
                     if let Ok(ns_window) = window.ns_window() {
                         let ns_window = ns_window as id;
                         
@@ -25,6 +28,10 @@ pub fn run() {
                             ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(cocoa::base::nil));
                             ns_window.setTitlebarAppearsTransparent_(YES);
                             ns_window.setMovableByWindowBackground_(NO);
+                            
+                            // Force refresh shadow to prevent square black corners
+                            ns_window.setHasShadow_(NO);
+                            ns_window.setHasShadow_(YES);
                         }
                     }
                 }
