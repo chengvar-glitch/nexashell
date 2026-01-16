@@ -1,25 +1,33 @@
 <template>
-  <div class="modal-form" @keydown.tab="handleTabKey">
+  <div
+    class="modal-form"
+    @keydown.tab="handleTabKey"
+  >
     <div class="modal-header">
-      <h3 class="modal-title">New SSH Connection</h3>
+      <h3 class="modal-title">
+        {{ $t('ssh.title') }}
+      </h3>
     </div>
 
     <form @submit.prevent="onSubmit">
       <!-- Connection name field moved to the top and marked as required -->
       <div class="modal-form-row">
         <div class="modal-form-group full-width">
-          <label for="name">Connection Name *</label>
+          <label for="name">{{ $t('ssh.name') }} *</label>
           <input
             id="name"
             ref="nameInput"
             v-model="formData.name"
             type="text"
-            placeholder="Name the connection"
+            :placeholder="$t('ssh.namePlaceholder')"
             class="input"
             :class="{ error: validationErrors.name }"
             required
-          />
-          <span v-if="validationErrors.name" class="modal-error-message">{{
+          >
+          <span
+            v-if="validationErrors.name"
+            class="modal-error-message"
+          >{{
             validationErrors.name
           }}</span>
         </div>
@@ -28,24 +36,27 @@
       <div class="modal-form-row">
         <div class="input-container">
           <div class="modal-form-group host-field">
-            <label for="host">Host Address *</label>
+            <label for="host">{{ $t('ssh.host') }} *</label>
             <input
               id="host"
               ref="hostInput"
               v-model="formData.host"
               type="text"
-              placeholder="e.g., example.com or hostname"
+              :placeholder="$t('ssh.hostPlaceholder')"
               class="input"
               :class="{ error: validationErrors.host }"
               required
-            />
-            <span v-if="validationErrors.host" class="modal-error-message">{{
+            >
+            <span
+              v-if="validationErrors.host"
+              class="modal-error-message"
+            >{{
               validationErrors.host
             }}</span>
           </div>
 
           <div class="modal-form-group port-field">
-            <label for="port">Port</label>
+            <label for="port">{{ $t('ssh.port') }}</label>
             <input
               id="port"
               ref="portInput"
@@ -56,8 +67,11 @@
               placeholder="22"
               class="input short-input"
               :class="{ error: validationErrors.port }"
-            />
-            <span v-if="validationErrors.port" class="modal-error-message">{{
+            >
+            <span
+              v-if="validationErrors.port"
+              class="modal-error-message"
+            >{{
               validationErrors.port
             }}</span>
           </div>
@@ -66,18 +80,21 @@
 
       <div class="modal-form-row">
         <div class="modal-form-group full-width">
-          <label for="username">Username *</label>
+          <label for="username">{{ $t('ssh.username') }} *</label>
           <input
             id="username"
             ref="usernameInput"
             v-model="formData.username"
             type="text"
-            placeholder="Username"
+            :placeholder="$t('ssh.usernamePlaceholder')"
             class="input"
             :class="{ error: validationErrors.username }"
             required
-          />
-          <span v-if="validationErrors.username" class="modal-error-message">{{
+          >
+          <span
+            v-if="validationErrors.username"
+            class="modal-error-message"
+          >{{
             validationErrors.username
           }}</span>
         </div>
@@ -85,7 +102,7 @@
 
       <div class="modal-form-row">
         <div class="modal-form-group full-width">
-          <label for="password">Password</label>
+          <label for="password">{{ $t('ssh.password') }}</label>
           <!-- Password field with show/hide toggle -->
           <div class="password-input-container">
             <input
@@ -93,9 +110,9 @@
               ref="passwordInput"
               v-model="formData.password"
               :type="showPassword ? 'text' : 'password'"
-              placeholder="Password (leave empty for key authentication)"
+              :placeholder="$t('ssh.passwordPlaceholder')"
               class="input"
-            />
+            >
             <button
               type="button"
               class="password-toggle-btn"
@@ -114,19 +131,19 @@
 
       <div class="modal-form-row">
         <div class="modal-form-group">
-          <label for="privateKey">Private Key File</label>
+          <label for="privateKey">{{ $t('ssh.privateKey') }}</label>
           <input
             id="privateKey"
             ref="privateKeyInput"
             v-model="formData.privateKey"
             type="text"
-            placeholder="Private key file path"
+            :placeholder="$t('ssh.privateKeyPlaceholder')"
             class="input"
-          />
+          >
         </div>
 
         <div class="modal-form-group">
-          <label for="keyPassphrase">Key Passphrase</label>
+          <label for="keyPassphrase">{{ $t('ssh.passphrase') }}</label>
           <!-- Key passphrase field with show/hide toggle -->
           <div class="password-input-container">
             <input
@@ -134,9 +151,9 @@
               ref="keyPassphraseInput"
               v-model="formData.keyPassphrase"
               :type="showKeyPassphrase ? 'text' : 'password'"
-              placeholder="Private key passphrase"
+              :placeholder="$t('ssh.passphrasePlaceholder')"
               class="input"
-            />
+            >
             <button
               type="button"
               class="password-toggle-btn"
@@ -163,13 +180,16 @@
             ref="saveSessionInput"
             v-model="formData.saveSession"
             type="checkbox"
-          />
-          <span class="checkbox-label">Save this session for later</span>
+          >
+          <span class="checkbox-label">{{ $t('ssh.saveSession') }}</span>
         </label>
       </div>
 
       <div class="modal-form-actions">
-        <div v-if="errorMessage" class="form-general-error">
+        <div
+          v-if="errorMessage"
+          class="form-general-error"
+        >
           {{ errorMessage }}
         </div>
         <button
@@ -178,7 +198,7 @@
           class="modal-btn modal-btn-primary"
           :disabled="isLoading"
         >
-          {{ isLoading ? 'Connecting...' : 'Connect' }}
+          {{ isLoading ? $t('ssh.connecting') : $t('ssh.connect') }}
         </button>
         <button
           ref="cancelButton"
@@ -187,7 +207,7 @@
           :disabled="isLoading"
           @click="onCancel"
         >
-          Cancel
+          {{ $t('ssh.cancel') }}
         </button>
       </div>
     </form>
@@ -196,6 +216,7 @@
 
 <script setup lang="ts">
 import { reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Eye, EyeOff } from 'lucide-vue-next';
 
 interface Props {
@@ -236,6 +257,8 @@ const formData = reactive<SSHConnectionFormData>({
 
 const validationErrors = reactive<ValidationErrors>({});
 
+const { t } = useI18n();
+
 const emit = defineEmits<{
   connect: [data: SSHConnectionFormData];
   cancel: [];
@@ -269,7 +292,6 @@ const toggleKeyPassphraseVisibility = () => {
   showKeyPassphrase.value = !showKeyPassphrase.value;
 };
 
-// Validate form fields before submission
 const validateForm = (): boolean => {
   // Clear previous errors
   Object.keys(validationErrors).forEach(key => {
@@ -280,25 +302,25 @@ const validateForm = (): boolean => {
 
   // Validate connection name
   if (!formData.name.trim()) {
-    validationErrors.name = 'Connection name cannot be empty';
+    validationErrors.name = t('ssh.errorName');
     isValid = false;
   }
 
   // Validate host address
   if (!formData.host.trim()) {
-    validationErrors.host = 'Host address cannot be empty';
+    validationErrors.host = t('ssh.errorHost');
     isValid = false;
   }
 
   // Validate port
   if (formData.port !== null && (formData.port < 1 || formData.port > 65535)) {
-    validationErrors.port = 'Port number must be between 1-65535';
+    validationErrors.port = t('ssh.errorPort');
     isValid = false;
   }
 
   // Validate username
   if (!formData.username.trim()) {
-    validationErrors.username = 'Username cannot be empty';
+    validationErrors.username = t('ssh.errorUsername');
     isValid = false;
   }
 

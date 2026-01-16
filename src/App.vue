@@ -193,14 +193,23 @@ const handleCreateTab = (tab: any) => {
 </script>
 
 <template>
-  <div id="app" class="app-wrapper">
+  <div
+    id="app"
+    class="app-wrapper"
+  >
     <div class="app-root">
       <WindowTitleBar />
       <AppTabs />
-      <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
+      <AppContent
+        @create-tab="handleCreateTab"
+        @connect="handleSSHConnect"
+      />
 
       <!-- SSH connection form modal -->
-      <div v-if="showSSHForm" class="modal-system-overlay">
+      <div
+        v-if="showSSHForm"
+        class="modal-system-overlay"
+      >
         <div class="modal-system-panel">
           <SSHConnectionForm
             :is-loading="isConnecting"

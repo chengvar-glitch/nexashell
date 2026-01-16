@@ -1,12 +1,18 @@
 <template>
-  <Teleport v-if="useTeleport" to="body">
+  <Teleport
+    v-if="useTeleport"
+    to="body"
+  >
     <Transition name="settings-fade">
       <div
         v-if="visible"
         class="settings-overlay flex-center"
         @click="handleClose"
       >
-        <div class="settings-panel panel" @click.stop>
+        <div
+          class="settings-panel panel"
+          @click.stop
+        >
           <div class="settings-header border-bottom draggable">
             <div class="macos-controls no-drag">
               <button
@@ -15,7 +21,9 @@
                 @click="handleClose"
               />
             </div>
-            <h2 class="settings-title">Settings</h2>
+            <h2 class="settings-title">
+              {{ $t('settings.title') }}
+            </h2>
           </div>
 
           <div class="settings-body">
@@ -28,21 +36,55 @@
                   :class="{ active: activeMenu === item.key }"
                   @click="handleMenuClick(item.key)"
                 >
-                  <component :is="item.icon" :size="16" class="menu-icon" />
+                  <component
+                    :is="item.icon"
+                    :size="16"
+                    class="menu-icon"
+                  />
                   <span class="menu-label">{{ item.label }}</span>
                 </button>
               </nav>
             </div>
 
             <div class="settings-content">
-              <div v-if="activeMenu === 'general'" class="content-section">
-                <h3 class="section-title">General Settings</h3>
+              <div
+                v-if="activeMenu === 'general'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  {{ $t('settings.general') }}
+                </h3>
                 <div class="setting-item">
-                  <label class="setting-label">Launch on Startup</label>
-                  <input type="checkbox" class="setting-checkbox" />
+                  <label class="setting-label">{{
+                    $t('settings.language')
+                  }}</label>
+                  <select
+                    class="setting-select modal-input"
+                    :value="locale"
+                    @change="handleLanguageChange"
+                  >
+                    <option
+                      v-for="lang in languages"
+                      :key="lang.value"
+                      :value="lang.value"
+                    >
+                      {{ lang.label }}
+                    </option>
+                  </select>
                 </div>
                 <div class="setting-item">
-                  <label class="setting-label">Default Shell</label>
+                  <label class="setting-label">{{
+                    $t('settings.startup')
+                  }}</label>
+                  <input
+                    type="checkbox"
+                    class="setting-checkbox"
+                  >
+                </div>
+                <div class="setting-item">
+                  <label class="setting-label">{{
+                    $t('settings.defaultShell')
+                  }}</label>
                   <select class="setting-select modal-input">
                     <option>Bash</option>
                     <option>Zsh</option>
@@ -51,36 +93,58 @@
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'appearance'" class="content-section">
-                <h3 class="section-title">Appearance Settings</h3>
+              <div
+                v-if="activeMenu === 'appearance'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  {{ $t('settings.appearance') }}
+                </h3>
                 <div class="setting-item">
-                  <label class="setting-label">Theme</label>
+                  <label class="setting-label">{{
+                    $t('settings.theme')
+                  }}</label>
                   <select
                     class="setting-select modal-input"
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
-                    <option value="auto">Auto</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
+                    <option value="auto">
+                      Auto
+                    </option>
+                    <option value="light">
+                      Light
+                    </option>
+                    <option value="dark">
+                      Dark
+                    </option>
                   </select>
                 </div>
                 <div class="setting-item">
-                  <label class="setting-label">Font Size</label>
+                  <label class="setting-label">{{
+                    $t('settings.fontSize')
+                  }}</label>
                   <input
                     type="number"
                     class="setting-input modal-input"
                     value="14"
                     min="10"
                     max="24"
-                  />
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'terminal'" class="content-section">
-                <h3 class="section-title">Terminal Settings</h3>
+              <div
+                v-if="activeMenu === 'terminal'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  {{ $t('settings.terminal') }}
+                </h3>
                 <div class="setting-item">
-                  <label class="setting-label">Cursor Style</label>
+                  <label class="setting-label">{{
+                    $t('settings.cursorStyle')
+                  }}</label>
                   <select class="setting-select modal-input">
                     <option>Block</option>
                     <option>Underline</option>
@@ -88,39 +152,59 @@
                   </select>
                 </div>
                 <div class="setting-item">
-                  <label class="setting-label">Enable Cursor Blink</label>
-                  <input type="checkbox" class="setting-checkbox" checked />
+                  <label class="setting-label">{{
+                    $t('settings.cursorBlink')
+                  }}</label>
+                  <input
+                    type="checkbox"
+                    class="setting-checkbox"
+                    checked
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'shortcuts'" class="content-section">
-                <h3 class="section-title">Keyboard Shortcuts</h3>
+              <div
+                v-if="activeMenu === 'shortcuts'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  {{ $t('settings.shortcuts') }}
+                </h3>
                 <div class="setting-item">
-                  <label class="setting-label">New Tab</label>
+                  <label class="setting-label">{{
+                    $t('settings.newTab')
+                  }}</label>
                   <input
                     type="text"
                     class="setting-input modal-input"
                     value="Cmd+T"
                     readonly
-                  />
+                  >
                 </div>
                 <div class="setting-item">
-                  <label class="setting-label">Close Tab</label>
+                  <label class="setting-label">{{
+                    $t('settings.closeTab')
+                  }}</label>
                   <input
                     type="text"
                     class="setting-input modal-input"
                     value="Cmd+W"
                     readonly
-                  />
+                  >
                 </div>
               </div>
 
-              <div v-if="activeMenu === 'about'" class="content-section">
-                <h3 class="section-title">About</h3>
+              <div
+                v-if="activeMenu === 'about'"
+                class="content-section"
+              >
+                <h3 class="section-title">
+                  {{ $t('settings.about') }}
+                </h3>
                 <div class="about-info">
                   <p><strong>NexaShell</strong></p>
-                  <p>Version 1.0.0</p>
-                  <p>Modern Terminal Emulator</p>
+                  <p>{{ $t('settings.version') }} 1.0.0</p>
+                  <p>{{ $t('settings.description') }}</p>
                 </div>
               </div>
             </div>
@@ -130,9 +214,19 @@
     </Transition>
   </Teleport>
   <!-- Render without teleport when useTeleport is false -->
-  <Transition v-else name="settings-fade">
-    <div v-if="visible" class="modal-system-overlay" @click="handleClose">
-      <div class="settings-panel modal-system-panel" @click.stop>
+  <Transition
+    v-else
+    name="settings-fade"
+  >
+    <div
+      v-if="visible"
+      class="modal-system-overlay"
+      @click="handleClose"
+    >
+      <div
+        class="settings-panel modal-system-panel"
+        @click.stop
+      >
         <div class="settings-header border-bottom draggable">
           <div class="macos-controls no-drag">
             <button
@@ -141,7 +235,9 @@
               @click="handleClose"
             />
           </div>
-          <h2 class="settings-title">Settings</h2>
+          <h2 class="settings-title">
+            {{ $t('settings.title') }}
+          </h2>
         </div>
 
         <div class="settings-body">
@@ -154,21 +250,55 @@
                 :class="{ active: activeMenu === item.key }"
                 @click="handleMenuClick(item.key)"
               >
-                <component :is="item.icon" :size="16" class="menu-icon" />
+                <component
+                  :is="item.icon"
+                  :size="16"
+                  class="menu-icon"
+                />
                 <span class="menu-label">{{ item.label }}</span>
               </button>
             </nav>
           </div>
 
           <div class="settings-content">
-            <div v-if="activeMenu === 'general'" class="content-section">
-              <h3 class="section-title">General Settings</h3>
+            <div
+              v-if="activeMenu === 'general'"
+              class="content-section"
+            >
+              <h3 class="section-title">
+                {{ $t('settings.general') }}
+              </h3>
               <div class="setting-item">
-                <label class="setting-label">Launch on Startup</label>
-                <input type="checkbox" class="setting-checkbox" />
+                <label class="setting-label">{{
+                  $t('settings.language')
+                }}</label>
+                <select
+                  class="setting-select modal-input"
+                  :value="locale"
+                  @change="handleLanguageChange"
+                >
+                  <option
+                    v-for="lang in languages"
+                    :key="lang.value"
+                    :value="lang.value"
+                  >
+                    {{ lang.label }}
+                  </option>
+                </select>
               </div>
               <div class="setting-item">
-                <label class="setting-label">Default Shell</label>
+                <label class="setting-label">{{
+                  $t('settings.startup')
+                }}</label>
+                <input
+                  type="checkbox"
+                  class="setting-checkbox"
+                >
+              </div>
+              <div class="setting-item">
+                <label class="setting-label">{{
+                  $t('settings.defaultShell')
+                }}</label>
                 <select class="setting-select modal-input">
                   <option>Bash</option>
                   <option>Zsh</option>
@@ -177,36 +307,56 @@
               </div>
             </div>
 
-            <div v-if="activeMenu === 'appearance'" class="content-section">
-              <h3 class="section-title">Appearance Settings</h3>
+            <div
+              v-if="activeMenu === 'appearance'"
+              class="content-section"
+            >
+              <h3 class="section-title">
+                {{ $t('settings.appearance') }}
+              </h3>
               <div class="setting-item">
-                <label class="setting-label">Theme</label>
+                <label class="setting-label">{{ $t('settings.theme') }}</label>
                 <select
                   class="setting-select modal-input"
                   :value="selectedTheme"
                   @change="handleThemeChange"
                 >
-                  <option value="auto">Auto</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
+                  <option value="auto">
+                    Auto
+                  </option>
+                  <option value="light">
+                    Light
+                  </option>
+                  <option value="dark">
+                    Dark
+                  </option>
                 </select>
               </div>
               <div class="setting-item">
-                <label class="setting-label">Font Size</label>
+                <label class="setting-label">{{
+                  $t('settings.fontSize')
+                }}</label>
                 <input
                   type="number"
                   class="setting-input modal-input"
                   value="14"
                   min="10"
                   max="24"
-                />
+                >
               </div>
             </div>
 
-            <div v-if="activeMenu === 'terminal'" class="content-section">
-              <h3 class="section-title">Terminal Settings</h3>
+            <div
+              v-if="activeMenu === 'terminal'"
+              class="content-section"
+            >
+              <h3 class="section-title">
+                {{ $t('settings.terminal') }}
+              </h3>
               <div class="setting-item">
-                <label class="setting-label">Cursor Style</label>
+                <label class="setting-label">{{
+                  $t('settings.cursorStyle')
+                }}</label>
                 <select class="setting-select modal-input">
                   <option>Block</option>
                   <option>Underline</option>
@@ -214,39 +364,57 @@
                 </select>
               </div>
               <div class="setting-item">
-                <label class="setting-label">Enable Cursor Blink</label>
-                <input type="checkbox" class="setting-checkbox" checked />
+                <label class="setting-label">{{
+                  $t('settings.cursorBlink')
+                }}</label>
+                <input
+                  type="checkbox"
+                  class="setting-checkbox"
+                  checked
+                >
               </div>
             </div>
 
-            <div v-if="activeMenu === 'shortcuts'" class="content-section">
-              <h3 class="section-title">Keyboard Shortcuts</h3>
+            <div
+              v-if="activeMenu === 'shortcuts'"
+              class="content-section"
+            >
+              <h3 class="section-title">
+                {{ $t('settings.shortcuts') }}
+              </h3>
               <div class="setting-item">
-                <label class="setting-label">New Tab</label>
+                <label class="setting-label">{{ $t('settings.newTab') }}</label>
                 <input
                   type="text"
                   class="setting-input modal-input"
                   value="Cmd+T"
                   readonly
-                />
+                >
               </div>
               <div class="setting-item">
-                <label class="setting-label">Close Tab</label>
+                <label class="setting-label">{{
+                  $t('settings.closeTab')
+                }}</label>
                 <input
                   type="text"
                   class="setting-input modal-input"
                   value="Cmd+W"
                   readonly
-                />
+                >
               </div>
             </div>
 
-            <div v-if="activeMenu === 'about'" class="content-section">
-              <h3 class="section-title">About</h3>
+            <div
+              v-if="activeMenu === 'about'"
+              class="content-section"
+            >
+              <h3 class="section-title">
+                {{ $t('settings.about') }}
+              </h3>
               <div class="about-info">
                 <p><strong>NexaShell</strong></p>
-                <p>Version 1.0.0</p>
-                <p>Modern Terminal Emulator</p>
+                <p>{{ $t('settings.version') }} 1.0.0</p>
+                <p>{{ $t('settings.description') }}</p>
               </div>
             </div>
           </div>
@@ -257,7 +425,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { Settings, Palette, Terminal, Keyboard, Info } from 'lucide-vue-next';
 import { themeManager, type ThemeMode } from '@/core/utils/theme-manager';
 
@@ -265,6 +434,8 @@ interface Props {
   visible?: boolean;
   useTeleport?: boolean; // Add prop to control teleport usage
 }
+
+const { locale, t } = useI18n();
 
 withDefaults(defineProps<Props>(), {
   visible: false,
@@ -278,13 +449,25 @@ const emit = defineEmits<{
 const activeMenu = ref('general');
 const selectedTheme = ref<ThemeMode>('auto');
 
-const menuItems = [
-  { key: 'general', label: 'General', icon: Settings },
-  { key: 'appearance', label: 'Appearance', icon: Palette },
-  { key: 'terminal', label: 'Terminal', icon: Terminal },
-  { key: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-  { key: 'about', label: 'About', icon: Info },
+const languages = [
+  { value: 'ar', label: 'Arabic' },
+  { value: 'zh', label: 'Chinese Simplified (简体中文)' },
+  { value: 'zh-TW', label: 'Chinese Traditional (繁體中文)' },
+  { value: 'en', label: 'English' },
+  { value: 'fr', label: 'French (Français)' },
+  { value: 'de', label: 'German (Deutsch)' },
+  { value: 'ja', label: 'Japanese (日本語)' },
+  { value: 'ko', label: 'Korean (한국어)' },
+  { value: 'ru', label: 'Russian (Русский)' },
 ];
+
+const menuItems = computed(() => [
+  { key: 'general', label: t('settings.general'), icon: Settings },
+  { key: 'appearance', label: t('settings.appearance'), icon: Palette },
+  { key: 'terminal', label: t('settings.terminal'), icon: Terminal },
+  { key: 'shortcuts', label: t('settings.shortcuts'), icon: Keyboard },
+  { key: 'about', label: t('settings.about'), icon: Info },
+]);
 
 const handleClose = () => {
   emit('update:visible', false);
@@ -292,6 +475,13 @@ const handleClose = () => {
 
 const handleMenuClick = (key: string) => {
   activeMenu.value = key;
+};
+
+const handleLanguageChange = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const lang = target.value;
+  locale.value = lang;
+  localStorage.setItem('language', lang);
 };
 
 const handleThemeChange = (event: Event) => {

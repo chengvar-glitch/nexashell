@@ -112,8 +112,14 @@ onUnmounted(() => {
         @mouseleave="handleMouseLeaveMenu"
       >
         <div class="menu-list">
-          <template v-for="item in items" :key="item.key">
-            <div v-if="item.divider" class="menu-divider" />
+          <template
+            v-for="item in items"
+            :key="item.key"
+          >
+            <div
+              v-if="item.divider"
+              class="menu-divider"
+            />
             <div
               v-else
               class="menu-item"
@@ -124,7 +130,10 @@ onUnmounted(() => {
               @click="handleItemClick(item)"
             >
               <span class="menu-label">{{ item.label }}</span>
-              <span v-if="item.shortcut" class="menu-shortcut">{{
+              <span
+                v-if="item.shortcut"
+                class="menu-shortcut"
+              >{{
                 item.shortcut
               }}</span>
             </div>

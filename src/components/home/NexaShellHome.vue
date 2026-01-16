@@ -1,108 +1,217 @@
 <template>
   <div class="nexashell-home">
-    <div class="home-content-wrapper">
-      <div class="home-header">
-        <h2>NexaShell</h2>
-        <p>Welcome to the modern SSH terminal tool</p>
+    <!-- Sidebar Navigation: Groups and Tags -->
+    <aside class="home-sidebar">
+      <div class="sidebar-section">
+        <h4 class="section-title">
+          {{ $t('home.views') }}
+        </h4>
+        <nav class="sidebar-nav">
+          <button class="nav-item active">
+            <Home :size="16" />
+            <span>{{ $t('home.allSessions') }}</span>
+            <span class="count">{{ sessions.length }}</span>
+          </button>
+          <button class="nav-item">
+            <Star :size="16" />
+            <span>{{ $t('home.favorites') }}</span>
+          </button>
+          <button class="nav-item">
+            <History :size="16" />
+            <span>{{ $t('home.recent') }}</span>
+          </button>
+        </nav>
       </div>
 
-      <div class="home-content">
-        <div class="quick-actions">
-          <button class="action-btn" @click="handleNewConnection">
-            <span class="btn-icon">+</span>
-            <span class="btn-text">New SSH Connection</span>
-          </button>
-
-          <button class="action-btn" @click="handleOpenRecent">
-            <span class="btn-icon">📁</span>
-            <span class="btn-text">Open Recent Connection</span>
-          </button>
-
-          <button class="action-btn" @click="handleOpenSettings">
-            <span class="btn-icon">⚙️</span>
-            <span class="btn-text">Settings</span>
+      <div class="sidebar-section">
+        <div class="section-header">
+          <h4 class="section-title">
+            {{ $t('home.groups') }}
+          </h4>
+          <button class="add-btn">
+            <Plus :size="14" />
           </button>
         </div>
+        <nav class="sidebar-nav">
+          <button
+            v-for="group in groups"
+            :key="group"
+            class="nav-item"
+          >
+            <Folder :size="16" />
+            <span>{{ group }}</span>
+          </button>
+        </nav>
+      </div>
 
-        <div class="recent-connections">
-          <h3>Recent Connections</h3>
-          <div class="connection-list">
+      <div class="sidebar-section">
+        <h4 class="section-title">
+          {{ $t('home.tags') }}
+        </h4>
+        <div class="tag-cloud">
+          <span
+            v-for="tag in tags"
+            :key="tag"
+            class="tag-badge"
+          >
+            <Hash :size="12" />{{ tag }}
+          </span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content: Session Management -->
+    <main class="home-main">
+      <header class="main-header">
+        <div class="title-area">
+          <h3>{{ $t('home.allSessions') }}</h3>
+          <p class="subtitle">
+            {{ $t('home.subtitle') }}
+          </p>
+        </div>
+        <div class="action-area">
+          <button
+            class="btn-primary"
+            @click="handleNewConnection"
+          >
+            <Plus :size="18" /> {{ $t('home.newSession') }}
+          </button>
+        </div>
+      </header>
+
+      <!-- Session Grid Area -->
+      <section class="session-manager">
+        <div
+          v-for="groupName in [$t('home.defaultGroup')]"
+          :key="groupName"
+          class="group-container"
+        >
+          <div class="group-header">
+            <FolderOpen
+              :size="18"
+              class="folder-icon"
+            />
+            <span class="name">{{ groupName }}</span>
+          </div>
+
+          <div class="session-grid">
             <div
-              v-for="conn in recentConnections"
-              :key="conn.id"
-              class="connection-item"
+              v-for="session in sessions"
+              :key="session.id"
+              class="session-card"
+              @click="handleConnect(session)"
             >
-              <div class="conn-info">
-                <div class="conn-name">
-                  {{ conn.name }}
-                </div>
-                <div class="conn-details">
-                  {{ conn.host }}:{{ conn.port }} | {{ conn.username }}
+              <div class="card-top">
+                <div class="avatar">
+                  {{ session.name[0].toUpperCase() }}
                 </div>
               </div>
-              <button class="connect-btn" @click="handleConnect(conn)">
-                Connect
-              </button>
+
+              <div class="card-info">
+                <div class="session-name">
+                  {{ session.name }}
+                </div>
+                <div class="session-meta">
+                  {{ session.username }}@{{ session.host }}
+                </div>
+              </div>
+
+              <div class="card-footer">
+                <div class="session-tags">
+                  <span
+                    v-for="tag in session.tags"
+                    :key="tag"
+                    class="mini-tag"
+                  >{{ tag }}</span>
+                </div>
+                <div class="connect-hint">
+                  {{ $t('home.connect') }} <ChevronRight :size="14" />
+                </div>
+              </div>
             </div>
-            <div v-if="recentConnections.length === 0" class="no-connections">
-              No recent connections
-            </div>
+
+            <!-- Empty State -->
+            <button
+              v-if="sessions.length === 0"
+              class="empty-card"
+              @click="handleNewConnection"
+            >
+              <Plus
+                :size="32"
+                class="plus"
+              />
+              <span>{{ $t('home.addFirst') }}</span>
+            </button>
           </div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, inject } from 'vue';
+import {
+  Home,
+  Star,
+  History,
+  Folder,
+  FolderOpen,
+  Plus,
+  ChevronRight,
+  Hash,
+} from 'lucide-vue-next';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 
-interface SSHConnection {
+interface SSHSession {
   id: string;
   name: string;
   host: string;
   port: number;
   username: string;
+  group?: string;
+  tags?: string[];
 }
 
-// Props
-const props = defineProps<{
-  connections?: SSHConnection[];
-}>();
+// Mock data (for design preview)
+const sessions = ref<SSHSession[]>([
+  {
+    id: '1',
+    name: 'Production Web 01',
+    host: '192.168.1.10',
+    port: 22,
+    username: 'root',
+    group: 'Production',
+    tags: ['Web', 'Nginx'],
+  },
+  {
+    id: '2',
+    name: 'Database Master',
+    host: 'db.example.com',
+    port: 22,
+    username: 'admin',
+    group: 'Core',
+    tags: ['DB', 'MySQL'],
+  },
+]);
 
-// Emits - Send events to parent component, no specific business logic handled here
+const groups = ref(['Production', 'Core', 'Staging']);
+const tags = ref(['Web', 'DB', 'Internal', 'Nginx', 'Docker']);
+
 const emit = defineEmits<{
   newConnection: [];
-  openRecent: [];
-  openSettings: [];
-  connect: [connection: SSHConnection];
+  connect: [session: SSHSession];
 }>();
 
-// Use the passed connection list or an empty array
-const recentConnections = ref<SSHConnection[]>(props.connections || []);
-
-// Inject SSH form control method from App.vue
 const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
 
-// Event handlers - only pass events upward
 const handleNewConnection = () => {
-  if (openSSHForm) {
-    openSSHForm();
-  }
+  if (openSSHForm) openSSHForm();
   emit('newConnection');
 };
 
-const handleOpenRecent = () => {
-  emit('openRecent');
-};
-
-const handleOpenSettings = () => {
-  emit('openSettings');
-};
-
-const handleConnect = (conn: SSHConnection) => {
-  emit('connect', conn);
+const handleConnect = (session: SSHSession) => {
+  emit('connect', session);
 };
 </script>
 
@@ -110,130 +219,303 @@ const handleConnect = (conn: SSHConnection) => {
 .nexashell-home {
   height: 100%;
   display: flex;
-  flex-direction: column;
   background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-  padding: 20px;
-  box-sizing: border-box;
+  overflow: hidden;
 }
 
-.home-header {
-  text-align: center;
-  margin-bottom: 30px;
-}
-
-.home-header h2 {
-  font-size: 2em;
-  margin: 0 0 10px 0;
-  color: var(--color-text-primary);
-}
-
-.home-header p {
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-
-.home-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 30px;
-}
-
-.quick-actions {
-  display: flex;
-  gap: 20px;
-  justify-content: center;
-  flex-wrap: wrap;
-}
-
-.action-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 120px;
-  height: 120px;
+/* 侧边栏样式 */
+.home-sidebar {
+  width: 240px;
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: var(--transition-fast);
-  padding: 15px;
-  box-sizing: border-box;
-}
-
-.action-btn:hover {
-  background: var(--color-interactive-hover);
-  transform: translateY(-2px);
-}
-
-.btn-icon {
-  font-size: 24px;
-  margin-bottom: 8px;
-}
-
-.btn-text {
-  font-size: 14px;
-  text-align: center;
-}
-
-.recent-connections h3 {
-  margin: 0 0 15px 0;
-  color: var(--color-text-primary);
-}
-
-.connection-list {
+  border-right: 1px solid var(--color-border-primary);
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  padding: 24px 12px;
+  gap: 32px;
 }
 
-.connection-item {
+.section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--color-text-tertiary);
+  margin-bottom: 12px;
+  padding: 0 12px;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.2s;
+  width: 100%;
+  text-align: left;
+}
+
+.nav-item:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.nav-item.active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.nav-item .count {
+  margin-left: auto;
+  font-size: 11px;
+  background: var(--color-bg-tertiary);
+  padding: 2px 6px;
+  border-radius: 10px;
+}
+
+.section-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px;
-  background: var(--color-bg-secondary);
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border-primary);
+  margin-bottom: 12px;
 }
 
-.conn-info {
+.add-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.tag-badge {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-badge:hover {
+  color: var(--color-primary);
+}
+
+/* 主内容区样式 */
+.home-main {
   flex: 1;
+  overflow-y: auto;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
 }
 
-.conn-name {
-  font-weight: 500;
+.main-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.main-header h3 {
+  font-size: 24px;
+  margin: 0;
   color: var(--color-text-primary);
 }
 
-.conn-details {
-  font-size: 0.9em;
+.main-header .subtitle {
   color: var(--color-text-secondary);
+  margin: 4px 0 0 0;
+  font-size: 14px;
 }
 
-.connect-btn {
-  padding: 6px 12px;
+.btn-primary {
   background: var(--color-primary);
   color: white;
   border: none;
-  border-radius: var(--radius-sm);
+  padding: 10px 20px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
   cursor: pointer;
-  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
-.connect-btn:hover {
-  background: var(--color-primary-hover);
+/* 分组与网格 */
+.group-container {
+  margin-bottom: 32px;
 }
 
-.no-connections {
-  text-align: center;
-  padding: 20px;
+.group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.folder-icon {
+  font-size: 18px;
+}
+.group-header .name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--color-text-primary);
+}
+
+.session-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.session-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.session-card:hover {
+  border-color: var(--color-primary);
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+}
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-primary);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 18px;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.3;
+  transition: 0.2s;
+  font-size: 16px;
+}
+
+.icon-btn:hover {
+  opacity: 1;
+}
+
+.session-name {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.session-meta {
+  font-size: 13px;
   color: var(--color-text-tertiary);
+  margin-top: 6px;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
+    'Courier New', monospace;
 }
 
-.home-content-wrapper {
-  height: 100%;
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  border-top: 1px solid var(--color-bg-tertiary);
+  padding-top: 16px;
+}
+
+.session-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mini-tag {
+  font-size: 10px;
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-primary);
+}
+
+.connect-hint {
+  font-size: 12px;
+  color: var(--color-primary);
+  font-weight: 500;
+  opacity: 0;
+  transition: 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-card:hover .connect-hint {
+  opacity: 1;
+}
+
+.empty-card {
+  border: 2px dashed var(--color-border-primary);
+  background: transparent;
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  min-height: 180px;
+  transition: 0.2s;
+}
+
+.empty-card:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  background: var(--color-bg-secondary);
+}
+
+.empty-card .plus {
+  font-size: 32px;
 }
 </style>

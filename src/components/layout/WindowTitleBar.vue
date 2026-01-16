@@ -193,7 +193,10 @@ const handleMaximize = async () => {
     :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS }"
     data-tauri-drag-region
   >
-    <div class="left-section" data-tauri-drag-region>
+    <div
+      class="left-section"
+      data-tauri-drag-region
+    >
       <!-- Window controls for macOS -->
       <div
         v-if="showWindowControls && isMacOS_OS && !isFullscreen"
@@ -217,7 +220,10 @@ const handleMaximize = async () => {
       </div>
     </div>
 
-    <div class="center-section" data-tauri-drag-region>
+    <div
+      class="center-section"
+      data-tauri-drag-region
+    >
       <SearchBox
         ref="searchBoxRef"
         v-model="searchQuery"
@@ -230,7 +236,10 @@ const handleMaximize = async () => {
       />
     </div>
 
-    <div class="right-section" data-tauri-drag-region>
+    <div
+      class="right-section"
+      data-tauri-drag-region
+    >
       <div
         v-if="showWindowControls && isWindowsOS"
         class="window-controls windows-controls"
@@ -240,8 +249,16 @@ const handleMaximize = async () => {
           aria-label="Minimize"
           @click="handleMinimize"
         >
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M0,5 L10,5" stroke="currentColor" stroke-width="1" />
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+          >
+            <path
+              d="M0,5 L10,5"
+              stroke="currentColor"
+              stroke-width="1"
+            />
           </svg>
         </button>
         <button
@@ -249,7 +266,11 @@ const handleMaximize = async () => {
           aria-label="Maximize"
           @click="handleMaximize"
         >
-          <svg width="10" height="10" viewBox="0 0 10 10">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+          >
             <rect
               x="0"
               y="0"
@@ -266,7 +287,11 @@ const handleMaximize = async () => {
           aria-label="Close"
           @click="handleClose"
         >
-          <svg width="10" height="10" viewBox="0 0 10 10">
+          <svg
+            width="10"
+            height="10"
+            viewBox="0 0 10 10"
+          >
             <path
               d="M0,0 L10,10 M10,0 L0,10"
               stroke="currentColor"
