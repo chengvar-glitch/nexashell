@@ -78,7 +78,8 @@ const connectSSH = async (cols: number, rows: number): Promise<void> => {
   try {
     // Get session info from store (includes serverName)
     const session = sessionStore.getSession(props.sessionId);
-    const serverName = session?.connectionParams?.serverName || props.ip || 'Unknown';
+    const serverName =
+      session?.connectionParams?.serverName || props.ip || 'Unknown';
 
     await sessionStore.createSSHSession(
       props.sessionId,
@@ -97,9 +98,13 @@ const connectSSH = async (cols: number, rows: number): Promise<void> => {
     // This ensures SSH welcome banner and login prompts are fully captured
     await new Promise(resolve => setTimeout(resolve, 2100));
 
-    const bufferedOutput = await sessionApi.getBufferedSSHOutput(props.sessionId);
+    const bufferedOutput = await sessionApi.getBufferedSSHOutput(
+      props.sessionId
+    );
     if (terminal && bufferedOutput.length > 0) {
-      logger.info('Writing buffered SSH output to terminal', { chunks: bufferedOutput.length });
+      logger.info('Writing buffered SSH output to terminal', {
+        chunks: bufferedOutput.length,
+      });
       for (const chunk of bufferedOutput) {
         terminal.write(chunk.output);
         lastSeq = Math.max(lastSeq, chunk.seq);
@@ -234,16 +239,24 @@ onMounted(async () => {
 
     unlistenFn = await listen(`ssh-output-${sessionId}`, (event: any) => {
       try {
-        const payload = event.payload as { seq?: number; output?: string; ts?: number } | undefined;
+        const payload = event.payload as
+          | { seq?: number; output?: string; ts?: number }
+          | undefined;
 
-        if (payload?.seq !== undefined && payload.output !== undefined && terminal) {
+        if (
+          payload?.seq !== undefined &&
+          payload.output !== undefined &&
+          terminal
+        ) {
           if (payload.seq > lastSeq) {
             terminal.write(String(payload.output));
             lastSeq = payload.seq;
 
             // Monitor high latency
             if (payload.ts && Date.now() - payload.ts > LATENCY_THRESHOLD_MS) {
-              logger.debug('High latency in SSH output', { latency: Date.now() - payload.ts });
+              logger.debug('High latency in SSH output', {
+                latency: Date.now() - payload.ts,
+              });
             }
           }
         }
@@ -282,30 +295,38 @@ onMounted(async () => {
    */
   // Key sequence mapping for terminal input
   const KEY_SEQUENCES: Record<string, string> = {
-    'Enter': '\r',
-    'Backspace': '\x7f',
-    'Tab': '\t',
-    'Escape': '\x1b',
-    'ArrowUp': '\x1b[A',
-    'ArrowDown': '\x1b[B',
-    'ArrowRight': '\x1b[C',
-    'ArrowLeft': '\x1b[D',
-    'Home': '\x1b[H',
-    'End': '\x1b[F',
-    'PageUp': '\x1b[5~',
-    'PageDown': '\x1b[6~',
-    'Insert': '\x1b[2~',
-    'Delete': '\x1b[3~',
+    Enter: '\r',
+    Backspace: '\x7f',
+    Tab: '\t',
+    Escape: '\x1b',
+    ArrowUp: '\x1b[A',
+    ArrowDown: '\x1b[B',
+    ArrowRight: '\x1b[C',
+    ArrowLeft: '\x1b[D',
+    Home: '\x1b[H',
+    End: '\x1b[F',
+    PageUp: '\x1b[5~',
+    PageDown: '\x1b[6~',
+    Insert: '\x1b[2~',
+    Delete: '\x1b[3~',
   };
 
   // Map raw keyboard events to terminal byte sequences
-  function mapKeyEventToSequence(key: string, domEvent?: KeyboardEvent): string {
+  function mapKeyEventToSequence(
+    key: string,
+    domEvent?: KeyboardEvent
+  ): string {
     if (domEvent) {
       domEvent.preventDefault();
       domEvent.stopPropagation();
 
       // Ctrl+<char> -> control code
-      if (domEvent.ctrlKey && !domEvent.altKey && !domEvent.metaKey && key.length === 1) {
+      if (
+        domEvent.ctrlKey &&
+        !domEvent.altKey &&
+        !domEvent.metaKey &&
+        key.length === 1
+      ) {
         const code = key.toUpperCase().charCodeAt(0);
         if (code >= 64 && code <= 95) {
           return String.fromCharCode(code - 64);
@@ -339,8 +360,12 @@ onMounted(async () => {
   };
 
   terminal.onKey(async (event: { key: string; domEvent?: KeyboardEvent }) => {
-    const seq = mapKeyEventToSequence(event.key, event.domEvent as KeyboardEvent | undefined);
-    const hasSession = props.sessionId && sessionStore.hasSession(props.sessionId);
+    const seq = mapKeyEventToSequence(
+      event.key,
+      event.domEvent as KeyboardEvent | undefined
+    );
+    const hasSession =
+      props.sessionId && sessionStore.hasSession(props.sessionId);
 
     if (hasSession) {
       inputBuffer += seq;
@@ -350,7 +375,10 @@ onMounted(async () => {
         await flushInput();
       } else {
         clearTimeout(inputFlushTimeout!);
-        inputFlushTimeout = setTimeout(flushInput, INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS);
+        inputFlushTimeout = setTimeout(
+          flushInput,
+          INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS
+        );
       }
     } else if (seq.length === 1 && seq >= ' ') {
       // No active session: echo printable characters locally
@@ -371,10 +399,7 @@ onMounted(async () => {
 
 <template>
   <div class="terminal-view">
-    <div
-      ref="terminalRef"
-      class="terminal-container"
-    />
+    <div ref="terminalRef" class="terminal-container" />
   </div>
 </template>
 

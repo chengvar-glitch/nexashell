@@ -104,7 +104,7 @@ const dynamicPlaceholder = computed(() => {
       @blur="handleBlur"
       @keydown="handleKeyDown"
       @keyup="handleKeyUp"
-    >
+    />
   </div>
 </template>
 

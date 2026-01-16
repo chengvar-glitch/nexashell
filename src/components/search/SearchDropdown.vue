@@ -14,10 +14,7 @@
           >
             <p>No matches found</p>
           </div>
-          <div
-            v-else
-            class="search-dropdown-list"
-          >
+          <div v-else class="search-dropdown-list">
             <div
               v-for="(item, index) in filteredItems"
               :key="item.id"
@@ -44,10 +41,7 @@
               "
             >
               <div class="item-icon">
-                <component
-                  :is="item.icon"
-                  :size="16"
-                />
+                <component :is="item.icon" :size="16" />
               </div>
               <div class="item-content">
                 <div class="item-title">
@@ -57,10 +51,7 @@
                   {{ item.description }}
                 </div>
               </div>
-              <div
-                v-if="item.shortcut"
-                class="item-shortcut"
-              >
+              <div v-if="item.shortcut" class="item-shortcut">
                 <span class="shortcut-text">{{ item.shortcut }}</span>
               </div>
             </div>

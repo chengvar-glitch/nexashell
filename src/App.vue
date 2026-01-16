@@ -147,15 +147,15 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     closeSSHForm();
   } catch (error) {
     logger.error('Failed to create SSH session', error);
-    
+
     // Enhanced error handling with structured error information
     if (error instanceof Error) {
       const errorMessage = error.message;
-      
+
       // Check for specific Tauri error patterns (structured SshError)
       if (typeof error === 'object' && error !== null) {
         const err = error as Record<string, any>;
-        
+
         if (err.connectionFailed) {
           sshErrorMessage.value = `Connection failed: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
         } else if (err.authenticationFailed) {
@@ -193,25 +193,15 @@ const handleCreateTab = (tab: any) => {
 </script>
 
 <template>
-  <div
-    id="app"
-    class="app-wrapper"
-  >
+  <div id="app" class="app-wrapper">
     <div class="app-root">
       <WindowTitleBar />
       <AppTabs />
-      <AppContent
-        @create-tab="handleCreateTab"
-        @connect="handleSSHConnect"
-      />
+      <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
     </div>
 
     <!-- SSH connection form modal -->
-    <div
-      v-if="showSSHForm"
-      class="modal-overlay"
-      @click.self="closeSSHForm"
-    >
+    <div v-if="showSSHForm" class="modal-overlay" @click.self="closeSSHForm">
       <div class="modal-content">
         <SSHConnectionForm
           :is-loading="isConnecting"
@@ -223,11 +213,7 @@ const handleCreateTab = (tab: any) => {
     </div>
 
     <!-- Settings panel modal -->
-    <div
-      v-if="showSettings"
-      class="modal-overlay"
-      @click.self="closeSettings"
-    >
+    <div v-if="showSettings" class="modal-overlay" @click.self="closeSettings">
       <div class="modal-content">
         <SettingsPanel
           :visible="showSettings"

@@ -197,10 +197,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="app-tabs glass-light border-bottom">
-    <div
-      ref="tabsContainerRef"
-      class="tabs-container scrollbar-hidden"
-    >
+    <div ref="tabsContainerRef" class="tabs-container scrollbar-hidden">
       <TabItem
         v-for="(tab, index) in tabs"
         :id="tab.id"
@@ -213,14 +210,8 @@ onBeforeUnmount(() => {
         @click="handleTabClick"
         @close="handleTabClose"
       />
-      <div
-        class="tab-actions"
-        :class="{ 'is-active': isDropdownOpen }"
-      >
-        <ShortcutHint
-          text="Cmd+T to create SSH connection"
-          position="bottom"
-        >
+      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
+        <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
@@ -230,34 +221,22 @@ onBeforeUnmount(() => {
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint
-          text="More options"
-          position="bottom"
-        >
+        <ShortcutHint text="More options" position="bottom">
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown
-              v-if="!isDropdownOpen"
-              :size="14"
-            />
-            <X
-              v-else
-              :size="14"
-            />
+            <ChevronDown v-if="!isDropdownOpen" :size="14" />
+            <X v-else :size="14" />
           </button>
         </ShortcutHint>
       </div>
     </div>
 
     <div class="more-container">
-      <button
-        class="action-btn"
-        aria-label="More"
-      >
+      <button class="action-btn" aria-label="More">
         <MoreHorizontal :size="14" />
       </button>
     </div>

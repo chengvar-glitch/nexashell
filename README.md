@@ -123,6 +123,7 @@ The backend exposes these Tauri commands and events for the renderer to consume 
 **Frontend rendering architecture**
 
 The terminal frontend uses `xterm.js` with WebGL acceleration for GPU-accelerated rendering. To optimize performance:
+
 - SSH output is received via Tauri events (push-based, not polling)
 - Writes to xterm are batched and flushed using `requestAnimationFrame` for per-frame rendering
 - Output deduplication is enforced via sequence numbers to prevent duplicate or out-of-order text

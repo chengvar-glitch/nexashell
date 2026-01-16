@@ -1,12 +1,7 @@
 <template>
-  <div
-    class="modal-form"
-    @keydown.tab="handleTabKey"
-  >
+  <div class="modal-form" @keydown.tab="handleTabKey">
     <div class="modal-header">
-      <h3 class="modal-title">
-        New SSH Connection
-      </h3>
+      <h3 class="modal-title">New SSH Connection</h3>
     </div>
 
     <form @submit.prevent="onSubmit">
@@ -23,11 +18,8 @@
             class="input"
             :class="{ error: validationErrors.name }"
             required
-          >
-          <span
-            v-if="validationErrors.name"
-            class="modal-error-message"
-          >{{
+          />
+          <span v-if="validationErrors.name" class="modal-error-message">{{
             validationErrors.name
           }}</span>
         </div>
@@ -46,11 +38,8 @@
               class="input"
               :class="{ error: validationErrors.host }"
               required
-            >
-            <span
-              v-if="validationErrors.host"
-              class="modal-error-message"
-            >{{
+            />
+            <span v-if="validationErrors.host" class="modal-error-message">{{
               validationErrors.host
             }}</span>
           </div>
@@ -67,11 +56,8 @@
               placeholder="22"
               class="input short-input"
               :class="{ error: validationErrors.port }"
-            >
-            <span
-              v-if="validationErrors.port"
-              class="modal-error-message"
-            >{{
+            />
+            <span v-if="validationErrors.port" class="modal-error-message">{{
               validationErrors.port
             }}</span>
           </div>
@@ -90,11 +76,8 @@
             class="input"
             :class="{ error: validationErrors.username }"
             required
-          >
-          <span
-            v-if="validationErrors.username"
-            class="modal-error-message"
-          >{{
+          />
+          <span v-if="validationErrors.username" class="modal-error-message">{{
             validationErrors.username
           }}</span>
         </div>
@@ -112,7 +95,7 @@
               :type="showPassword ? 'text' : 'password'"
               placeholder="Password (leave empty for key authentication)"
               class="input"
-            >
+            />
             <button
               type="button"
               class="password-toggle-btn"
@@ -139,7 +122,7 @@
             type="text"
             placeholder="Private key file path"
             class="input"
-          >
+          />
         </div>
 
         <div class="modal-form-group">
@@ -153,7 +136,7 @@
               :type="showKeyPassphrase ? 'text' : 'password'"
               placeholder="Private key passphrase"
               class="input"
-            >
+            />
             <button
               type="button"
               class="password-toggle-btn"
@@ -175,10 +158,7 @@
       </div>
 
       <div class="modal-form-actions">
-        <div
-          v-if="errorMessage"
-          class="form-general-error"
-        >
+        <div v-if="errorMessage" class="form-general-error">
           {{ errorMessage }}
         </div>
         <button

@@ -22,12 +22,12 @@ const logger = createLogger('SESSION_API');
 class SessionAPI {
   /**
    * Request the backend to establish an SSH session.
-   * 
+   *
    * Optimized for Tauri 2.0+ best practices:
    * - Structured error handling (SshError enum)
    * - Type-safe session management (SessionId newtype)
    * - Clean API surface (no redundant parameters)
-   * 
+   *
    * @param sessionId Unique session identifier (corresponds to tab id)
    * @param ip Remote host IP or hostname
    * @param port Remote port (typically 22)
@@ -80,12 +80,12 @@ class SessionAPI {
   async disconnectSSH(sessionId: string): Promise<void> {
     try {
       const params = { sessionId };
-      
+
       console.debug('[DEBUG] sessionApi.disconnectSSH invoke', params);
-      
+
       // Tauri 2.0+ optimized: camelCase parameters
       await invoke<void>('disconnect_ssh', params as Record<string, unknown>);
-      
+
       console.debug('[DEBUG] sessionApi.disconnectSSH returned', { sessionId });
       logger.info('SSH disconnection initiated', { sessionId });
     } catch (error) {
@@ -127,11 +127,17 @@ class SessionAPI {
    * @param sessionId Unique session identifier
    * @returns Promise resolving to array of buffered output chunks
    */
-  async getBufferedSSHOutput(sessionId: string): Promise<Array<{ seq: number; output: string; ts: number }>> {
+  async getBufferedSSHOutput(
+    sessionId: string
+  ): Promise<Array<{ seq: number; output: string; ts: number }>> {
     try {
       const params = { sessionId };
-      const result = await invoke<Array<{ seq: number; output: string; ts: number }>>('get_buffered_ssh_output', params as Record<string, unknown>);
-      return (result as Array<{ seq: number; output: string; ts: number }>) || [];
+      const result = await invoke<
+        Array<{ seq: number; output: string; ts: number }>
+      >('get_buffered_ssh_output', params as Record<string, unknown>);
+      return (
+        (result as Array<{ seq: number; output: string; ts: number }>) || []
+      );
     } catch (error) {
       logger.error('Failed to get buffered SSH output', error);
       return [];
