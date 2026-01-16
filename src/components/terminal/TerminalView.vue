@@ -190,6 +190,22 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value);
+  
+  // Use ResizeObserver for robust layout management
+  const resizeObserver = new ResizeObserver(() => {
+    if (fitAddon) {
+      try {
+        fitAddon.fit();
+      } catch (e) {
+        logger.error('Fit error', e);
+      }
+    }
+  });
+
+  if (terminalRef.value) {
+    resizeObserver.observe(terminalRef.value);
+  }
+
   await nextTick();
   fitAddon.fit();
   terminal.focus();
@@ -197,11 +213,6 @@ onMounted(async () => {
   // Handle terminal resize and notify backend
   terminal.onResize(({ cols, rows }) => {
     if (props.sessionId) {
-      logger.debug('Terminal resized, emitting event', {
-        sessionId: props.sessionId,
-        cols,
-        rows,
-      });
       emit(`ssh-resize-${props.sessionId}`, { cols, rows });
     }
   });
@@ -210,13 +221,18 @@ onMounted(async () => {
 
   // Handle activation when switching back to this tab (KeepAlive)
   onActivated(() => {
-    logger.debug('Terminal component activated', {
-      sessionId: props.sessionId,
-    });
     nextTick(() => {
       if (fitAddon) {
         fitAddon.fit();
         terminal?.focus();
+        
+        // Force a sync after activation
+        if (terminal && props.sessionId) {
+          emit(`ssh-resize-${props.sessionId}`, { 
+            cols: terminal.cols, 
+            rows: terminal.rows 
+          });
+        }
       }
     });
   });
@@ -280,7 +296,23 @@ onMounted(async () => {
           await setupSSHOutputListener(newSessionId);
 
           if (terminal) {
+            // First, ensure we have the correct size before connecting
+            if (fitAddon) {
+              fitAddon.fit();
+            }
+            
             await connectSSH(terminal.cols, terminal.rows);
+            
+            // Re-sync after a short delay to ensure backend is ready and listener is active
+            setTimeout(() => {
+              if (fitAddon && props.sessionId === newSessionId) {
+                fitAddon.fit();
+                emit(`ssh-resize-${newSessionId}`, { 
+                  cols: terminal!.cols, 
+                  rows: terminal!.rows 
+                });
+              }
+            }, 500);
           }
         } catch (error) {
           logger.error('SSH connection failed', error);
@@ -392,6 +424,7 @@ onMounted(async () => {
    */
   onUnmounted(async () => {
     window.removeEventListener('resize', handleResize);
+    resizeObserver.disconnect();
     await cleanupResources();
   });
 });

@@ -212,7 +212,9 @@ impl SshManager {
             let mut channel = sess.channel_session()
                 .map_err(|e| SshError::ChannelError(format!("Create channel failed: {}", e)))?;
             
-            let _ = channel.request_pty("xterm", None, Some((cols, rows, 640, 480)));
+            channel.request_pty("xterm-256color", None, Some((cols, rows, 0, 0)))
+                .map_err(|e| SshError::ChannelError(format!("Failed to request PTY: {}", e)))?;
+            
             channel.shell()
                 .map_err(|e| SshError::ChannelError(format!("Failed to start shell: {}", e)))?;
             
@@ -331,7 +333,7 @@ impl SshManager {
                 let task_channel_clone = task_channel.clone();
                 let _ = tokio::spawn(async move {
                     let mut ch = task_channel_clone.lock().await;
-                    let _ = ch.request_pty("xterm", None, Some((payload.cols, payload.rows, 0, 0)));
+                    let _ = ch.request_pty_size(payload.cols, payload.rows, None, None);
                 });
             }
         });
@@ -355,7 +357,7 @@ impl SshManager {
             let mut pending_output = String::new();
             let mut last_emit = std::time::Instant::now();
             let mut seen_first_output = false;
-            let mut initial_buffering_start = std::time::Instant::now();
+            let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
 
             loop {
@@ -508,7 +510,7 @@ impl SshManager {
         if let Ok(mut sessions) = self.sessions.write() {
             sessions.remove(session_id);
         }
-        
+        println!("Disconnected SSH session: {}", session_id.0);
         Ok(())
     }
 
@@ -523,7 +525,9 @@ impl SshManager {
         
         for session_id in session_ids {
             let _ = self.disconnect_ssh(&session_id);
+            println!("Disconnected SSH session: {}", session_id.0);
         }
+
     }
 
     /// Checks if a session exists
