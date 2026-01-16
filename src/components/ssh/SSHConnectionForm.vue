@@ -101,7 +101,9 @@
             <button
               type="button"
               class="password-toggle-btn"
-              :aria-label="showPassword ? 'Hide password' : 'Show password'"
+              :aria-label="
+                showPassword ? $t('ssh.hidePassword') : $t('ssh.showPassword')
+              "
               @click="togglePasswordVisibility"
             >
               <component
@@ -144,8 +146,8 @@
               class="password-toggle-btn"
               :aria-label="
                 showKeyPassphrase
-                  ? 'Hide key passphrase'
-                  : 'Show key passphrase'
+                  ? $t('ssh.hideKeyPassphrase')
+                  : $t('ssh.showKeyPassphrase')
               "
               @click="toggleKeyPassphraseVisibility"
             >
@@ -239,7 +241,7 @@ const formData = reactive<SSHConnectionFormData>({
 
 const validationErrors = reactive<ValidationErrors>({});
 
-const { t } = useI18n();
+const { t } = useI18n({ useScope: 'global' });
 
 const emit = defineEmits<{
   connect: [data: SSHConnectionFormData];

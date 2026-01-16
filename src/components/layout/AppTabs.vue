@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, nextTick, inject } from 'vue';
+import {
+  ref,
+  onMounted,
+  onBeforeUnmount,
+  nextTick,
+  inject,
+  computed,
+} from 'vue';
+import { useI18n } from 'vue-i18n';
 import TabItem from '@/components/common/TabItem.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
@@ -23,6 +31,8 @@ if (!openSSHForm) {
   console.warn('[AppTabs] openSSHForm not provided by parent component');
 }
 
+const { t } = useI18n({ useScope: 'global' });
+
 const isDropdownOpen = ref(false);
 const dropdownX = ref(0);
 const dropdownY = ref(0);
@@ -30,8 +40,13 @@ let tabCounter = 1;
 
 const tabsContainerRef = ref<HTMLElement>();
 
-// Use constant definitions
-// const NEW_TAB_MENU = NEW_TAB_MENU_ITEMS;
+// Translate menu items reactively
+const translatedMenuItems = computed(() =>
+  NEW_TAB_MENU_ITEMS.map(item => ({
+    ...item,
+    label: t(item.label),
+  }))
+);
 
 const handleTabClick = async (id: string) => {
   tabManagement.setActiveTab(id);
@@ -252,7 +267,7 @@ onBeforeUnmount(() => {
 
     <DropdownMenu
       v-model:visible="isDropdownOpen"
-      :items="NEW_TAB_MENU_ITEMS"
+      :items="translatedMenuItems"
       :x="dropdownX"
       :y="dropdownY"
       @select="handleMenuSelect"

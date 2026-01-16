@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { themeManager } from '@/core/utils/theme-manager';
 
 const emit = defineEmits(['complete']);
 
-const { locale, availableLocales } = useI18n();
+const { locale, availableLocales } = useI18n({ useScope: 'global' });
 
 const showContent = ref(false);
 const showOptions = ref(false);
 const selectedLanguage = ref(locale.value);
 const selectedTheme = ref(themeManager.getTheme());
+
+const logoSrc = computed(() => {
+  return '/welcome-image.png';
+});
+
+// Based on theme, we'll apply different styles via CSS
+const themeClass = computed(() => {
+  return selectedTheme.value === 'auto'
+    ? `theme-${themeManager.getActualTheme()}`
+    : `theme-${selectedTheme.value}`;
+});
 
 // Map of language codes to display names
 const languageNames: Record<string, string> = {
@@ -82,126 +93,12 @@ const handleSave = () => {
 
 <template>
   <Transition name="fade">
-    <div v-if="showContent" class="welcome-screen">
+    <div v-if="showContent" class="welcome-screen" :class="themeClass">
       <div class="welcome-container" :class="{ 'show-options': showOptions }">
         <!-- Logo Section -->
         <div class="logo-section">
           <div class="logo-icon">
-            <svg
-              viewBox="0 0 120 120"
-              class="logo-svg"
-              xmlns="http://www.w3.org/2000/svg"
-            >
-              <defs>
-                <!-- Laptop Body Gradient -->
-                <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop
-                    offset="0%"
-                    style="stop-color: #60a5fa; stop-opacity: 1"
-                  />
-                  <stop
-                    offset="100%"
-                    style="stop-color: #2563eb; stop-opacity: 1"
-                  />
-                </linearGradient>
-                <!-- Screen Reflection -->
-                <linearGradient
-                  id="screenGrad"
-                  x1="0%"
-                  y1="0%"
-                  x2="100%"
-                  y2="100%"
-                >
-                  <stop
-                    offset="0%"
-                    style="stop-color: #1e293b; stop-opacity: 1"
-                  />
-                  <stop
-                    offset="50%"
-                    style="stop-color: #0f172a; stop-opacity: 1"
-                  />
-                  <stop
-                    offset="100%"
-                    style="stop-color: #1e293b; stop-opacity: 1"
-                  />
-                </linearGradient>
-                <!-- Glow Effect -->
-                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-              <!-- Laptop Body/Frame -->
-              <rect
-                x="20"
-                y="24"
-                width="80"
-                height="56"
-                rx="6"
-                fill="url(#bodyGrad)"
-              />
-              <!-- Screen Border/Internal -->
-              <rect
-                x="24"
-                y="28"
-                width="72"
-                height="48"
-                rx="3"
-                fill="#000000"
-              />
-              <!-- Laptop Screen with Gradient -->
-              <rect
-                x="25"
-                y="29"
-                width="70"
-                height="46"
-                rx="2"
-                fill="url(#screenGrad)"
-              />
-              <!-- NS Text with refined style -->
-              <text
-                x="60"
-                y="63"
-                text-anchor="middle"
-                font-size="26"
-                font-weight="900"
-                fill="#ffffff"
-                font-family="Inter, system-ui, sans-serif"
-                letter-spacing="1"
-                style="filter: drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.5))"
-              >
-                NS
-              </text>
-              <!-- Laptop Bottom Part - Detailed -->
-              <rect
-                x="10"
-                y="80"
-                width="100"
-                height="7"
-                rx="3.5"
-                fill="url(#bodyGrad)"
-              />
-              <!-- Bottom Shine -->
-              <rect
-                x="10"
-                y="80"
-                width="100"
-                height="2"
-                rx="1"
-                fill="#93c5fd"
-                opacity="0.4"
-              />
-              <!-- Notch/Touchpad area -->
-              <rect
-                x="48"
-                y="81"
-                width="24"
-                height="2.5"
-                rx="1.25"
-                fill="#ffffff"
-                opacity="0.9"
-              />
-            </svg>
+            <img :src="logoSrc" alt="NexaShell Logo" class="logo-img" />
           </div>
           <h1 class="app-name">NexaShell</h1>
         </div>
@@ -215,15 +112,13 @@ const handleSave = () => {
           }"
         >
           <div class="options-content">
-            <h2>Welcome to NexaShell</h2>
+            <h2>{{ $t('welcome.title') }}</h2>
             <p class="subtitle">
-              A modern, cross-platform terminal emulator designed for the next
-              generation of developers and operations professionals. Fast,
-              beautiful, and built for productivity.
+              {{ $t('welcome.subtitle') }}
             </p>
 
             <div class="selection-group">
-              <h3>Language</h3>
+              <h3>{{ $t('welcome.language') }}</h3>
               <div class="selection-grid">
                 <button
                   v-for="lang in availableLocales"
@@ -238,33 +133,35 @@ const handleSave = () => {
             </div>
 
             <div class="selection-group">
-              <h3>Appearance</h3>
+              <h3>{{ $t('welcome.appearance') }}</h3>
               <div class="selection-grid theme-grid">
                 <button
                   class="select-btn"
                   :class="{ active: selectedTheme === 'light' }"
                   @click="handleThemeSelect('light')"
                 >
-                  Light
+                  {{ $t('welcome.themeLight') }}
                 </button>
                 <button
                   class="select-btn"
                   :class="{ active: selectedTheme === 'dark' }"
                   @click="handleThemeSelect('dark')"
                 >
-                  Dark
+                  {{ $t('welcome.themeDark') }}
                 </button>
                 <button
                   class="select-btn"
                   :class="{ active: selectedTheme === 'auto' }"
                   @click="handleThemeSelect('auto')"
                 >
-                  System
+                  {{ $t('welcome.themeSystem') }}
                 </button>
               </div>
             </div>
 
-            <button class="save-btn" @click="handleSave">Get Started</button>
+            <button class="save-btn" @click="handleSave">
+              {{ $t('welcome.getStarted') }}
+            </button>
           </div>
         </div>
       </div>
@@ -326,11 +223,18 @@ const handleSave = () => {
   transform: translateZ(0);
   backface-visibility: hidden;
   will-change: transform, filter, opacity;
+  transition: filter 0.5s ease;
 }
 
-.logo-svg {
+.theme-dark .logo-img {
+  /* This will intelligently invert the colors for dark mode */
+  filter: invert(0.9) hue-rotate(180deg) brightness(1.2);
+}
+
+.logo-img {
   width: 100%;
   height: 100%;
+  object-fit: contain;
 }
 
 .app-name {

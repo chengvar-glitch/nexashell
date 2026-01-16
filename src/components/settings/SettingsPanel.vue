@@ -90,9 +90,11 @@
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
-                    <option value="auto">Auto</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
+                    <option value="auto">{{ $t('settings.themeAuto') }}</option>
+                    <option value="light">
+                      {{ $t('settings.themeLight') }}
+                    </option>
+                    <option value="dark">{{ $t('settings.themeDark') }}</option>
                   </select>
                 </div>
                 <div class="setting-item">
@@ -118,9 +120,9 @@
                     $t('settings.cursorStyle')
                   }}</label>
                   <select class="setting-select modal-input">
-                    <option>Block</option>
-                    <option>Underline</option>
-                    <option>Bar</option>
+                    <option>{{ $t('settings.cursorBlock') }}</option>
+                    <option>{{ $t('settings.cursorUnderline') }}</option>
+                    <option>{{ $t('settings.cursorBar') }}</option>
                   </select>
                 </div>
                 <div class="setting-item">
@@ -260,9 +262,9 @@
                   :value="selectedTheme"
                   @change="handleThemeChange"
                 >
-                  <option value="auto">Auto</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
+                  <option value="auto">{{ $t('settings.themeAuto') }}</option>
+                  <option value="light">{{ $t('settings.themeLight') }}</option>
+                  <option value="dark">{{ $t('settings.themeDark') }}</option>
                 </select>
               </div>
               <div class="setting-item">
@@ -288,9 +290,9 @@
                   $t('settings.cursorStyle')
                 }}</label>
                 <select class="setting-select modal-input">
-                  <option>Block</option>
-                  <option>Underline</option>
-                  <option>Bar</option>
+                  <option>{{ $t('settings.cursorBlock') }}</option>
+                  <option>{{ $t('settings.cursorUnderline') }}</option>
+                  <option>{{ $t('settings.cursorBar') }}</option>
                 </select>
               </div>
               <div class="setting-item">
@@ -355,7 +357,7 @@ interface Props {
   useTeleport?: boolean; // Add prop to control teleport usage
 }
 
-const { locale, t } = useI18n();
+const { locale, t } = useI18n({ useScope: 'global' });
 
 withDefaults(defineProps<Props>(), {
   visible: false,
@@ -376,9 +378,12 @@ const languages = [
   { value: 'en', label: 'English' },
   { value: 'fr', label: 'French (Français)' },
   { value: 'de', label: 'German (Deutsch)' },
+  { value: 'it', label: 'Italian (Italiano)' },
   { value: 'ja', label: 'Japanese (日本語)' },
   { value: 'ko', label: 'Korean (한국어)' },
+  { value: 'ms', label: 'Malay (Bahasa Melayu)' },
   { value: 'ru', label: 'Russian (Русский)' },
+  { value: 'es', label: 'Spanish (Español)' },
 ];
 
 const menuItems = computed(() => [

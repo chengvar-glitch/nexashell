@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { isMacOSBrowser, isWindowsBrowser } from '@/core/utils/app-utils';
 
 /**
@@ -17,7 +18,6 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  placeholder: 'Quick search (Cmd+K)',
   modelValue: '',
 });
 
@@ -31,6 +31,7 @@ const emit = defineEmits<{
   keyup: [event: KeyboardEvent];
 }>();
 
+const { t } = useI18n({ useScope: 'global' });
 const searchInputRef = ref<HTMLInputElement | null>(null);
 const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
@@ -116,7 +117,8 @@ const shortcutText = computed(() => {
  * Generates the final placeholder string including the shortcut key.
  */
 const dynamicPlaceholder = computed(() => {
-  return `Quick search (${shortcutText.value})`;
+  if (props.placeholder) return props.placeholder;
+  return t('search.placeholder', { shortcut: shortcutText.value });
 });
 </script>
 
@@ -146,14 +148,14 @@ const dynamicPlaceholder = computed(() => {
 
 .search-input {
   width: 100%;
-  max-width: 720px;
-  min-width: 400px;
-  padding: 4px 18px;
-  padding-left: 36px;
-  border-radius: var(--radius-xl);
+  max-width: 860px;
+  min-width: 500px;
+  padding: 10px 20px;
+  padding-left: 42px;
+  border-radius: var(--radius-2xl);
   border: 1px solid var(--color-border-secondary);
   background-color: var(--color-bg-elevated);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--color-text-primary);
   font-family: inherit;
   outline: none;
@@ -162,8 +164,8 @@ const dynamicPlaceholder = computed(() => {
   backdrop-filter: var(--blur-light);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.3-4.3'%3E%3C/path%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: 12px center;
-  background-size: 14px 14px;
+  background-position: 15px center;
+  background-size: 16px 16px;
   text-align: left;
 }
 

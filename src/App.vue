@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { v4 as uuidv4 } from 'uuid';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
@@ -52,6 +53,8 @@ const {
 } = useModal();
 const isConnecting = ref(false);
 const sshErrorMessage = ref<string | null>(null);
+
+const { t } = useI18n({ useScope: 'global' });
 
 provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, () => {
@@ -161,11 +164,11 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         const err = error as Record<string, any>;
 
         if (err.connectionFailed) {
-          sshErrorMessage.value = `Connection failed: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
+          sshErrorMessage.value = `${t('ssh.errorConnectionFailed')}: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
         } else if (err.authenticationFailed) {
-          sshErrorMessage.value = `Authentication failed: please check username and password`;
+          sshErrorMessage.value = t('ssh.errorAuthenticationFailed');
         } else if (err.channelError) {
-          sshErrorMessage.value = `Channel error: ${err.channelError}`;
+          sshErrorMessage.value = `${t('ssh.errorChannel')}: ${err.channelError}`;
         } else {
           sshErrorMessage.value = errorMessage;
         }
