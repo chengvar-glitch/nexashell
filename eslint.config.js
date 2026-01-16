@@ -3,6 +3,7 @@ import ts from '@typescript-eslint/eslint-plugin';
 import vueParser from 'vue-eslint-parser';
 import tsParser from '@typescript-eslint/parser';
 import vue from 'eslint-plugin-vue';
+import prettier from 'eslint-config-prettier';
 
 export default [
   js.configs.recommended,
@@ -139,4 +140,5 @@ export default [
       'vite.config.ts',
     ],
   },
+  prettier,
 ];

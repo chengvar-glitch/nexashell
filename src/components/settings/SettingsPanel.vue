@@ -1,18 +1,12 @@
 <template>
-  <Teleport
-    v-if="useTeleport"
-    to="body"
-  >
+  <Teleport v-if="useTeleport" to="body">
     <Transition name="settings-fade">
       <div
         v-if="visible"
         class="settings-overlay flex-center"
         @click="handleClose"
       >
-        <div
-          class="settings-panel panel"
-          @click.stop
-        >
+        <div class="settings-panel panel" @click.stop>
           <div class="settings-header border-bottom draggable">
             <div class="macos-controls no-drag">
               <button
@@ -36,21 +30,14 @@
                   :class="{ active: activeMenu === item.key }"
                   @click="handleMenuClick(item.key)"
                 >
-                  <component
-                    :is="item.icon"
-                    :size="16"
-                    class="menu-icon"
-                  />
+                  <component :is="item.icon" :size="16" class="menu-icon" />
                   <span class="menu-label">{{ item.label }}</span>
                 </button>
               </nav>
             </div>
 
             <div class="settings-content">
-              <div
-                v-if="activeMenu === 'general'"
-                class="content-section"
-              >
+              <div v-if="activeMenu === 'general'" class="content-section">
                 <h3 class="section-title">
                   {{ $t('settings.general') }}
                 </h3>
@@ -76,10 +63,7 @@
                   <label class="setting-label">{{
                     $t('settings.startup')
                   }}</label>
-                  <input
-                    type="checkbox"
-                    class="setting-checkbox"
-                  >
+                  <input type="checkbox" class="setting-checkbox" />
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">{{
@@ -93,10 +77,7 @@
                 </div>
               </div>
 
-              <div
-                v-if="activeMenu === 'appearance'"
-                class="content-section"
-              >
+              <div v-if="activeMenu === 'appearance'" class="content-section">
                 <h3 class="section-title">
                   {{ $t('settings.appearance') }}
                 </h3>
@@ -109,15 +90,9 @@
                     :value="selectedTheme"
                     @change="handleThemeChange"
                   >
-                    <option value="auto">
-                      Auto
-                    </option>
-                    <option value="light">
-                      Light
-                    </option>
-                    <option value="dark">
-                      Dark
-                    </option>
+                    <option value="auto">Auto</option>
+                    <option value="light">Light</option>
+                    <option value="dark">Dark</option>
                   </select>
                 </div>
                 <div class="setting-item">
@@ -130,14 +105,11 @@
                     value="14"
                     min="10"
                     max="24"
-                  >
+                  />
                 </div>
               </div>
 
-              <div
-                v-if="activeMenu === 'terminal'"
-                class="content-section"
-              >
+              <div v-if="activeMenu === 'terminal'" class="content-section">
                 <h3 class="section-title">
                   {{ $t('settings.terminal') }}
                 </h3>
@@ -155,18 +127,11 @@
                   <label class="setting-label">{{
                     $t('settings.cursorBlink')
                   }}</label>
-                  <input
-                    type="checkbox"
-                    class="setting-checkbox"
-                    checked
-                  >
+                  <input type="checkbox" class="setting-checkbox" checked />
                 </div>
               </div>
 
-              <div
-                v-if="activeMenu === 'shortcuts'"
-                class="content-section"
-              >
+              <div v-if="activeMenu === 'shortcuts'" class="content-section">
                 <h3 class="section-title">
                   {{ $t('settings.shortcuts') }}
                 </h3>
@@ -179,7 +144,7 @@
                     class="setting-input modal-input"
                     value="Cmd+T"
                     readonly
-                  >
+                  />
                 </div>
                 <div class="setting-item">
                   <label class="setting-label">{{
@@ -190,14 +155,11 @@
                     class="setting-input modal-input"
                     value="Cmd+W"
                     readonly
-                  >
+                  />
                 </div>
               </div>
 
-              <div
-                v-if="activeMenu === 'about'"
-                class="content-section"
-              >
+              <div v-if="activeMenu === 'about'" class="content-section">
                 <h3 class="section-title">
                   {{ $t('settings.about') }}
                 </h3>
@@ -214,19 +176,9 @@
     </Transition>
   </Teleport>
   <!-- Render without teleport when useTeleport is false -->
-  <Transition
-    v-else
-    name="settings-fade"
-  >
-    <div
-      v-if="visible"
-      class="modal-system-overlay"
-      @click="handleClose"
-    >
-      <div
-        class="settings-panel modal-system-panel"
-        @click.stop
-      >
+  <Transition v-else name="settings-fade">
+    <div v-if="visible" class="modal-system-overlay" @click="handleClose">
+      <div class="settings-panel modal-system-panel" @click.stop>
         <div class="settings-header border-bottom draggable">
           <div class="macos-controls no-drag">
             <button
@@ -250,21 +202,14 @@
                 :class="{ active: activeMenu === item.key }"
                 @click="handleMenuClick(item.key)"
               >
-                <component
-                  :is="item.icon"
-                  :size="16"
-                  class="menu-icon"
-                />
+                <component :is="item.icon" :size="16" class="menu-icon" />
                 <span class="menu-label">{{ item.label }}</span>
               </button>
             </nav>
           </div>
 
           <div class="settings-content">
-            <div
-              v-if="activeMenu === 'general'"
-              class="content-section"
-            >
+            <div v-if="activeMenu === 'general'" class="content-section">
               <h3 class="section-title">
                 {{ $t('settings.general') }}
               </h3>
@@ -290,10 +235,7 @@
                 <label class="setting-label">{{
                   $t('settings.startup')
                 }}</label>
-                <input
-                  type="checkbox"
-                  class="setting-checkbox"
-                >
+                <input type="checkbox" class="setting-checkbox" />
               </div>
               <div class="setting-item">
                 <label class="setting-label">{{
@@ -307,10 +249,7 @@
               </div>
             </div>
 
-            <div
-              v-if="activeMenu === 'appearance'"
-              class="content-section"
-            >
+            <div v-if="activeMenu === 'appearance'" class="content-section">
               <h3 class="section-title">
                 {{ $t('settings.appearance') }}
               </h3>
@@ -321,15 +260,9 @@
                   :value="selectedTheme"
                   @change="handleThemeChange"
                 >
-                  <option value="auto">
-                    Auto
-                  </option>
-                  <option value="light">
-                    Light
-                  </option>
-                  <option value="dark">
-                    Dark
-                  </option>
+                  <option value="auto">Auto</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
                 </select>
               </div>
               <div class="setting-item">
@@ -342,14 +275,11 @@
                   value="14"
                   min="10"
                   max="24"
-                >
+                />
               </div>
             </div>
 
-            <div
-              v-if="activeMenu === 'terminal'"
-              class="content-section"
-            >
+            <div v-if="activeMenu === 'terminal'" class="content-section">
               <h3 class="section-title">
                 {{ $t('settings.terminal') }}
               </h3>
@@ -367,18 +297,11 @@
                 <label class="setting-label">{{
                   $t('settings.cursorBlink')
                 }}</label>
-                <input
-                  type="checkbox"
-                  class="setting-checkbox"
-                  checked
-                >
+                <input type="checkbox" class="setting-checkbox" checked />
               </div>
             </div>
 
-            <div
-              v-if="activeMenu === 'shortcuts'"
-              class="content-section"
-            >
+            <div v-if="activeMenu === 'shortcuts'" class="content-section">
               <h3 class="section-title">
                 {{ $t('settings.shortcuts') }}
               </h3>
@@ -389,7 +312,7 @@
                   class="setting-input modal-input"
                   value="Cmd+T"
                   readonly
-                >
+                />
               </div>
               <div class="setting-item">
                 <label class="setting-label">{{
@@ -400,14 +323,11 @@
                   class="setting-input modal-input"
                   value="Cmd+W"
                   readonly
-                >
+                />
               </div>
             </div>
 
-            <div
-              v-if="activeMenu === 'about'"
-              class="content-section"
-            >
+            <div v-if="activeMenu === 'about'" class="content-section">
               <h3 class="section-title">
                 {{ $t('settings.about') }}
               </h3>

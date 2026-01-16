@@ -196,10 +196,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div
-    class="app-tabs glass-light border-bottom"
-    data-tauri-drag-region
-  >
+  <div class="app-tabs glass-light border-bottom" data-tauri-drag-region>
     <div
       ref="tabsContainerRef"
       class="tabs-container scrollbar-hidden"
@@ -220,14 +217,8 @@ onBeforeUnmount(() => {
         />
       </TransitionGroup>
 
-      <div
-        class="tab-actions"
-        :class="{ 'is-active': isDropdownOpen }"
-      >
-        <ShortcutHint
-          text="Cmd+T to create SSH connection"
-          position="bottom"
-        >
+      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
+        <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
@@ -237,41 +228,23 @@ onBeforeUnmount(() => {
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint
-          text="More options"
-          position="bottom"
-        >
+        <ShortcutHint text="More options" position="bottom">
           <button
             class="action-btn dropdown-btn"
             :class="{ 'is-active': isDropdownOpen }"
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown
-              v-if="!isDropdownOpen"
-              :size="14"
-            />
-            <X
-              v-else
-              :size="14"
-            />
+            <ChevronDown v-if="!isDropdownOpen" :size="14" />
+            <X v-else :size="14" />
           </button>
         </ShortcutHint>
       </div>
     </div>
 
-    <div
-      class="right-actions"
-      data-tauri-drag-region
-    >
-      <ShortcutHint
-        text="Window Actions"
-        position="bottom"
-      >
-        <button
-          class="action-btn more-btn"
-          aria-label="More"
-        >
+    <div class="right-actions" data-tauri-drag-region>
+      <ShortcutHint text="Window Actions" position="bottom">
+        <button class="action-btn more-btn" aria-label="More">
           <MoreHorizontal :size="16" />
         </button>
       </ShortcutHint>

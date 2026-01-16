@@ -432,10 +432,7 @@ onMounted(async () => {
 
 <template>
   <div class="terminal-view">
-    <div
-      ref="terminalRef"
-      class="terminal-container"
-    />
+    <div ref="terminalRef" class="terminal-container" />
   </div>
 </template>
 

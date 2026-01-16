@@ -1,8 +1,5 @@
 <template>
-  <div
-    class="modal-form"
-    @keydown.tab="handleTabKey"
-  >
+  <div class="modal-form" @keydown.tab="handleTabKey">
     <div class="modal-header">
       <h3 class="modal-title">
         {{ $t('ssh.title') }}
@@ -23,11 +20,8 @@
             class="input"
             :class="{ error: validationErrors.name }"
             required
-          >
-          <span
-            v-if="validationErrors.name"
-            class="modal-error-message"
-          >{{
+          />
+          <span v-if="validationErrors.name" class="modal-error-message">{{
             validationErrors.name
           }}</span>
         </div>
@@ -46,11 +40,8 @@
               class="input"
               :class="{ error: validationErrors.host }"
               required
-            >
-            <span
-              v-if="validationErrors.host"
-              class="modal-error-message"
-            >{{
+            />
+            <span v-if="validationErrors.host" class="modal-error-message">{{
               validationErrors.host
             }}</span>
           </div>
@@ -67,11 +58,8 @@
               placeholder="22"
               class="input short-input"
               :class="{ error: validationErrors.port }"
-            >
-            <span
-              v-if="validationErrors.port"
-              class="modal-error-message"
-            >{{
+            />
+            <span v-if="validationErrors.port" class="modal-error-message">{{
               validationErrors.port
             }}</span>
           </div>
@@ -90,11 +78,8 @@
             class="input"
             :class="{ error: validationErrors.username }"
             required
-          >
-          <span
-            v-if="validationErrors.username"
-            class="modal-error-message"
-          >{{
+          />
+          <span v-if="validationErrors.username" class="modal-error-message">{{
             validationErrors.username
           }}</span>
         </div>
@@ -112,7 +97,7 @@
               :type="showPassword ? 'text' : 'password'"
               :placeholder="$t('ssh.passwordPlaceholder')"
               class="input"
-            >
+            />
             <button
               type="button"
               class="password-toggle-btn"
@@ -139,7 +124,7 @@
             type="text"
             :placeholder="$t('ssh.privateKeyPlaceholder')"
             class="input"
-          >
+          />
         </div>
 
         <div class="modal-form-group">
@@ -153,7 +138,7 @@
               :type="showKeyPassphrase ? 'text' : 'password'"
               :placeholder="$t('ssh.passphrasePlaceholder')"
               class="input"
-            >
+            />
             <button
               type="button"
               class="password-toggle-btn"
@@ -180,16 +165,13 @@
             ref="saveSessionInput"
             v-model="formData.saveSession"
             type="checkbox"
-          >
+          />
           <span class="checkbox-label">{{ $t('ssh.saveSession') }}</span>
         </label>
       </div>
 
       <div class="modal-form-actions">
-        <div
-          v-if="errorMessage"
-          class="form-general-error"
-        >
+        <div v-if="errorMessage" class="form-general-error">
           {{ errorMessage }}
         </div>
         <button

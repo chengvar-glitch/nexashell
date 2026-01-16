@@ -33,11 +33,7 @@
           </button>
         </div>
         <nav class="sidebar-nav">
-          <button
-            v-for="group in groups"
-            :key="group"
-            class="nav-item"
-          >
+          <button v-for="group in groups" :key="group" class="nav-item">
             <Folder :size="16" />
             <span>{{ group }}</span>
           </button>
@@ -49,11 +45,7 @@
           {{ $t('home.tags') }}
         </h4>
         <div class="tag-cloud">
-          <span
-            v-for="tag in tags"
-            :key="tag"
-            class="tag-badge"
-          >
+          <span v-for="tag in tags" :key="tag" class="tag-badge">
             <Hash :size="12" />{{ tag }}
           </span>
         </div>
@@ -70,10 +62,7 @@
           </p>
         </div>
         <div class="action-area">
-          <button
-            class="btn-primary"
-            @click="handleNewConnection"
-          >
+          <button class="btn-primary" @click="handleNewConnection">
             <Plus :size="18" /> {{ $t('home.newSession') }}
           </button>
         </div>
@@ -87,10 +76,7 @@
           class="group-container"
         >
           <div class="group-header">
-            <FolderOpen
-              :size="18"
-              class="folder-icon"
-            />
+            <FolderOpen :size="18" class="folder-icon" />
             <span class="name">{{ groupName }}</span>
           </div>
 
@@ -122,7 +108,8 @@
                     v-for="tag in session.tags"
                     :key="tag"
                     class="mini-tag"
-                  >{{ tag }}</span>
+                    >{{ tag }}</span
+                  >
                 </div>
                 <div class="connect-hint">
                   {{ $t('home.connect') }} <ChevronRight :size="14" />
@@ -136,10 +123,7 @@
               class="empty-card"
               @click="handleNewConnection"
             >
-              <Plus
-                :size="32"
-                class="plus"
-              />
+              <Plus :size="32" class="plus" />
               <span>{{ $t('home.addFirst') }}</span>
             </button>
           </div>

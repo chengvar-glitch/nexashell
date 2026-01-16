@@ -6,6 +6,7 @@ import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
 import SSHConnectionForm from '@/components/ssh/SSHConnectionForm.vue';
 import SettingsPanel from '@/components/settings/SettingsPanel.vue';
+import WelcomeScreen from '@/components/common/WelcomeScreen.vue';
 import {
   shortcutManager,
   PredefinedShortcuts,
@@ -36,6 +37,9 @@ import { createLogger } from '@/core/utils/logger';
 import { TAB_TYPE } from '@/features/tabs';
 
 const logger = createLogger('APP');
+
+// Welcome screen state
+const showWelcome = ref(localStorage.getItem('hasLaunched') !== 'true');
 
 // Session management with Pinia
 const sessionStore = useSessionStore();
@@ -193,23 +197,14 @@ const handleCreateTab = (tab: any) => {
 </script>
 
 <template>
-  <div
-    id="app"
-    class="app-wrapper"
-  >
+  <div id="app" class="app-wrapper">
     <div class="app-root">
       <WindowTitleBar />
       <AppTabs />
-      <AppContent
-        @create-tab="handleCreateTab"
-        @connect="handleSSHConnect"
-      />
+      <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
 
       <!-- SSH connection form modal -->
-      <div
-        v-if="showSSHForm"
-        class="modal-system-overlay"
-      >
+      <div v-if="showSSHForm" class="modal-system-overlay">
         <div class="modal-system-panel">
           <SSHConnectionForm
             :is-loading="isConnecting"
@@ -226,6 +221,9 @@ const handleCreateTab = (tab: any) => {
         :use-teleport="false"
         @update:visible="handleSettingsUpdate"
       />
+
+      <!-- Welcome screen for first launch -->
+      <WelcomeScreen v-if="showWelcome" @complete="showWelcome = false" />
     </div>
   </div>
 </template>
