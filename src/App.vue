@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
-import { useI18n } from 'vue-i18n';
+// i18n not used in this file for progress messages (messages are plain English)
 import { v4 as uuidv4 } from 'uuid';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
@@ -54,7 +54,19 @@ const {
 const isConnecting = ref(false);
 const sshErrorMessage = ref<string | null>(null);
 
-const { t } = useI18n({ useScope: 'global' });
+// Save form data for restoration on cancel
+const savedSSHFormData = ref<SSHConnectionFormData | null>(null);
+
+// Connection progress state
+const showConnectionProgress = ref(false);
+const connectionProgress = ref(0);
+const connectionCurrentStep = ref(0);
+const connectionMessage = ref('');
+const connectionStatus = ref<'connecting' | 'success' | 'error'>('connecting');
+const connectionErrorMessage = ref('');
+const connectionErrorTitle = ref('');
+
+// no `t` used here
 
 provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, () => {
@@ -122,14 +134,34 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     port: data.port,
   });
 
+  // Save form data for later restoration
+  savedSSHFormData.value = { ...data };
+
   sshErrorMessage.value = null;
   isConnecting.value = true;
+
+  // Show progress bar inside the SSH form - do not close the form immediately
+  showConnectionProgress.value = true;
+
+  connectionProgress.value = 0;
+  connectionCurrentStep.value = 0;
+  connectionMessage.value = 'Establishing SSH connection';
+  connectionStatus.value = 'connecting';
+  connectionErrorMessage.value = '';
+  connectionErrorTitle.value = '';
 
   // 1. Generate a unique session ID
   const sessionId = uuidv4();
 
   // 2. Initiate backend connection via Pinia store
   try {
+    // Simulate step transitions for better UX
+    const stepInterval = setTimeout(() => {
+      connectionCurrentStep.value = 1;
+      connectionProgress.value = 30;
+      connectionMessage.value = 'Authenticating user';
+    }, 800);
+
     await sessionStore.createSSHSession(
       sessionId,
       sessionId, // Use sessionId as tabId for now
@@ -143,44 +175,107 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     );
     logger.info('SSH session created successfully', { sessionId });
 
-    // 3. Create and add a new tab ONLY after successful connection
-    tabManagement.addTab({
-      id: sessionId,
-      label: data.name || data.host,
-      type: TAB_TYPE.SSH,
-      closable: true,
-    });
+    clearTimeout(stepInterval);
+    connectionCurrentStep.value = 2;
+    connectionProgress.value = 70;
+    connectionMessage.value = 'Initializing terminal';
 
-    closeSSHForm();
+    // Final step completion
+    connectionProgress.value = 100;
+    connectionCurrentStep.value = 3;
+    connectionStatus.value = 'success';
+    connectionMessage.value = 'Connection established successfully';
+
+    // Keep progress bar visible for a brief moment before closing and opening the tab
+    setTimeout(() => {
+      // Close the SSH form entirely (including progress bar)
+      closeSSHForm();
+      showConnectionProgress.value = false;
+
+      // 3. Create and add a new tab AFTER the form is closed
+      // Use a small delay to allow the modal to disappear visually
+      setTimeout(() => {
+        tabManagement.addTab({
+          id: sessionId,
+          label: data.name || data.host,
+          type: TAB_TYPE.SSH,
+          closable: true,
+        });
+      }, 100);
+    }, 500);
   } catch (error) {
     logger.error('Failed to create SSH session', error);
 
-    // Enhanced error handling with structured error information
-    if (error instanceof Error) {
-      const errorMessage = error.message;
+    // Set error state in progress bar
+    connectionStatus.value = 'error';
+    connectionProgress.value = 0;
+    connectionErrorTitle.value = 'Connection Failed';
+    connectionMessage.value = 'Failed to establish connection';
+
+    // Parse error message
+    let errorDetails = '';
+
+    // Handle both JS Errors and structured objects from Tauri
+    if (typeof error === 'object' && error !== null) {
+      const err = error as Record<string, any>;
 
       // Check for specific Tauri error patterns (structured SshError)
-      if (typeof error === 'object' && error !== null) {
-        const err = error as Record<string, any>;
-
-        if (err.connectionFailed) {
-          sshErrorMessage.value = `${t('ssh.errorConnectionFailed')}: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
-        } else if (err.authenticationFailed) {
-          sshErrorMessage.value = t('ssh.errorAuthenticationFailed');
-        } else if (err.channelError) {
-          sshErrorMessage.value = `${t('ssh.errorChannel')}: ${err.channelError}`;
-        } else {
-          sshErrorMessage.value = errorMessage;
-        }
+      if (err.connectionFailed) {
+        errorDetails = `Connection failed: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
+      } else if (err.authenticationFailed) {
+        errorDetails =
+          'Authentication failed. Please check your username and password.';
+      } else if (err.channelError) {
+        errorDetails = `Channel error: ${err.channelError}`;
+      } else if (err.message) {
+        // Standard JS Error or object with message property
+        errorDetails = String(err.message);
       } else {
-        sshErrorMessage.value = errorMessage;
+        // Fallback for other objects: try JSON stringify to see content
+        try {
+          // Avoid [object Object]
+          const json = JSON.stringify(error);
+          errorDetails = json === '{}' ? 'Unknown error' : json;
+        } catch (e) {
+          // If stringify failed, fall back to string conversion
+          errorDetails = String(error);
+          logger.debug('JSON stringify failed while formatting error', e);
+        }
       }
     } else {
-      sshErrorMessage.value = String(error);
+      errorDetails = String(error);
     }
+
+    // Clean up error message if it is literally wrapping a string like "Error: ..."
+    if (errorDetails.startsWith('"') && errorDetails.endsWith('"')) {
+      try {
+        errorDetails = JSON.parse(errorDetails);
+      } catch (e) {
+        // ignore parse errors and keep the raw string
+        logger.debug('Failed to JSON.parse errorDetails', e);
+      }
+    }
+
+    connectionErrorMessage.value = errorDetails;
+    sshErrorMessage.value = errorDetails;
   } finally {
     isConnecting.value = false;
   }
+};
+
+// Handle connection progress bar close
+const handleConnectionProgressClose = () => {
+  showConnectionProgress.value = false;
+
+  // Show SSH form again with saved data
+  openSSHForm();
+};
+
+// Handle connection progress bar retry
+const handleConnectionProgressRetry = () => {
+  // Close progress bar and reopen SSH form
+  showConnectionProgress.value = false;
+  openSSHForm();
 };
 
 // Handle SSH connection cancellation
@@ -214,8 +309,18 @@ const handleCreateTab = (tab: any) => {
           <SSHConnectionForm
             :is-loading="isConnecting"
             :error-message="sshErrorMessage"
+            :initial-data="savedSSHFormData"
+            :show-progress="showConnectionProgress"
+            :connection-status="connectionStatus"
+            :connection-progress="connectionProgress"
+            :connection-current-step="connectionCurrentStep"
+            :connection-message="connectionMessage"
+            :connection-error-title="connectionErrorTitle"
+            :connection-error-message="connectionErrorMessage"
             @connect="handleSSHConnect"
             @cancel="handleSSHCancel"
+            @retry="handleConnectionProgressRetry"
+            @close-progress="handleConnectionProgressClose"
           />
         </div>
       </div>

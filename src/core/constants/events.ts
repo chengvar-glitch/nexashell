@@ -11,6 +11,10 @@ export const APP_EVENTS = {
   CLOSE_TAB: 'app:close-tab',
   NEW_TAB: 'app:new-tab',
   FOCUS_SEARCH: 'app:focus-search',
+  CONNECTION_START: 'app:connection-start',
+  CONNECTION_END: 'app:connection-end',
+  CONNECTION_STEP: 'app:connection-step',
+  CONNECTION_PROGRESS: 'app:connection-progress',
 } as const;
 
 export type AppEventType = (typeof APP_EVENTS)[keyof typeof APP_EVENTS];

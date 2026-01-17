@@ -1,5 +1,9 @@
 <template>
-  <div class="modal-form" @keydown.tab="handleTabKey">
+  <div
+    class="modal-form"
+    style="position: relative"
+    @keydown.tab="handleTabKey"
+  >
     <div class="modal-header">
       <h3 class="modal-title">
         {{ $t('ssh.title') }}
@@ -173,9 +177,6 @@
       </div>
 
       <div class="modal-form-actions">
-        <div v-if="errorMessage" class="form-general-error">
-          {{ errorMessage }}
-        </div>
         <button
           ref="connectButton"
           type="submit"
@@ -195,6 +196,18 @@
         </button>
       </div>
     </form>
+
+    <ConnectionProgressBar
+      :visible="showProgress"
+      :status="connectionStatus"
+      :progress="connectionProgress"
+      :current-step="connectionCurrentStep"
+      :message="connectionMessage"
+      :title="connectionErrorTitle"
+      :error-message="connectionErrorMessage"
+      @close="onCloseProgress"
+      @retry="onRetry"
+    />
   </div>
 </template>
 
@@ -202,13 +215,23 @@
 import { reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Eye, EyeOff } from 'lucide-vue-next';
+import ConnectionProgressBar from '../common/ConnectionProgressBar.vue';
+
+type ConnectionStatus = 'connecting' | 'success' | 'error';
 
 interface Props {
   isLoading?: boolean;
   errorMessage?: string | null;
+  initialData?: SSHConnectionFormData;
+  // Status and progress for ConnectionProgressBar
+  showProgress?: boolean;
+  connectionStatus?: ConnectionStatus;
+  connectionProgress?: number;
+  connectionCurrentStep?: number;
+  connectionMessage?: string;
+  connectionErrorTitle?: string;
+  connectionErrorMessage?: string;
 }
-
-defineProps<Props>();
 
 interface SSHConnectionFormData {
   name: string; // Connection name is now required and at the top
@@ -228,15 +251,31 @@ interface ValidationErrors {
   username?: string;
 }
 
+const props = withDefaults(defineProps<Props>(), {
+  isLoading: false,
+  errorMessage: null,
+  initialData: undefined,
+  showProgress: false,
+  connectionStatus: 'connecting',
+  connectionProgress: 0,
+  connectionCurrentStep: 0,
+  connectionMessage: '',
+  connectionErrorTitle: '',
+  connectionErrorMessage: '',
+});
+
 const formData = reactive<SSHConnectionFormData>({
-  name: '', // Initialize with empty string
-  host: '',
-  port: 22,
-  username: '',
-  password: '',
-  privateKey: '',
-  keyPassphrase: '',
-  saveSession: true,
+  name: props.initialData?.name || '', // Initialize with empty string
+  host: props.initialData?.host || '',
+  port: props.initialData?.port || 22,
+  username: props.initialData?.username || '',
+  password: props.initialData?.password || '',
+  privateKey: props.initialData?.privateKey || '',
+  keyPassphrase: props.initialData?.keyPassphrase || '',
+  saveSession:
+    props.initialData?.saveSession !== undefined
+      ? props.initialData.saveSession
+      : true,
 });
 
 const validationErrors = reactive<ValidationErrors>({});
@@ -246,6 +285,8 @@ const { t } = useI18n({ useScope: 'global' });
 const emit = defineEmits<{
   connect: [data: SSHConnectionFormData];
   cancel: [];
+  retry: [];
+  'close-progress': [];
 }>();
 
 // Password visibility state
@@ -327,6 +368,14 @@ const onSubmit = () => {
 
 const onCancel = () => {
   emit('cancel');
+};
+
+const onRetry = () => {
+  emit('retry');
+};
+
+const onCloseProgress = () => {
+  emit('close-progress');
 };
 
 // Handle Tab key navigation

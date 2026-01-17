@@ -75,6 +75,23 @@ const messages = {
       showKeyPassphrase: 'Show key passphrase',
       hideKeyPassphrase: 'Hide key passphrase',
     },
+    connection: {
+      connecting: 'Connecting...',
+      connectionFailed: 'Connection Failed',
+      connectionSuccessful: 'Connection Successful',
+      connectionError: 'Failed to establish connection',
+      connectionEstablished: 'Connection established successfully',
+      establishingSSH: 'Establishing SSH connection',
+      authenticating: 'Authenticating user',
+      initializingTerminal: 'Initializing terminal',
+      retry: 'Retry',
+      close: 'Close',
+      step: {
+        verify: 'Verifying connection',
+        authenticate: 'Authenticating user',
+        initialize: 'Initializing terminal',
+      },
+    },
     welcome: {
       title: 'Welcome to NexaShell',
       subtitle:
@@ -160,6 +177,23 @@ const messages = {
       showKeyPassphrase: '显示私钥口令',
       hideKeyPassphrase: '隐藏私钥口令',
     },
+    connection: {
+      connecting: '连接中...',
+      connectionFailed: '连接失败',
+      connectionSuccessful: '连接成功',
+      connectionError: '无法建立连接',
+      connectionEstablished: '连接已成功建立',
+      establishingSSH: '正在建立 SSH 连接',
+      authenticating: '正在认证用户',
+      initializingTerminal: '正在初始化终端',
+      retry: '重试',
+      close: '关闭',
+      step: {
+        verify: '验证连接',
+        authenticate: '认证用户',
+        initialize: '初始化终端',
+      },
+    },
     welcome: {
       title: 'Welcome to NexaShell',
       subtitle:
@@ -238,6 +272,23 @@ const messages = {
       errorPort: '端口號必須在 1-65535 之間',
       errorUsername: '用戶名不能為空',
     },
+    connection: {
+      connecting: '連接中...',
+      connectionFailed: '連接失敗',
+      connectionSuccessful: '連接成功',
+      connectionError: '無法建立連接',
+      connectionEstablished: '連接已成功建立',
+      establishingSSH: '正在建立 SSH 連接',
+      authenticating: '正在認證用戶',
+      initializingTerminal: '正在初始化終端',
+      retry: '重試',
+      close: '關閉',
+      step: {
+        verify: '驗證連接',
+        authenticate: '認證用戶',
+        initialize: '初始化終端',
+      },
+    },
   },
   ja: {
     home: {
@@ -301,6 +352,23 @@ const messages = {
       errorHost: 'ホストアドレスを指定してください',
       errorPort: 'ポートは 1-65535 の間で指定してください',
       errorUsername: 'ユーザー名を指定してください',
+    },
+    connection: {
+      connecting: '接続中...',
+      connectionFailed: '接続失敗',
+      connectionSuccessful: '接続成功',
+      connectionError: '接続を確立できません',
+      connectionEstablished: '接続が正常に確立されました',
+      establishingSSH: 'SSH 接続を確立中',
+      authenticating: 'ユーザーを認証中',
+      initializingTerminal: 'ターミナルを初期化中',
+      retry: '再試行',
+      close: '閉じる',
+      step: {
+        verify: '接続を検証',
+        authenticate: 'ユーザーを認証',
+        initialize: 'ターミナルを初期化',
+      },
     },
   },
   ko: {
