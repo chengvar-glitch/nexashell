@@ -202,9 +202,11 @@ const handleCreateTab = (tab: any) => {
 <template>
   <div id="app" class="app-wrapper">
     <div class="app-root">
-      <WindowTitleBar />
-      <AppTabs />
-      <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
+      <template v-if="!showWelcome">
+        <WindowTitleBar />
+        <AppTabs />
+        <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
+      </template>
 
       <!-- SSH connection form modal -->
       <div v-if="showSSHForm" class="modal-system-overlay">

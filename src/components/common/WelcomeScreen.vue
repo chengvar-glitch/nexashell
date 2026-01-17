@@ -7,7 +7,7 @@ const emit = defineEmits(['complete']);
 
 const { locale, availableLocales } = useI18n({ useScope: 'global' });
 
-const showContent = ref(false);
+const showContent = ref(true);
 const showOptions = ref(false);
 const selectedLanguage = ref(locale.value);
 const selectedTheme = ref(themeManager.getTheme());
@@ -62,8 +62,6 @@ const detectLanguage = async () => {
 };
 
 onMounted(async () => {
-  showContent.value = true;
-
   // 1. Initial logo centered (handled by CSS)
 
   // 2. Async language detection
@@ -92,7 +90,7 @@ const handleSave = () => {
 </script>
 
 <template>
-  <Transition name="fade">
+  <Transition name="fade" appear>
     <div v-if="showContent" class="welcome-screen" :class="themeClass">
       <div class="welcome-container" :class="{ 'show-options': showOptions }">
         <!-- Logo Section -->
