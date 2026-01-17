@@ -1,5 +1,6 @@
 mod system;
 mod ssh;
+mod db;
 
 use tauri::Manager;
 use ssh::SshManager;
@@ -54,6 +55,9 @@ pub fn run() {
             ssh::send_ssh_input,
             ssh::get_ssh_output,
             ssh::get_buffered_ssh_output,
+                db::init_db,
+                db::add_session,
+                db::list_sessions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
