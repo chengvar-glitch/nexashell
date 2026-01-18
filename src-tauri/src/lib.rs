@@ -11,6 +11,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .manage(SshManager::default())
         .setup(|app| {
+            // Initialize database before app is fully started. This ensures
+            // schema and indexes exist even if the DB file was absent.
+            match db::init_db() {
+                Ok(v) => {
+                    // log to stdout for visibility during startup
+                    println!("db init: {}", v);
+                }
+                Err(e) => {
+                    eprintln!("db init error: {}", e);
+                }
+            }
             #[cfg(target_os = "macos")]
             {
                 use cocoa::appkit::NSWindow;
@@ -58,6 +69,23 @@ pub fn run() {
                 db::init_db,
                 db::add_session,
                 db::list_sessions,
+                db::add_group,
+                db::list_groups,
+                db::add_tag,
+                db::list_tags,
+                db::link_session_group,
+                db::unlink_session_group,
+                db::list_groups_for_session,
+                db::link_session_tag,
+                db::unlink_session_tag,
+                db::list_tags_for_session,
+                db::get_sessions,
+                db::edit_group,
+                db::delete_group,
+                db::edit_tag,
+                db::delete_tag,
+                db::edit_session,
+                db::delete_session,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
