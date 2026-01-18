@@ -203,9 +203,6 @@
                     >{{ tag }}</span
                   >
                 </div>
-                <div class="connect-hint">
-                  {{ $t('home.connect') }} <ChevronRight :size="14" />
-                </div>
               </div>
             </div>
 
@@ -277,7 +274,6 @@ import {
   Folder,
   FolderOpen,
   Plus,
-  ChevronRight,
   Hash,
   Minus,
   Search,
@@ -381,14 +377,14 @@ const filteredSessions = computed(() => {
     }
   }
 
-  // 2. Filter by search query
+  // Filter by search query
   if (searchQuery.value.trim()) {
     const query = searchQuery.value.toLowerCase();
     result = result.filter(
       s =>
         s.server_name.toLowerCase().includes(query) ||
         s.addr.toLowerCase().includes(query) ||
-        s.username.toLowerCase().includes(query)
+        (s.username && s.username.toLowerCase().includes(query))
     );
   }
 
@@ -642,8 +638,8 @@ const handleNewConnection = () => {
 };
 
 const handleConnect = (session: SavedSessionDisplay) => {
-  // Directly trigger quick connect for now as the main action
-  handleQuickConnect(session);
+  // Single click to select, double click to connect
+  console.log('Session selected:', session.server_name);
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {

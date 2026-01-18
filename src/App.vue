@@ -43,6 +43,9 @@ import { TAB_TYPE } from '@/features/tabs';
 
 const logger = createLogger('APP');
 
+// Global contextmenu handler reference so we can remove it on unmount
+let __globalContextMenuHandler: ((e: MouseEvent) => void) | null = null;
+
 // Welcome screen state
 const showWelcome = ref(localStorage.getItem('hasLaunched') !== 'true');
 
@@ -153,6 +156,46 @@ onMounted(() => {
     isConnecting.value = false;
     openSSHForm();
   });
+
+  // Global right-click handling: prevent browser default menu in production
+  // but only when clicking on empty areas (not on interactive components)
+  __globalContextMenuHandler = (e: MouseEvent) => {
+    // Keep default menu in dev for debugging (Inspect Element)
+    if (import.meta.env.DEV) return;
+
+    const target = e.target as HTMLElement | null;
+    if (!target) return;
+
+    // Elements that should keep native/context menu
+    const interactiveSelector = [
+      'a',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      '[contenteditable]',
+      '.session-card',
+      '.session-grid',
+      '.search-container',
+      '.search-input',
+      '.terminal-container',
+      '.modal-content',
+      '.dropdown-menu',
+      '.connect-hint',
+      '.favorite-btn',
+    ].join(',');
+
+    if (target.closest(interactiveSelector)) {
+      // clicked on an interactive element — allow default
+      return;
+    }
+
+    // otherwise treat as blank area and prevent browser menu
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  window.addEventListener('contextmenu', __globalContextMenuHandler);
 });
 
 onBeforeUnmount(() => {
@@ -162,6 +205,10 @@ onBeforeUnmount(() => {
   sessionStore.cleanupAllSessions().catch(error => {
     logger.error('Error cleaning up sessions on app close', error);
   });
+  if (__globalContextMenuHandler) {
+    window.removeEventListener('contextmenu', __globalContextMenuHandler);
+    __globalContextMenuHandler = null;
+  }
 });
 
 // Handle SSH connection with improved error handling

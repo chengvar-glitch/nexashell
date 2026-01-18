@@ -45,20 +45,18 @@ const handleClose = (e: Event) => {
   >
     <Home v-if="type === 'home'" class="home-icon" :size="14" />
     <span class="tab-label">{{ label }}</span>
-    <button
-      v-if="closable"
-      class="close-btn"
-      aria-label="Close tab"
-      @click="handleClose"
-    >
-      <svg width="12" height="12" viewBox="0 0 12 12">
-        <path
-          d="M2,2 L10,10 M10,2 L2,10"
-          stroke="currentColor"
-          stroke-width="1.5"
-        />
-      </svg>
-    </button>
+    <div v-if="closable" class="close-btn-wrapper">
+      <button class="close-btn" aria-label="Close tab" @click="handleClose">
+        <svg width="10" height="10" viewBox="0 0 12 12">
+          <path
+            d="M2,2 L10,10 M10,2 L2,10"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          />
+        </svg>
+      </button>
+    </div>
   </div>
 </template>
 
@@ -66,14 +64,14 @@ const handleClose = (e: Event) => {
 .tab-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   height: 28px;
   margin: 4px 2px;
-  padding: 0 10px;
+  padding: 0 8px 0 12px;
   background-color: transparent;
-  border: none;
-  min-width: 110px;
-  max-width: 180px;
+  border: 1px solid transparent;
+  min-width: 120px;
+  max-width: 200px;
   border-radius: var(--radius-md);
   position: relative;
   transition: all var(--transition-base);
@@ -81,94 +79,89 @@ const handleClose = (e: Event) => {
 }
 
 .tab-item:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-interactive-hover);
 }
 
 .tab-item.active {
   background-color: var(--color-bg-primary);
-  box-shadow:
-    0 4px 12px rgba(0, 0, 0, 0.12),
-    0 0 0 1px var(--color-border-primary);
-  transform: translateY(-1px);
+  border-color: var(--color-border-primary);
+  box-shadow: var(--shadow-sm);
 }
 
 .tab-item.active .tab-label {
-  color: var(--color-text-primary);
-  font-weight: 600;
-}
-
-/* Add a subtle accent pill on the left of active tab */
-.tab-item.active::before {
-  content: '';
-  position: absolute;
-  left: 6px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 14px;
-  background-color: var(--color-primary);
-  border-radius: 100px;
-  box-shadow: 0 0 8px var(--color-primary);
-}
-
-.tab-item.active.home-tab::before {
-  display: none; /* Icon handles the intent for home tab */
-}
-
-/* Home tab special styling (Overrides general active styles) */
-.home-tab {
-  background-color: rgba(0, 122, 255, 0.05);
-  border: 1px solid rgba(0, 122, 255, 0.1);
-}
-
-.home-tab .tab-label {
-  font-weight: 700;
-  letter-spacing: 0.5px;
   color: var(--color-primary);
+  font-weight: 500;
 }
 
-.home-tab.active {
-  background-color: var(--color-primary) !important;
-  border-color: var(--color-primary) !important;
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+/* Remove the old accent pill */
+
+.tab-label {
+  flex: 1;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.home-tab.active .tab-label,
-.home-tab.active .home-icon {
-  color: white !important;
-}
-
-.home-icon {
-  margin-right: -2px;
-  color: var(--color-primary);
+.close-btn-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 100%;
 }
 
 .close-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   padding: 0;
   border: none;
   background-color: transparent;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-xs);
   cursor: pointer;
   color: var(--color-text-tertiary);
-  transition: all var(--transition-base);
+  transition: all var(--transition-fast);
   flex-shrink: 0;
   opacity: 0;
 }
 
 .tab-item:hover .close-btn,
 .tab-item.active .close-btn {
-  opacity: 0.6;
+  opacity: 0.8;
 }
 
 .close-btn:hover {
-  background-color: var(--color-interactive-hover);
-  color: var(--color-text-primary);
+  background-color: rgba(255, 95, 87, 0.1);
+  color: var(--color-macos-close);
   opacity: 1 !important;
+}
+
+/* Home tab special styling */
+.home-tab.active {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.home-tab.active .tab-label,
+.home-tab.active .home-icon {
+  color: white;
+}
+
+.home-tab.active .close-btn {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.home-tab.active .close-btn:hover {
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.home-icon {
+  color: var(--color-primary);
 }
 
 @media (prefers-color-scheme: dark) {

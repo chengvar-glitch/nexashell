@@ -88,7 +88,8 @@ export class ShortcutManager {
 
     // Global shortcuts that should trigger even in input fields
     const isGlobalShortcut =
-      (event.key === 'k' && (event.metaKey || event.ctrlKey)) ||
+      ((event.key === 'k' || event.key === 'w') &&
+        (event.metaKey || event.ctrlKey)) ||
       event.key === 'Escape';
 
     if (isInputElement) {
@@ -170,11 +171,14 @@ export class ShortcutManager {
 
 export const shortcutManager = new ShortcutManager();
 
+const IS_MAC =
+  typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+
 export const PredefinedShortcuts = {
   QUIT_APP: {
     key: 'q',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'Quit application',
@@ -184,8 +188,8 @@ export const PredefinedShortcuts = {
   },
   CLOSE_WINDOW: {
     key: 'w',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'Close window',
@@ -195,8 +199,8 @@ export const PredefinedShortcuts = {
   },
   OPEN_SETTINGS: {
     key: ',',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'Open settings',
@@ -206,8 +210,8 @@ export const PredefinedShortcuts = {
   },
   NEW_LOCAL_TAB: {
     key: 't',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: true,
     altKey: false,
     description: 'New local terminal tab',
@@ -217,8 +221,8 @@ export const PredefinedShortcuts = {
   },
   NEW_SSH_TAB: {
     key: 't',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'New SSH connection tab',
@@ -228,8 +232,8 @@ export const PredefinedShortcuts = {
   },
   FOCUS_SEARCH: {
     key: 'k',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'Focus search box',
@@ -250,8 +254,8 @@ export const PredefinedShortcuts = {
   },
   CLOSE_CURRENT_TAB: {
     key: 'w',
-    metaKey: true,
-    ctrlKey: false,
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
     shiftKey: false,
     altKey: false,
     description: 'Close current tab',

@@ -349,8 +349,16 @@ onMounted(async () => {
     domEvent?: KeyboardEvent
   ): string {
     if (domEvent) {
-      domEvent.preventDefault();
-      domEvent.stopPropagation();
+      // Check if this is a global shortcut that should bubble up
+      const isMac = navigator.userAgent.includes('Mac');
+      const isShortcut =
+        (isMac ? domEvent.metaKey : domEvent.ctrlKey) &&
+        ['w', 'k', 't', ','].includes(key.toLowerCase());
+
+      if (!isShortcut) {
+        domEvent.preventDefault();
+        domEvent.stopPropagation();
+      }
 
       // Ctrl+<char> -> control code
       if (
