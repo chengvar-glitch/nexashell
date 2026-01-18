@@ -7,9 +7,10 @@
     :create-item-text="createTagText"
     :empty-text="emptyText"
     :allow-create="allowCreateTag"
+    :immediate-save="immediateSave"
     item-type="tag"
-    @update:model-value="(val) => emit('update:modelValue', val)"
-    @item-added="(item) => emit('tag-added', item as Tag)"
+    @update:model-value="val => emit('update:modelValue', val)"
+    @item-added="item => emit('tag-added', item as Tag)"
   />
 </template>
 
@@ -32,6 +33,7 @@ interface Props {
   createTagText?: string;
   emptyText?: string;
   allowCreateTag?: boolean;
+  immediateSave?: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
@@ -42,6 +44,7 @@ withDefaults(defineProps<Props>(), {
   createTagText: 'Create',
   emptyText: 'No tags available',
   allowCreateTag: true,
+  immediateSave: true,
 });
 
 const emit = defineEmits<{

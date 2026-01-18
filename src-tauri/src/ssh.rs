@@ -188,10 +188,24 @@ impl SshManager {
 
         // 1. Establish connection and authenticate (blocking part in separate thread)
         let connection_res = tokio::task::spawn_blocking(move || {
-            let tcp = TcpStream::connect(&addr).map_err(|e| {
+            use std::net::ToSocketAddrs;
+            let socket_addr = addr.to_socket_addrs()
+                .map_err(|e| SshError::ConnectionFailed {
+                    host: addr.clone(),
+                    port,
+                    reason: format!("Failed to resolve address: {}", e),
+                })?
+                .next()
+                .ok_or_else(|| SshError::ConnectionFailed {
+                    host: addr.clone(),
+                    port,
+                    reason: "No addresses found".to_string(),
+                })?;
+
+            let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(|e| {
                 SshError::ConnectionFailed {
                     host: addr.clone(),
-                    port: 22,
+                    port,
                     reason: e.to_string(),
                 }
             })?;

@@ -7,16 +7,31 @@
           {{ $t('home.views') }}
         </h4>
         <nav class="sidebar-nav">
-          <button class="nav-item active">
+          <button
+            class="nav-item"
+            :class="{ active: activeView === 'all' }"
+            @click="setActiveView('all')"
+          >
             <Home :size="16" />
             <span>{{ $t('home.allSessions') }}</span>
             <span class="count">{{ sessions.length }}</span>
           </button>
-          <button class="nav-item">
+          <button
+            class="nav-item"
+            :class="{ active: activeView === 'favorites' }"
+            @click="setActiveView('favorites')"
+          >
             <Star :size="16" />
             <span>{{ $t('home.favorites') }}</span>
+            <span v-if="favoriteCount > 0" class="count">{{
+              favoriteCount
+            }}</span>
           </button>
-          <button class="nav-item">
+          <button
+            class="nav-item"
+            :class="{ active: activeView === 'recent' }"
+            @click="setActiveView('recent')"
+          >
             <History :size="16" />
             <span>{{ $t('home.recent') }}</span>
           </button>
@@ -28,7 +43,10 @@
           <h4 class="section-title">
             {{ $t('home.groups') }}
           </h4>
-          <button class="add-btn" @click="showAddGroupInput = !showAddGroupInput">
+          <button
+            class="add-btn"
+            @click="showAddGroupInput = !showAddGroupInput"
+          >
             <Plus :size="14" />
           </button>
         </div>
@@ -44,11 +62,20 @@
         </div>
         <nav class="sidebar-nav">
           <div v-for="group in groups" :key="group.id" class="nav-item-wrapper">
-            <button class="nav-item">
+            <button
+              class="nav-item"
+              :class="{
+                active: activeView === 'group' && selectedGroupId === group.id,
+              }"
+              @click="setActiveGroup(group.id)"
+            >
               <Folder :size="16" />
               <span>{{ group.name }}</span>
             </button>
-            <button class="delete-btn" @click.stop="handleDeleteGroup(group.id)">
+            <button
+              class="delete-btn"
+              @click.stop="handleDeleteGroup(group.id)"
+            >
               <Minus :size="14" />
             </button>
           </div>
@@ -76,10 +103,19 @@
         </div>
         <div class="tag-cloud">
           <div v-for="tag in tags" :key="tag.id" class="tag-item-wrapper">
-            <span class="tag-badge">
+            <span
+              class="tag-badge"
+              :class="{
+                active: activeView === 'tag' && selectedTagId === tag.id,
+              }"
+              @click="setActiveTag(tag.id)"
+            >
               <Hash :size="12" />{{ tag.name }}
             </span>
-            <button class="tag-delete-btn" @click.stop="handleDeleteTag(tag.id)">
+            <button
+              class="tag-delete-btn"
+              @click.stop="handleDeleteTag(tag.id)"
+            >
               <Minus :size="12" />
             </button>
           </div>
@@ -91,12 +127,21 @@
     <main class="home-main">
       <header class="main-header">
         <div class="title-area">
-          <h3>{{ $t('home.allSessions') }}</h3>
+          <h3>{{ viewTitle }}</h3>
           <p class="subtitle">
             {{ $t('home.subtitle') }}
           </p>
         </div>
         <div class="action-area">
+          <div class="search-container">
+            <Search :size="16" class="search-icon" />
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="search-input"
+              :placeholder="$t('search.placeholder').split('(')[0].trim()"
+            />
+          </div>
           <button class="btn-primary" @click="handleNewConnection">
             <Plus :size="18" /> {{ $t('home.newSession') }}
           </button>
@@ -106,7 +151,7 @@
       <!-- Session Grid Area -->
       <section class="session-manager">
         <div
-          v-for="groupName in [$t('home.defaultGroup')]"
+          v-for="groupName in groupDisplayItems"
           :key="groupName"
           class="group-container"
         >
@@ -117,7 +162,7 @@
 
           <div class="session-grid">
             <div
-              v-for="session in sessions"
+              v-for="session in getSessionsInGroup(groupName)"
               :key="session.id"
               class="session-card"
               @click="handleConnect(session)"
@@ -128,6 +173,16 @@
                 <div class="avatar">
                   {{ session.name[0].toUpperCase() }}
                 </div>
+                <button
+                  class="favorite-btn"
+                  :class="{ active: session.isFavorite }"
+                  @click.stop="toggleFavorite(session)"
+                >
+                  <Star
+                    :size="18"
+                    :fill="session.isFavorite ? 'currentColor' : 'none'"
+                  />
+                </button>
               </div>
 
               <div class="card-info">
@@ -155,14 +210,19 @@
             </div>
 
             <!-- Empty State -->
-            <button
-              v-if="sessions.length === 0"
-              class="empty-card"
-              @click="handleNewConnection"
+            <div
+              v-if="filteredSessions.length === 0"
+              class="empty-state-container"
             >
-              <Plus :size="32" class="plus" />
-              <span>{{ $t('home.addFirst') }}</span>
-            </button>
+              <button class="empty-card" @click="handleNewConnection">
+                <Plus :size="32" class="plus" />
+                <span>{{
+                  searchQuery
+                    ? 'No sessions match your search'
+                    : $t('home.addFirst')
+                }}</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -207,7 +267,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted, onUnmounted } from 'vue';
+import { ref, inject, onMounted, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import {
@@ -220,6 +280,7 @@ import {
   ChevronRight,
   Hash,
   Minus,
+  Search,
 } from 'lucide-vue-next';
 import ConnectionProgressBar from '@/components/common/ConnectionProgressBar.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
@@ -227,7 +288,7 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import { OPEN_SSH_FORM_KEY, TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
-import { useSessionStore } from '@/features/session';
+import { useSessionStore, sessionApi } from '@/features/session';
 import { v4 as uuidv4 } from 'uuid';
 
 interface SSHSession {
@@ -240,6 +301,8 @@ interface SSHSession {
   privateKeyPath?: string;
   groups?: string[];
   tags?: string[];
+  isFavorite?: boolean; // Added for UI
+  updatedAt?: string; // Added to handle recent sorting
 }
 
 interface Group {
@@ -258,15 +321,21 @@ interface Tag {
   updated_at: string;
 }
 
-// Mock sessions data (keep for now)
+// Global states
 const sessions = ref<SSHSession[]>([]);
-
-// Real data from backend
 const groups = ref<Group[]>([]);
 const tags = ref<Tag[]>([]);
-
-// Track if component is mounted
 const isMounted = ref(false);
+
+// View and filter states
+const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
+const searchQuery = ref('');
+const selectedGroupId = ref<string | null>(null);
+const selectedTagId = ref<string | null>(null);
+
+const favoriteCount = computed(
+  () => sessions.value.filter(s => s.isFavorite).length
+);
 
 // Input states for adding new groups/tags
 const showAddGroupInput = ref(false);
@@ -274,14 +343,141 @@ const newGroupName = ref('');
 const showAddTagInput = ref(false);
 const newTagName = ref('');
 
-// Quick connect states
+// Computed values for UI
+const viewTitle = computed(() => {
+  switch (activeView.value) {
+    case 'favorites':
+      return t('home.favorites');
+    case 'recent':
+      return t('home.recent');
+    case 'group':
+      return (
+        groups.value.find(g => g.id === selectedGroupId.value)?.name || 'Group'
+      );
+    case 'tag':
+      return tags.value.find(t => t.id === selectedTagId.value)?.name || 'Tag';
+    default:
+      return t('home.allSessions');
+  }
+});
+
+const filteredSessions = computed(() => {
+  let result = [...sessions.value];
+
+  // 1. Filter by view/category
+  if (activeView.value === 'favorites') {
+    result = result.filter(s => s.isFavorite);
+  } else if (activeView.value === 'recent') {
+    // Sort by updatedAt descending and take only the first 5
+    result = result
+      .filter(s => s.updatedAt)
+      .sort((a, b) => {
+        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return dateB - dateA;
+      })
+      .slice(0, 5);
+  } else if (activeView.value === 'group' && selectedGroupId.value) {
+    const groupName = groups.value.find(
+      g => g.id === selectedGroupId.value
+    )?.name;
+    if (groupName) {
+      result = result.filter(s => s.groups?.includes(groupName));
+    }
+  } else if (activeView.value === 'tag' && selectedTagId.value) {
+    const tagName = tags.value.find(t => t.id === selectedTagId.value)?.name;
+    if (tagName) {
+      result = result.filter(s => s.tags?.includes(tagName));
+    }
+  }
+
+  // 2. Filter by search query
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.toLowerCase();
+    result = result.filter(
+      s =>
+        s.name.toLowerCase().includes(query) ||
+        s.host.toLowerCase().includes(query) ||
+        s.username.toLowerCase().includes(query)
+    );
+  }
+
+  return result;
+});
+
+// Calculate which group headers to display
+const groupDisplayItems = computed(() => {
+  if (activeView.value === 'group') {
+    const groupName = groups.value.find(
+      g => g.id === selectedGroupId.value
+    )?.name;
+    return groupName ? [groupName] : [];
+  }
+
+  const groupSet = new Set<string>();
+  filteredSessions.value.forEach(s => {
+    if (s.groups && s.groups.length > 0) {
+      s.groups.forEach(g => groupSet.add(g));
+    } else {
+      groupSet.add(t('home.defaultGroup'));
+    }
+  });
+
+  return Array.from(groupSet).sort((a, b) => {
+    if (a === t('home.defaultGroup')) return -1;
+    if (b === t('home.defaultGroup')) return 1;
+    return a.localeCompare(b);
+  });
+});
+
+const getSessionsInGroup = (groupName: string) => {
+  if (groupName === t('home.defaultGroup')) {
+    return filteredSessions.value.filter(
+      s => !s.groups || s.groups.length === 0
+    );
+  }
+  return filteredSessions.value.filter(s => s.groups?.includes(groupName));
+};
+
+// Selection handlers
+const setActiveView = (view: 'all' | 'favorites' | 'recent') => {
+  activeView.value = view;
+  selectedGroupId.value = null;
+  selectedTagId.value = null;
+};
+
+const setActiveGroup = (groupId: string) => {
+  activeView.value = 'group';
+  selectedGroupId.value = groupId;
+  selectedTagId.value = null;
+};
+
+const setActiveTag = (tagId: string) => {
+  activeView.value = 'tag';
+  selectedTagId.value = tagId;
+  selectedGroupId.value = null;
+};
+
+const toggleFavorite = async (session: SSHSession) => {
+  try {
+    const newStatus = !session.isFavorite;
+    await sessionApi.toggleFavorite(session.id, newStatus);
+    session.isFavorite = newStatus;
+    console.log('Toggled favorite for session:', session.name, newStatus);
+  } catch (error) {
+    console.error('Failed to toggle favorite:', error);
+  }
+};
+
 const isQuickConnecting = ref(false);
 const quickConnectSessionId = ref<string | null>(null);
 const showQuickConnectProgress = ref(false);
 const quickConnectProgress = ref(0);
 const quickConnectCurrentStep = ref(0);
 const quickConnectMessage = ref('');
-const quickConnectStatus = ref<'connecting' | 'success' | 'error'>('connecting');
+const quickConnectStatus = ref<'connecting' | 'success' | 'error'>(
+  'connecting'
+);
 const quickConnectErrorMessage = ref('');
 const quickConnectErrorTitle = ref('');
 
@@ -289,12 +485,14 @@ const quickConnectErrorTitle = ref('');
 const contextMenuVisible = ref(false);
 const contextMenuX = ref(0);
 const contextMenuY = ref(0);
-const contextMenuItems = ref<Array<{
-  key: string;
-  label: string;
-  danger?: boolean;
-  divider?: boolean;
-}>>([]);
+const contextMenuItems = ref<
+  Array<{
+    key: string;
+    label: string;
+    danger?: boolean;
+    divider?: boolean;
+  }>
+>([]);
 const selectedSession = ref<SSHSession | null>(null);
 
 // Confirm dialog states
@@ -303,8 +501,8 @@ const confirmDialogTitle = ref('');
 const confirmDialogMessage = ref('');
 let pendingDeleteSession: SSHSession | null = null;
 
-const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
-const tabManagement = inject<any>(TAB_MANAGEMENT_KEY);
+const openSSHForm = inject(OPEN_SSH_FORM_KEY);
+const tabManagement = inject(TAB_MANAGEMENT_KEY);
 const sessionStore = useSessionStore();
 const { t } = useI18n();
 
@@ -350,16 +548,20 @@ const handleTagsUpdated = async () => {
 // Fetch all sessions from the database
 const loadSessions = async () => {
   try {
-    const dbSessions = await invoke<Array<{
-      id: string;
-      addr: string;
-      port: number;
-      server_name: string;
-      username: string;
-      auth_type: string;
-      private_key_path?: string;
-    }>>('list_sessions');
-    
+    const dbSessions = await invoke<
+      Array<{
+        id: string;
+        addr: string;
+        port: number;
+        server_name: string;
+        username: string;
+        auth_type: string;
+        private_key_path?: string;
+        is_favorite: boolean;
+        updated_at?: string;
+      }>
+    >('list_sessions');
+
     if (!dbSessions || dbSessions.length === 0) {
       sessions.value = [];
       return;
@@ -367,17 +569,22 @@ const loadSessions = async () => {
 
     // Transform database sessions to UI format and fetch associated groups/tags
     const transformedSessions: SSHSession[] = await Promise.all(
-      dbSessions.map(async (dbSession) => {
+      dbSessions.map(async dbSession => {
         try {
           // Fetch groups for this session
-          const sessionGroups = await invoke<Array<{ id: string; name: string }>>('list_groups_for_session', {
+          const sessionGroups = await invoke<
+            Array<{ id: string; name: string }>
+          >('list_groups_for_session', {
             sessionId: dbSession.id,
           });
 
           // Fetch tags for this session
-          const sessionTags = await invoke<Array<{ id: string; name: string }>>('list_tags_for_session', {
-            sessionId: dbSession.id,
-          });
+          const sessionTags = await invoke<Array<{ id: string; name: string }>>(
+            'list_tags_for_session',
+            {
+              sessionId: dbSession.id,
+            }
+          );
 
           return {
             id: dbSession.id,
@@ -387,11 +594,16 @@ const loadSessions = async () => {
             username: dbSession.username,
             authType: dbSession.auth_type,
             privateKeyPath: dbSession.private_key_path,
+            isFavorite: dbSession.is_favorite,
             groups: sessionGroups?.map(g => g.name) || [],
             tags: sessionTags?.map(t => t.name) || [],
+            updatedAt: dbSession.updated_at,
           };
         } catch (error) {
-          console.error(`Failed to fetch groups/tags for session ${dbSession.id}:`, error);
+          console.error(
+            `Failed to fetch groups/tags for session ${dbSession.id}:`,
+            error
+          );
           return {
             id: dbSession.id,
             name: dbSession.server_name,
@@ -400,6 +612,7 @@ const loadSessions = async () => {
             username: dbSession.username,
             authType: dbSession.auth_type,
             privateKeyPath: dbSession.private_key_path,
+            isFavorite: dbSession.is_favorite,
             groups: [],
             tags: [],
           };
@@ -419,7 +632,7 @@ const loadSessions = async () => {
 onMounted(async () => {
   console.log('NexaShellHome mounted');
   isMounted.value = true;
-  
+
   // Load sessions first
   await loadSessions();
 
@@ -461,13 +674,14 @@ const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
 };
 
-const handleConnect = (_session: SSHSession) => {
-  // TODO: emit connect event
+const handleConnect = (session: SSHSession) => {
+  // Directly trigger quick connect for now as the main action
+  handleQuickConnect(session);
 };
 
 const handleQuickConnect = async (session: SSHSession) => {
   if (isQuickConnecting.value) return;
-  
+
   console.log('Quick connect initiated for session:', session.name);
   isQuickConnecting.value = true;
   const sessionId = uuidv4();
@@ -489,16 +703,19 @@ const handleQuickConnect = async (session: SSHSession) => {
     await new Promise(resolve => setTimeout(resolve, 200));
 
     let password = '';
-    
+
     try {
-      const [_, pwd] = await invoke<[string, string | null, string | null]>(
+      const credentials = await invoke<[string, string | null, string | null]>(
         'get_session_credentials',
         { sessionId: session.id }
       );
-      password = pwd || '';
+      password = credentials[1] || '';
       console.log('Loaded credentials for session:', session.id);
     } catch (credError) {
-      console.warn('Failed to load credentials, continuing with empty password:', credError);
+      console.warn(
+        'Failed to load credentials, continuing with empty password:',
+        credError
+      );
       // Continue without credentials - may fail at SSH level with proper error
     }
 
@@ -523,7 +740,7 @@ const handleQuickConnect = async (session: SSHSession) => {
     // Step 3: After session is created, add tab so TerminalView receives an existing session
     quickConnectProgress.value = 70;
     quickConnectMessage.value = `Opening terminal for ${session.name}...`;
-    
+
     if (tabManagement) {
       tabManagement.addTab({
         id: tabId,
@@ -538,16 +755,31 @@ const handleQuickConnect = async (session: SSHSession) => {
     quickConnectStatus.value = 'success';
     quickConnectCurrentStep.value = 2;
 
+    // Update timestamp in database
+    try {
+      await invoke('update_session_timestamp', { id: session.id });
+    } catch (e) {
+      console.warn('Failed to update session timestamp:', e);
+    }
+
     // Auto-close progress after 1 second and stay on terminal tab
     await new Promise(resolve => setTimeout(resolve, 1000));
     showQuickConnectProgress.value = false;
 
     console.log('Quick connect successful:', session.name);
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Quick connect failed:', error);
     quickConnectStatus.value = 'error';
     quickConnectErrorTitle.value = `Failed to connect to ${session.name}`;
-    quickConnectErrorMessage.value = error?.message || 'Unknown error occurred';
+
+    let errorDetails = 'Unknown error occurred';
+    if (error && typeof error === 'object' && 'message' in error) {
+      errorDetails = String(error.message);
+    } else if (typeof error === 'string') {
+      errorDetails = error;
+    }
+
+    quickConnectErrorMessage.value = errorDetails;
     quickConnectProgress.value = 100;
 
     // Remove the tab on failure
@@ -562,7 +794,7 @@ const handleQuickConnect = async (session: SSHSession) => {
 const handleDeleteGroup = async (groupId: string) => {
   try {
     await invoke('delete_group', { id: groupId });
-    groups.value = groups.value.filter((g) => g.id !== groupId);
+    groups.value = groups.value.filter(g => g.id !== groupId);
     // The backend cascades deletion to session_groups, clearing SSH sessions' group association
   } catch (error) {
     console.error('Failed to delete group:', error);
@@ -572,7 +804,7 @@ const handleDeleteGroup = async (groupId: string) => {
 const handleDeleteTag = async (tagId: string) => {
   try {
     await invoke('delete_tag', { id: tagId });
-    tags.value = tags.value.filter((t) => t.id !== tagId);
+    tags.value = tags.value.filter(t => t.id !== tagId);
     // The backend cascades deletion to session_tags, clearing SSH sessions' tag association
   } catch (error) {
     console.error('Failed to delete tag:', error);
@@ -642,15 +874,15 @@ const handleSessionContextMenu = (event: MouseEvent, session: SSHSession) => {
 
 const handleContextMenuSelect = async (key: string) => {
   console.log('Context menu item selected:', key);
-  
+
   // Skip divider
   if (key === 'divider') {
     console.log('Skipping divider');
     return;
   }
-  
+
   console.log('Selected session:', selectedSession.value);
-  
+
   if (!selectedSession.value) {
     console.warn('No session selected');
     return;
@@ -679,7 +911,9 @@ const handleEditSession = (session: SSHSession) => {
 const handleDeleteSession = (session: SSHSession) => {
   pendingDeleteSession = session;
   confirmDialogTitle.value = t('home.deleteSession');
-  confirmDialogMessage.value = t('home.deleteSessionConfirm', { name: session.name });
+  confirmDialogMessage.value = t('home.deleteSessionConfirm', {
+    name: session.name,
+  });
   showConfirmDialog.value = true;
 };
 
@@ -694,13 +928,11 @@ const onConfirmDelete = async () => {
     console.log('Invoking delete_session for session ID:', session.id);
     const result = await invoke('delete_session', { id: session.id });
     console.log('Delete result:', result);
-    
+
     sessions.value = sessions.value.filter(s => s.id !== session.id);
     await loadSessions();
-    
   } catch (error) {
     console.error('Failed to delete session:', error);
-    alert(`Failed to delete session: ${error}`);
   }
 };
 
@@ -720,21 +952,21 @@ const onCancelDelete = () => {
 
 /* 侧边栏样式 */
 .home-sidebar {
-  width: 240px;
+  width: 220px;
   background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border-primary);
   display: flex;
   flex-direction: column;
-  padding: 24px 12px;
-  gap: 32px;
+  padding: 16px 8px;
+  gap: 20px;
 }
 
 .section-title {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   color: var(--color-text-tertiary);
-  margin-bottom: 12px;
-  padding: 0 12px;
+  margin-bottom: 8px;
+  padding: 0 10px;
   letter-spacing: 0.05em;
   font-weight: 600;
 }
@@ -900,14 +1132,24 @@ const onCancelDelete = () => {
   color: var(--color-danger, #ef4444);
 }
 
+.tag-badge.active {
+  background: var(--color-primary);
+  color: white;
+}
+
+.tag-badge.active:hover {
+  color: white;
+  opacity: 0.9;
+}
+
 /* 主内容区样式 */
 .home-main {
   flex: 1;
   overflow-y: auto;
-  padding: 40px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 40px;
+  gap: 24px;
 }
 
 .main-header {
@@ -917,15 +1159,53 @@ const onCancelDelete = () => {
 }
 
 .main-header h3 {
-  font-size: 24px;
+  font-size: 20px;
   margin: 0;
   color: var(--color-text-primary);
 }
 
 .main-header .subtitle {
   color: var(--color-text-secondary);
-  margin: 4px 0 0 0;
+  margin: 2px 0 0 0;
+  font-size: 13px;
+}
+
+.action-area {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.search-container {
+  position: relative;
+  width: 280px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-text-tertiary);
+  pointer-events: none;
+}
+
+.search-input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   font-size: 14px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.search-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
+  background: var(--color-bg-primary);
 }
 
 .btn-primary {
@@ -939,24 +1219,30 @@ const onCancelDelete = () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  white-space: nowrap;
+}
+
+.btn-primary:hover {
+  filter: brightness(1.1);
 }
 
 /* 分组与网格 */
 .group-container {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .group-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 20px;
-  padding-bottom: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
   border-bottom: 1px solid var(--color-border-primary);
 }
 
 .folder-icon {
   font-size: 18px;
+  color: var(--color-primary);
 }
 .group-header .name {
   font-weight: 600;
@@ -966,46 +1252,73 @@ const onCancelDelete = () => {
 
 .session-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.empty-state-container {
+  grid-column: 1 / -1;
+  width: 100%;
 }
 
 .session-card {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-lg);
-  padding: 24px;
+  border-radius: var(--radius-md);
+  padding: 12px;
   cursor: pointer;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 8px;
   user-select: none;
 }
 
 .session-card:hover {
   border-color: var(--color-primary);
-  transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .card-top {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .avatar {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   background: var(--color-bg-tertiary);
   color: var(--color-primary);
-  border-radius: 12px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: bold;
-  font-size: 18px;
+  font-size: 14px;
+}
+
+.favorite-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  transition: all 0.2s;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.favorite-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: #facc15; /* Yellow/Gold */
+}
+
+.favorite-btn.active {
+  color: #facc15;
 }
 
 .icon-btn {
@@ -1022,18 +1335,24 @@ const onCancelDelete = () => {
 }
 
 .session-name {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .session-meta {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--color-text-tertiary);
-  margin-top: 6px;
+  margin-top: 4px;
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
     'Courier New', monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-footer {
@@ -1042,33 +1361,35 @@ const onCancelDelete = () => {
   align-items: center;
   margin-top: auto;
   border-top: 1px solid var(--color-bg-tertiary);
-  padding-top: 16px;
+  padding-top: 8px;
 }
 
 .session-tags {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
+  max-height: 24px;
+  overflow: hidden;
 }
 
 .mini-tag {
-  font-size: 10px;
+  font-size: 9px;
   background: var(--color-bg-tertiary);
-  padding: 2px 8px;
-  border-radius: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border-primary);
 }
 
 .connect-hint {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--color-primary);
   font-weight: 500;
   opacity: 0;
   transition: 0.2s;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .session-card:hover .connect-hint {
@@ -1078,26 +1399,26 @@ const onCancelDelete = () => {
 .empty-card {
   border: 2px dashed var(--color-border-primary);
   background: transparent;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 8px;
   color: var(--color-text-tertiary);
   cursor: pointer;
-  min-height: 180px;
+  min-height: 110px;
+  padding: 12px;
   transition: 0.2s;
 }
 
-.empty-card:hover {
-  border-color: var(--color-primary);
-  color: var(--color-primary);
-  background: var(--color-bg-secondary);
+.empty-card span {
+  font-size: 13px;
+  text-align: center;
 }
 
 .empty-card .plus {
-  font-size: 32px;
+  font-size: 24px;
 }
 
 /* Modal styles for quick connect progress */

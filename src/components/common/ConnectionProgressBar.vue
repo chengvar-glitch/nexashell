@@ -56,6 +56,11 @@
 
           <!-- Error State -->
           <template v-else-if="isError">
+            <div class="progress-details-row">
+              <span class="progress-time-label"
+                >Total time: {{ formattedTime }}</span
+              >
+            </div>
             <!-- Status indicators with error inline -->
             <div class="status-steps">
               <div
@@ -113,6 +118,7 @@
 
             <!-- Progress bar -->
             <div class="progress-bar-wrapper">
+              <div class="progress-time">{{ formattedTime }}</div>
               <div class="progress-bar">
                 <div
                   class="progress-bar-fill"
@@ -195,6 +201,7 @@ interface Props {
   errorMessage?: string; // Error details
   progress?: number; // 0-100
   currentStep?: number; // 0-based index of current step
+  time?: number; // Connection time in seconds
   steps?: string[];
 }
 
@@ -206,6 +213,7 @@ const props = withDefaults(defineProps<Props>(), {
   errorMessage: '',
   progress: 0,
   currentStep: 0,
+  time: 0,
   steps: () => [],
 });
 
@@ -218,6 +226,13 @@ const emit = defineEmits<{
 const isError = computed(() => props.status === 'error');
 const isSuccess = computed(() => props.status === 'success');
 const isConnecting = computed(() => props.status === 'connecting');
+
+// Format time as MM:SS
+const formattedTime = computed(() => {
+  const mins = Math.floor(props.time / 60);
+  const secs = props.time % 60;
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+});
 
 // Default steps (English)
 const defaultSteps = computed(() => [
@@ -420,6 +435,13 @@ const handleClose = () => {
   gap: 12px;
 }
 
+.progress-time {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--color-text-secondary);
+  min-width: 45px;
+}
+
 .progress-bar {
   flex: 1;
   height: 6px;
@@ -441,6 +463,18 @@ const handleClose = () => {
   color: var(--color-text-secondary);
   min-width: 32px;
   text-align: right;
+}
+
+.progress-details-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.progress-time-label {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
 }
 
 /* Status steps */

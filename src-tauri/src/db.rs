@@ -29,6 +29,7 @@ pub struct Session {
     pub username: String,
     pub auth_type: String,
     pub private_key_path: Option<String>,
+    pub is_favorite: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -49,12 +50,16 @@ pub fn init_db() -> Result<String, String> {
             username TEXT NOT NULL,
             auth_type TEXT NOT NULL,
             private_key_path TEXT,
+            is_favorite INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )",
         [],
     )
     .map_err(|e| e.to_string())?;
+
+    // Migration for is_favorite if it doesn't exist
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0", []);
 
     // Ensure groups/tags and junction tables exist.
     ensure_groups_and_tags(&conn)?;
@@ -103,8 +108,8 @@ pub fn add_session(
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     let id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
         params![id, addr, port, server_name, username, auth_type, private_key_path],
     )
     .map_err(|e| e.to_string())?;
@@ -121,14 +126,15 @@ pub fn add_session(
 /// * `username` - SSH username
 /// * `auth_type` - Authentication type ('password' or 'key')
 /// * `private_key_path` - Path to private key file (optional)
+/// * `is_favorite` - Whether the session is favorited (optional)
 /// * `group_ids` - List of group IDs to associate with this session (optional)
 /// * `tag_ids` - List of tag IDs to associate with this session (optional)
 /// 
 /// # Returns
 /// The UUID of the newly created session
 #[tauri::command]
-#[allow(dead_code)]
 pub fn save_session_with_credentials(
+    id: Option<String>,
     addr: String,
     port: i64,
     server_name: String,
@@ -137,6 +143,7 @@ pub fn save_session_with_credentials(
     private_key_path: Option<String>,
     password: Option<String>,
     key_passphrase: Option<String>,
+    is_favorite: Option<bool>,
     group_ids: Option<Vec<String>>,
     tag_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
@@ -144,74 +151,90 @@ pub fn save_session_with_credentials(
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     ensure_groups_and_tags(&conn)?;
     
-    let session_id = Uuid::new_v4().to_string();
+    let is_update = id.is_some();
+    let session_id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
     
-    println!("[save_session_with_credentials] Starting to save session:");
-    println!("  session_id: {}", session_id);
-    println!("  server_name: {}", server_name);
-    println!("  addr: {}, port: {}", addr, port);
-    println!("  username: {}", username);
-    println!("  auth_type: {}", auth_type);
-    println!("  group_ids: {:?}", group_ids);
-    println!("  tag_ids: {:?}", tag_ids);
+    println!("[save_session_with_credentials] {} session: {}", if is_update { "Updating" } else { "Saving new" }, session_id);
     
     // 1. Save session metadata to database (without sensitive information)
-    match conn.execute(
-        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![session_id, addr, port, server_name, username, auth_type, private_key_path],
-    ) {
-        Ok(_) => println!("[save_session_with_credentials] Session inserted successfully"),
-        Err(e) => {
-            println!("[save_session_with_credentials] Failed to insert session: {}", e);
-            return Err(e.to_string());
+    if is_update {
+        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, updated_at = CURRENT_TIMESTAMP".to_string();
+        let mut params_vec: Vec<Box<dyn ToSql>> = vec![
+            Box::new(addr),
+            Box::new(port),
+            Box::new(server_name),
+            Box::new(username),
+            Box::new(auth_type),
+            Box::new(private_key_path),
+        ];
+
+        if let Some(fav) = is_favorite {
+            sql.push_str(", is_favorite = ?");
+            sql.push_str(&(params_vec.len() + 1).to_string());
+            params_vec.push(Box::new(if fav { 1 } else { 0 }));
         }
+
+        sql.push_str(" WHERE id = ?");
+        sql.push_str(&(params_vec.len() + 1).to_string());
+        params_vec.push(Box::new(session_id.clone()));
+
+        let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+        conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
+        
+        // Clear existing associations to reset them
+        conn.execute("DELETE FROM session_groups WHERE session_id = ?1", params![session_id]).map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM session_tags WHERE session_id = ?1", params![session_id]).map_err(|e| e.to_string())?;
+    } else {
+        conn.execute(
+            "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![session_id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }],
+        ).map_err(|e| e.to_string())?;
     }
     
-    // 2. Save sensitive information to system keychain
+    // 2. Save sensitive information to system keychain only if changed
     if password.is_some() || key_passphrase.is_some() {
-        println!("[save_session_with_credentials] Saving credentials to keychain...");
-        crate::keychain::KeychainManager::save_credentials(
-            &session_id,
-            &crate::keychain::SensitiveData {
-                password: password.clone(),
-                key_passphrase: key_passphrase.clone(),
+        let should_save = match crate::keychain::KeychainManager::retrieve_credentials(&session_id) {
+            Ok(existing) => {
+                existing.password != password || existing.key_passphrase != key_passphrase
             },
-        )?;
-        println!("[save_session_with_credentials] Credentials saved to keychain");
-    } else {
-        println!("[save_session_with_credentials] No credentials to save (password and passphrase are both None)");
+            Err(_) => true,
+        };
+
+        if should_save {
+            println!("[save_session_with_credentials] Credentials changed or new, saving to keychain...");
+            crate::keychain::KeychainManager::save_credentials(
+                &session_id,
+                &crate::keychain::SensitiveData {
+                    password: password.clone(),
+                    key_passphrase: key_passphrase.clone(),
+                },
+            )?;
+        } else {
+            println!("[save_session_with_credentials] Credentials unchanged, skipping keychain write to avoid system prompts");
+        }
     }
     
     // 3. Associate with groups
     if let Some(groups) = group_ids {
-        println!("[save_session_with_credentials] Linking {} groups", groups.len());
         for group_id in groups {
-            match conn.execute(
+            conn.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
                 params![session_id, group_id],
-            ) {
-                Ok(_) => println!("  Linked to group: {}", group_id),
-                Err(e) => println!("  Failed to link group {}: {}", group_id, e),
-            }
+            ).ok();
         }
     }
     
     // 4. Associate with tags
     if let Some(tags) = tag_ids {
-        println!("[save_session_with_credentials] Linking {} tags", tags.len());
         for tag_id in tags {
-            match conn.execute(
+            conn.execute(
                 "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
                 params![session_id, tag_id],
-            ) {
-                Ok(_) => println!("  Linked to tag: {}", tag_id),
-                Err(e) => println!("  Failed to link tag {}: {}", tag_id, e),
-            }
+            ).ok();
         }
     }
     
-    println!("[save_session_with_credentials] Session saved successfully: {}", session_id);
     Ok(session_id)
 }
 
@@ -239,6 +262,7 @@ pub fn get_session_credentials(sessionId: String) -> Result<(String, Option<Stri
 /// * `username` - SSH username
 /// * `auth_type` - Authentication type ('password' or 'key')
 /// * `private_key_path` - Path to private key file (optional)
+/// * `is_favorite` - Whether the session is favorited (optional)
 /// * `group_ids` - List of group IDs to associate with this session (optional)
 /// * `tag_ids` - List of tag IDs to associate with this session (optional)
 /// 
@@ -253,6 +277,7 @@ pub fn save_session(
     username: String,
     auth_type: String,
     private_key_path: Option<String>,
+    is_favorite: Option<bool>,
     group_ids: Option<Vec<String>>,
     tag_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
@@ -264,9 +289,9 @@ pub fn save_session(
     
     // Insert the session
     conn.execute(
-        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![id, addr, port, server_name, username, auth_type, private_key_path],
+        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }],
     )
     .map_err(|e| e.to_string())?;
     
@@ -296,12 +321,34 @@ pub fn save_session(
 }
 
 #[tauri::command]
+pub fn toggle_favorite(id: String, is_favorite: bool) -> Result<(), String> {
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE sessions SET is_favorite = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![if is_favorite { 1 } else { 0 }, id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn update_session_timestamp(id: String) -> Result<(), String> {
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        params![id],
+    ).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn list_sessions() -> Result<Vec<Session>, String> {
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, addr, port, server_name, username, auth_type, private_key_path, created_at, updated_at FROM sessions",
+            "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, created_at, updated_at FROM sessions",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -314,8 +361,9 @@ pub fn list_sessions() -> Result<Vec<Session>, String> {
                 username: row.get(4)?,
                 auth_type: row.get(5)?,
                 private_key_path: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
+                is_favorite: row.get::<_, i64>(7)? != 0,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -344,7 +392,7 @@ pub fn get_sessions(
     host_addr: Option<String>,
 ) -> Result<Vec<Session>, String> {
     let db_path = db_path()?;
-    let mut sql = String::from("SELECT DISTINCT s.id, s.addr, s.port, s.server_name, s.username, s.auth_type, s.private_key_path, s.created_at, s.updated_at FROM sessions s");
+    let mut sql = String::from("SELECT DISTINCT s.id, s.addr, s.port, s.server_name, s.username, s.auth_type, s.private_key_path, s.is_favorite, s.created_at, s.updated_at FROM sessions s");
     if group_id.is_some() {
         sql.push_str(" JOIN session_groups sg ON s.id = sg.session_id");
     }
@@ -396,8 +444,9 @@ pub fn get_sessions(
                 username: row.get(4)?,
                 auth_type: row.get(5)?,
                 private_key_path: row.get(6)?,
-                created_at: row.get(7)?,
-                updated_at: row.get(8)?,
+                is_favorite: row.get::<_, i64>(7)? != 0,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -494,6 +543,7 @@ pub fn edit_session(
     username: Option<String>,
     auth_type: Option<String>,
     private_key_path: Option<Option<String>>,
+    is_favorite: Option<bool>,
 ) -> Result<(), String> {
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
@@ -507,6 +557,10 @@ pub fn edit_session(
     if let Some(pk_opt) = private_key_path {
         sets.push("private_key_path = ?".to_string());
         params_vec.push(Box::new(pk_opt));
+    }
+    if let Some(fav) = is_favorite {
+        sets.push("is_favorite = ?".to_string());
+        params_vec.push(Box::new(if fav { 1 } else { 0 }));
     }
     if sets.is_empty() { return Ok(()); }
     sets.push("updated_at = CURRENT_TIMESTAMP".to_string());

@@ -7,9 +7,10 @@
     :create-item-text="createGroupText"
     :empty-text="emptyText"
     :allow-create="allowCreateGroup"
+    :immediate-save="immediateSave"
     item-type="group"
-    @update:model-value="(val) => emit('update:modelValue', val)"
-    @item-added="(item) => emit('group-added', item as Group)"
+    @update:model-value="val => emit('update:modelValue', val)"
+    @item-added="item => emit('group-added', item as Group)"
   />
 </template>
 
@@ -32,6 +33,7 @@ interface Props {
   createGroupText?: string;
   emptyText?: string;
   allowCreateGroup?: boolean;
+  immediateSave?: boolean;
 }
 
 withDefaults(defineProps<Props>(), {
@@ -42,6 +44,7 @@ withDefaults(defineProps<Props>(), {
   createGroupText: 'Create',
   emptyText: 'No groups available',
   allowCreateGroup: true,
+  immediateSave: true,
 });
 
 const emit = defineEmits<{

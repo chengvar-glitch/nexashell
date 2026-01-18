@@ -174,7 +174,8 @@
             :placeholder="$t('ssh.groupsPlaceholder')"
             :create-group-text="$t('ssh.createGroup')"
             :empty-text="$t('ssh.noGroupsAvailable')"
-            @group-added="(group) => allGroups.push(group)"
+            :immediate-save="false"
+            @group-added="group => allGroups.push(group)"
           />
         </div>
 
@@ -186,7 +187,8 @@
             :placeholder="$t('ssh.tagsPlaceholder')"
             :create-tag-text="$t('ssh.createTag')"
             :empty-text="$t('ssh.noTagsAvailable')"
-            @tag-added="(tag) => allTags.push(tag)"
+            :immediate-save="false"
+            @tag-added="tag => allTags.push(tag)"
           />
         </div>
       </div>
@@ -229,6 +231,7 @@
       :progress="connectionProgress"
       :current-step="connectionCurrentStep"
       :message="connectionMessage"
+      :time="connectionTime"
       :title="connectionErrorTitle"
       :error-message="connectionErrorMessage"
       @close="onCloseProgress"
@@ -258,6 +261,7 @@ interface Props {
   connectionProgress?: number;
   connectionCurrentStep?: number;
   connectionMessage?: string;
+  connectionTime?: number;
   connectionErrorTitle?: string;
   connectionErrorMessage?: string;
 }
@@ -291,6 +295,7 @@ const props = withDefaults(defineProps<Props>(), {
   connectionProgress: 0,
   connectionCurrentStep: 0,
   connectionMessage: '',
+  connectionTime: 0,
   connectionErrorTitle: '',
   connectionErrorMessage: '',
 });
@@ -298,7 +303,10 @@ const props = withDefaults(defineProps<Props>(), {
 const formData = reactive<SSHConnectionFormData>({
   name: props.initialData?.name || '',
   host: props.initialData?.host || '',
-  port: props.initialData?.port !== undefined && props.initialData?.port !== null ? props.initialData.port : 22,
+  port:
+    props.initialData?.port !== undefined && props.initialData?.port !== null
+      ? props.initialData.port
+      : 22,
   username: props.initialData?.username || '',
   password: props.initialData?.password || '',
   privateKey: props.initialData?.privateKey || '',

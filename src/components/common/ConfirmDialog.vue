@@ -1,28 +1,35 @@
 <template>
   <div v-if="visible" class="confirm-dialog-overlay" @click.self="onCancel">
-    <div class="confirm-dialog" role="alertdialog" aria-labelledby="dialog-title">
+    <div
+      class="confirm-dialog"
+      role="alertdialog"
+      aria-labelledby="dialog-title"
+    >
       <div class="dialog-header">
         <div class="dialog-title-container">
-          <AlertCircle v-if="isDanger" class="dialog-title-icon dialog-title-icon-danger" />
+          <AlertCircle
+            v-if="isDanger"
+            class="dialog-title-icon dialog-title-icon-danger"
+          />
           <h3 id="dialog-title" class="dialog-title">{{ title }}</h3>
         </div>
       </div>
-      
+
       <div class="dialog-body">
         <p class="dialog-message">{{ message }}</p>
       </div>
-      
+
       <div class="dialog-footer">
-        <button 
-          class="dialog-btn dialog-btn-secondary" 
-          @click="onCancel"
+        <button
+          class="dialog-btn dialog-btn-secondary"
           autofocus
+          @click="onCancel"
         >
           {{ cancelText }}
         </button>
-        <button 
-          class="dialog-btn dialog-btn-primary" 
-          :class="{ 'dialog-btn-danger': isDanger }" 
+        <button
+          class="dialog-btn dialog-btn-primary"
+          :class="{ 'dialog-btn-danger': isDanger }"
           @click="onConfirm"
         >
           {{ confirmText }}
@@ -108,7 +115,8 @@ const onCancel = () => {
   max-width: 420px;
   box-shadow: var(--shadow-lg);
   overflow: hidden;
-  animation: dialog-scale-in var(--transition-fast) cubic-bezier(0.16, 1, 0.3, 1);
+  animation: dialog-scale-in var(--transition-fast)
+    cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes dialog-scale-in {

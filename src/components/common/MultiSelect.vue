@@ -40,8 +40,8 @@
 
       <!-- Dropdown menu -->
       <transition name="dropdown">
-        <div 
-          v-if="isOpen" 
+        <div
+          v-if="isOpen"
           class="dropdown-menu"
           :class="{ 'dropdown-menu-up': dropdownDirection === 'up' }"
           :style="{ maxHeight: dropdownMaxHeight }"
@@ -64,22 +64,24 @@
           </div>
 
           <!-- Divider if there are both existing and new item option -->
-          <div v-if="filteredItems.length > 0 && searchQuery.trim()" class="divider" />
+          <div
+            v-if="filteredItems.length > 0 && searchQuery.trim()"
+            class="divider"
+          />
 
           <!-- New item input -->
           <div v-if="searchQuery.trim()" class="new-item-section">
-            <button
-              type="button"
-              class="new-item-btn"
-              @click="addNewItem"
-            >
+            <button type="button" class="new-item-btn" @click="addNewItem">
               <span class="plus-icon">+</span>
               {{ createItemText }}: "{{ searchQuery }}"
             </button>
           </div>
 
           <!-- Empty state -->
-          <div v-if="filteredItems.length === 0 && !searchQuery.trim()" class="empty-state">
+          <div
+            v-if="filteredItems.length === 0 && !searchQuery.trim()"
+            class="empty-state"
+          >
             {{ emptyText }}
           </div>
         </div>
@@ -88,7 +90,19 @@
   </div>
 </template>
 
-<script setup lang="ts" generic="T extends { id: string; name: string; sort: number; created_at: string; updated_at: string }">
+<script
+  setup
+  lang="ts"
+  generic="
+    T extends {
+      id: string;
+      name: string;
+      sort: number;
+      created_at: string;
+      updated_at: string;
+    }
+  "
+>
 import { ref, computed, nextTick, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { eventBus } from '@/core/utils';
@@ -103,6 +117,7 @@ interface Props {
   emptyText?: string;
   allowCreate?: boolean;
   itemType: 'tag' | 'group'; // 'tag' or 'group' to determine event and command
+  immediateSave?: boolean; // Whether to save to DB immediately when creating a new item
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -113,6 +128,7 @@ const props = withDefaults(defineProps<Props>(), {
   createItemText: 'Create',
   emptyText: 'No items available',
   allowCreate: true,
+  immediateSave: true,
 });
 
 const emit = defineEmits<{
@@ -129,15 +145,21 @@ const allItems = ref<any[]>(props.items || []);
 const dropdownDirection = ref<'down' | 'up'>('up');
 
 // Watch for changes to the items prop and update local state
-watch(() => props.items, (newItems) => {
-  allItems.value = newItems || [];
-}, { immediate: true, deep: true });
+watch(
+  () => props.items,
+  newItems => {
+    allItems.value = newItems || [];
+  },
+  { immediate: true, deep: true }
+);
 
 // Computed: filter items based on search query
 const filteredItems = computed(() => {
   const query = searchQuery.value.toLowerCase().trim();
   if (!query) {
-    return allItems.value.filter(item => !selectedItems.value.includes(item.id));
+    return allItems.value.filter(
+      item => !selectedItems.value.includes(item.id)
+    );
   }
   return allItems.value.filter(
     item =>
@@ -154,15 +176,20 @@ const dropdownMaxHeight = computed(() => {
   const itemListPadding = 12; // top + bottom padding of item-list (6px + 6px)
   const dividerHeight = 5; // 1px height + 4px margin
   const newItemSectionHeight = 30; // button with padding
-  const totalMaxHeight = itemHeight * maxVisibleItems + itemListPadding + dividerHeight + newItemSectionHeight;
-  
+  const totalMaxHeight =
+    itemHeight * maxVisibleItems +
+    itemListPadding +
+    dividerHeight +
+    newItemSectionHeight;
+
   // Always return a pixel value to ensure proper scrolling
   // If actual items count is less than or equal to maxVisibleItems, use auto-height but as pixel value
   if (filteredItems.value.length <= maxVisibleItems) {
-    const autoHeight = itemHeight * filteredItems.value.length + itemListPadding;
+    const autoHeight =
+      itemHeight * filteredItems.value.length + itemListPadding;
     return `${autoHeight}px`;
   }
-  
+
   // Otherwise, set max-height and enable scrolling
   return `${totalMaxHeight}px`;
 });
@@ -209,41 +236,65 @@ const addNewItem = async () => {
     return;
   }
 
-  try {
-    // Determine command name based on itemType
-    const commandName = props.itemType === 'tag' ? 'add_tag' : 'add_group';
-    const eventName = props.itemType === 'tag' ? APP_EVENTS.TAGS_UPDATED : APP_EVENTS.GROUPS_UPDATED;
+  if (props.immediateSave) {
+    try {
+      // Determine command name based on itemType
+      const commandName = props.itemType === 'tag' ? 'add_tag' : 'add_group';
+      const eventName =
+        props.itemType === 'tag'
+          ? APP_EVENTS.TAGS_UPDATED
+          : APP_EVENTS.GROUPS_UPDATED;
 
-    // Call Tauri command to create item
-    const newItemId = await invoke<string>(commandName, { name });
+      // Call Tauri command to create item
+      const newItemId = await invoke<string>(commandName, { name });
 
-    // Create the new item object
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // Create the new item object
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const newItem: any = {
+        id: newItemId,
+        name,
+        sort: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // Add to local items list
+      allItems.value.push(newItem);
+
+      // Select the newly created item
+      selectedItems.value.push(newItemId);
+      emit('update:modelValue', selectedItems.value);
+      emit('item-added', newItem);
+
+      // Emit event to notify other components (e.g., home page) to refresh
+      eventBus.emit(eventName);
+
+      // Clear search and close dropdown
+      searchQuery.value = '';
+      await nextTick();
+      isOpen.value = false;
+    } catch (error) {
+      console.error(`Failed to create ${props.itemType}:`, error);
+    }
+  } else {
+    // Simple creation without backend call - will be handled by parent on submit
+    const tempId = `new:${name}`;
     const newItem: any = {
-      id: newItemId,
+      id: tempId,
       name,
       sort: 1,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
 
-    // Add to local items list
     allItems.value.push(newItem);
-
-    // Select the newly created item
-    selectedItems.value.push(newItemId);
+    selectedItems.value.push(tempId);
     emit('update:modelValue', selectedItems.value);
     emit('item-added', newItem);
 
-    // Emit event to notify other components (e.g., home page) to refresh
-    eventBus.emit(eventName);
-
-    // Clear search and close dropdown
     searchQuery.value = '';
     await nextTick();
     isOpen.value = false;
-  } catch (error) {
-    console.error(`Failed to create ${props.itemType}:`, error);
   }
 };
 
@@ -260,14 +311,14 @@ const checkDropdownPosition = async () => {
   await nextTick();
   const container = document.querySelector('.select-container') as HTMLElement;
   const menu = document.querySelector('.dropdown-menu') as HTMLElement;
-  
+
   if (!container || !menu) return;
-  
+
   const containerRect = container.getBoundingClientRect();
   const menuHeight = menu.offsetHeight;
   const spaceBelow = window.innerHeight - containerRect.bottom;
   const spaceAbove = containerRect.top;
-  
+
   // Default to opening upwards
   // Only switch to downwards if there's not enough space above and more space below
   if (spaceAbove < menuHeight + 10 && spaceBelow > menuHeight + 10) {
@@ -277,7 +328,7 @@ const checkDropdownPosition = async () => {
   }
 };
 
-watch(isOpen, async (newVal) => {
+watch(isOpen, async newVal => {
   if (newVal) {
     await checkDropdownPosition();
   }
@@ -319,7 +370,7 @@ watch(isOpen, async (newVal) => {
   border-radius: var(--radius-sm);
   cursor: text;
   box-sizing: border-box;
-  transition: 
+  transition:
     border-color var(--transition-fast),
     background-color var(--transition-fast),
     box-shadow var(--transition-fast);
@@ -348,7 +399,7 @@ watch(isOpen, async (newVal) => {
   font-size: 0.8em;
   line-height: 1;
   border: 1px solid var(--color-border-secondary);
-  transition: 
+  transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast);
 }
@@ -378,7 +429,7 @@ watch(isOpen, async (newVal) => {
   justify-content: center;
   width: 16px;
   height: 16px;
-  transition: 
+  transition:
     color var(--transition-fast),
     transform var(--transition-fast);
   border-radius: 3px;
@@ -494,7 +545,7 @@ watch(isOpen, async (newVal) => {
   padding: 6px 10px;
   cursor: pointer;
   font-size: 0.85em;
-  transition: 
+  transition:
     background-color var(--transition-fast),
     color var(--transition-fast);
 }
@@ -549,7 +600,7 @@ watch(isOpen, async (newVal) => {
   color: var(--color-primary);
   font-size: 0.85em;
   text-align: left;
-  transition: 
+  transition:
     background-color var(--transition-fast),
     color var(--transition-fast);
 }

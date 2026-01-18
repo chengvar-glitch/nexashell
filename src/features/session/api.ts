@@ -155,6 +155,7 @@ class SessionAPI {
    * @param username SSH username
    * @param authType Authentication type ('password' or 'key')
    * @param privateKeyPath Path to private key file (optional)
+   * @param isFavorite Whether the session is favorited (optional)
    * @param groupIds List of group IDs to associate with this session (optional)
    * @param tagIds List of tag IDs to associate with this session (optional)
    * @returns Promise resolving to the UUID of the newly created session
@@ -167,6 +168,7 @@ class SessionAPI {
     username: string,
     authType: string,
     privateKeyPath?: string,
+    isFavorite?: boolean,
     groupIds?: string[],
     tagIds?: string[]
   ): Promise<string> {
@@ -178,6 +180,7 @@ class SessionAPI {
         username,
         authType,
         privateKeyPath: privateKeyPath || null,
+        isFavorite: isFavorite ?? null,
         groupIds: groupIds || null,
         tagIds: tagIds || null,
       };
@@ -187,6 +190,7 @@ class SessionAPI {
         port: params.port,
         serverName: params.serverName,
         username: params.username,
+        isFavorite: params.isFavorite,
         groupCount: groupIds?.length || 0,
         tagCount: tagIds?.length || 0,
       });
@@ -208,6 +212,21 @@ class SessionAPI {
       return sessionId;
     } catch (error) {
       logger.error('Failed to save SSH session', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Toggle the favorite status of a session in the database.
+   * @param id Session UUID
+   * @param isFavorite New favorite status
+   */
+  async toggleFavorite(id: string, isFavorite: boolean): Promise<void> {
+    try {
+      await invoke('toggle_favorite', { id, isFavorite });
+      logger.info('Session favorite status toggled', { id, isFavorite });
+    } catch (error) {
+      logger.error('Failed to toggle session favorite status', error);
       throw error;
     }
   }

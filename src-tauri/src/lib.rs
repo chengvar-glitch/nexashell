@@ -71,6 +71,7 @@ pub fn run() {
                 db::add_session,
                 db::save_session,
                 db::save_session_with_credentials,
+                db::update_session_timestamp,
                 db::list_sessions,
                 db::get_session_credentials,
                 db::add_group,
@@ -90,6 +91,7 @@ pub fn run() {
                 db::delete_tag,
                 db::edit_session,
                 db::delete_session,
+                db::toggle_favorite,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
