@@ -18,16 +18,18 @@
           <input
             id="name"
             ref="nameInput"
-            v-model="formData.name"
+            v-model="formData.server_name"
             type="text"
             :placeholder="$t('ssh.namePlaceholder')"
             class="input"
-            :class="{ error: validationErrors.name }"
+            :class="{ error: validationErrors.server_name }"
             required
           />
-          <span v-if="validationErrors.name" class="modal-error-message">{{
-            validationErrors.name
-          }}</span>
+          <span
+            v-if="validationErrors.server_name"
+            class="modal-error-message"
+            >{{ validationErrors.server_name }}</span
+          >
         </div>
       </div>
 
@@ -38,15 +40,15 @@
             <input
               id="host"
               ref="hostInput"
-              v-model="formData.host"
+              v-model="formData.addr"
               type="text"
               :placeholder="$t('ssh.hostPlaceholder')"
               class="input"
-              :class="{ error: validationErrors.host }"
+              :class="{ error: validationErrors.addr }"
               required
             />
-            <span v-if="validationErrors.host" class="modal-error-message">{{
-              validationErrors.host
+            <span v-if="validationErrors.addr" class="modal-error-message">{{
+              validationErrors.addr
             }}</span>
           </div>
 
@@ -126,7 +128,7 @@
           <input
             id="privateKey"
             ref="privateKeyInput"
-            v-model="formData.privateKey"
+            v-model="formData.private_key_path"
             type="text"
             :placeholder="$t('ssh.privateKeyPlaceholder')"
             class="input"
@@ -140,7 +142,7 @@
             <input
               id="keyPassphrase"
               ref="keyPassphraseInput"
-              v-model="formData.keyPassphrase"
+              v-model="formData.key_passphrase"
               :type="showKeyPassphrase ? 'text' : 'password'"
               :placeholder="$t('ssh.passphrasePlaceholder')"
               class="input"
@@ -197,7 +199,7 @@
         <label class="checkbox-container">
           <input
             ref="saveSessionInput"
-            v-model="formData.saveSession"
+            v-model="formData.save_session"
             type="checkbox"
           />
           <span class="checkbox-label">{{ $t('ssh.saveSession') }}</span>
@@ -267,21 +269,21 @@ interface Props {
 }
 
 interface SSHConnectionFormData {
-  name: string; // Connection name is now required and at the top
-  host: string;
+  server_name: string;
+  addr: string;
   port: number | null;
   username: string;
   password: string;
-  privateKey: string;
-  keyPassphrase: string;
-  saveSession: boolean;
-  groups?: string[]; // Selected group IDs (optional)
-  tags?: string[]; // Selected tag IDs (optional)
+  private_key_path: string;
+  key_passphrase: string; // internal to frontend logic mostly
+  save_session: boolean;
+  groups?: string[];
+  tags?: string[];
 }
 
 interface ValidationErrors {
-  name?: string; // Add name validation error
-  host?: string;
+  server_name?: string;
+  addr?: string;
   port?: string;
   username?: string;
 }
@@ -301,19 +303,19 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const formData = reactive<SSHConnectionFormData>({
-  name: props.initialData?.name || '',
-  host: props.initialData?.host || '',
+  server_name: props.initialData?.server_name || '',
+  addr: props.initialData?.addr || '',
   port:
     props.initialData?.port !== undefined && props.initialData?.port !== null
       ? props.initialData.port
       : 22,
   username: props.initialData?.username || '',
   password: props.initialData?.password || '',
-  privateKey: props.initialData?.privateKey || '',
-  keyPassphrase: props.initialData?.keyPassphrase || '',
-  saveSession:
-    props.initialData?.saveSession !== undefined
-      ? props.initialData.saveSession
+  private_key_path: props.initialData?.private_key_path || '',
+  key_passphrase: props.initialData?.key_passphrase || '',
+  save_session:
+    props.initialData?.save_session !== undefined
+      ? props.initialData.save_session
       : true,
   groups: props.initialData?.groups || [],
   tags: props.initialData?.tags || [],
@@ -406,14 +408,14 @@ const validateForm = (): boolean => {
   let isValid = true;
 
   // Validate connection name
-  if (!formData.name.trim()) {
-    validationErrors.name = t('ssh.errorName');
+  if (!formData.server_name.trim()) {
+    validationErrors.server_name = t('ssh.errorName');
     isValid = false;
   }
 
   // Validate host address
-  if (!formData.host.trim()) {
-    validationErrors.host = t('ssh.errorHost');
+  if (!formData.addr.trim()) {
+    validationErrors.addr = t('ssh.errorHost');
     isValid = false;
   }
 

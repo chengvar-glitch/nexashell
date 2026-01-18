@@ -171,26 +171,26 @@
             >
               <div class="card-top">
                 <div class="avatar">
-                  {{ session.name[0].toUpperCase() }}
+                  {{ session.server_name[0].toUpperCase() }}
                 </div>
                 <button
                   class="favorite-btn"
-                  :class="{ active: session.isFavorite }"
+                  :class="{ active: session.is_favorite }"
                   @click.stop="toggleFavorite(session)"
                 >
                   <Star
                     :size="18"
-                    :fill="session.isFavorite ? 'currentColor' : 'none'"
+                    :fill="session.is_favorite ? 'currentColor' : 'none'"
                   />
                 </button>
               </div>
 
               <div class="card-info">
                 <div class="session-name">
-                  {{ session.name }}
+                  {{ session.server_name }}
                 </div>
                 <div class="session-meta">
-                  {{ session.username }}@{{ session.host }}
+                  {{ session.username }}@{{ session.addr }}
                 </div>
               </div>
 
@@ -289,21 +289,11 @@ import { OPEN_SSH_FORM_KEY, TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
 import { useSessionStore, sessionApi } from '@/features/session';
+import type {
+  SavedSession,
+  SavedSessionDisplay,
+} from '@/features/session/types';
 import { v4 as uuidv4 } from 'uuid';
-
-interface SSHSession {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  username: string;
-  authType: string;
-  privateKeyPath?: string;
-  groups?: string[];
-  tags?: string[];
-  isFavorite?: boolean; // Added for UI
-  updatedAt?: string; // Added to handle recent sorting
-}
 
 interface Group {
   id: string;
@@ -322,7 +312,7 @@ interface Tag {
 }
 
 // Global states
-const sessions = ref<SSHSession[]>([]);
+const sessions = ref<SavedSessionDisplay[]>([]);
 const groups = ref<Group[]>([]);
 const tags = ref<Tag[]>([]);
 const isMounted = ref(false);
@@ -334,7 +324,7 @@ const selectedGroupId = ref<string | null>(null);
 const selectedTagId = ref<string | null>(null);
 
 const favoriteCount = computed(
-  () => sessions.value.filter(s => s.isFavorite).length
+  () => sessions.value.filter(s => s.is_favorite).length
 );
 
 // Input states for adding new groups/tags
@@ -366,14 +356,14 @@ const filteredSessions = computed(() => {
 
   // 1. Filter by view/category
   if (activeView.value === 'favorites') {
-    result = result.filter(s => s.isFavorite);
+    result = result.filter(s => s.is_favorite);
   } else if (activeView.value === 'recent') {
-    // Sort by updatedAt descending and take only the first 5
+    // Sort by updated_at descending and take only the first 5
     result = result
-      .filter(s => s.updatedAt)
+      .filter(s => s.updated_at)
       .sort((a, b) => {
-        const dateA = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const dateB = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+        const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
         return dateB - dateA;
       })
       .slice(0, 5);
@@ -396,8 +386,8 @@ const filteredSessions = computed(() => {
     const query = searchQuery.value.toLowerCase();
     result = result.filter(
       s =>
-        s.name.toLowerCase().includes(query) ||
-        s.host.toLowerCase().includes(query) ||
+        s.server_name.toLowerCase().includes(query) ||
+        s.addr.toLowerCase().includes(query) ||
         s.username.toLowerCase().includes(query)
     );
   }
@@ -458,12 +448,16 @@ const setActiveTag = (tagId: string) => {
   selectedGroupId.value = null;
 };
 
-const toggleFavorite = async (session: SSHSession) => {
+const toggleFavorite = async (session: SavedSessionDisplay) => {
   try {
-    const newStatus = !session.isFavorite;
+    const newStatus = !session.is_favorite;
     await sessionApi.toggleFavorite(session.id, newStatus);
-    session.isFavorite = newStatus;
-    console.log('Toggled favorite for session:', session.name, newStatus);
+    session.is_favorite = newStatus;
+    console.log(
+      'Toggled favorite for session:',
+      session.server_name,
+      newStatus
+    );
   } catch (error) {
     console.error('Failed to toggle favorite:', error);
   }
@@ -493,13 +487,13 @@ const contextMenuItems = ref<
     divider?: boolean;
   }>
 >([]);
-const selectedSession = ref<SSHSession | null>(null);
+const selectedSession = ref<SavedSessionDisplay | null>(null);
 
 // Confirm dialog states
 const showConfirmDialog = ref(false);
 const confirmDialogTitle = ref('');
 const confirmDialogMessage = ref('');
-let pendingDeleteSession: SSHSession | null = null;
+let pendingDeleteSession: SavedSessionDisplay | null = null;
 
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
@@ -548,19 +542,7 @@ const handleTagsUpdated = async () => {
 // Fetch all sessions from the database
 const loadSessions = async () => {
   try {
-    const dbSessions = await invoke<
-      Array<{
-        id: string;
-        addr: string;
-        port: number;
-        server_name: string;
-        username: string;
-        auth_type: string;
-        private_key_path?: string;
-        is_favorite: boolean;
-        updated_at?: string;
-      }>
-    >('list_sessions');
+    const dbSessions = await invoke<SavedSession[]>('list_sessions');
 
     if (!dbSessions || dbSessions.length === 0) {
       sessions.value = [];
@@ -568,7 +550,7 @@ const loadSessions = async () => {
     }
 
     // Transform database sessions to UI format and fetch associated groups/tags
-    const transformedSessions: SSHSession[] = await Promise.all(
+    const transformedSessions: SavedSessionDisplay[] = await Promise.all(
       dbSessions.map(async dbSession => {
         try {
           // Fetch groups for this session
@@ -587,35 +569,20 @@ const loadSessions = async () => {
           );
 
           return {
-            id: dbSession.id,
-            name: dbSession.server_name,
-            host: dbSession.addr,
-            port: dbSession.port,
-            username: dbSession.username,
-            authType: dbSession.auth_type,
-            privateKeyPath: dbSession.private_key_path,
-            isFavorite: dbSession.is_favorite,
+            ...dbSession,
             groups: sessionGroups?.map(g => g.name) || [],
             tags: sessionTags?.map(t => t.name) || [],
-            updatedAt: dbSession.updated_at,
-          };
+          } as SavedSessionDisplay;
         } catch (error) {
           console.error(
             `Failed to fetch groups/tags for session ${dbSession.id}:`,
             error
           );
           return {
-            id: dbSession.id,
-            name: dbSession.server_name,
-            host: dbSession.addr,
-            port: dbSession.port,
-            username: dbSession.username,
-            authType: dbSession.auth_type,
-            privateKeyPath: dbSession.private_key_path,
-            isFavorite: dbSession.is_favorite,
+            ...dbSession,
             groups: [],
             tags: [],
-          };
+          } as SavedSessionDisplay;
         }
       })
     );
@@ -674,15 +641,15 @@ const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
 };
 
-const handleConnect = (session: SSHSession) => {
+const handleConnect = (session: SavedSessionDisplay) => {
   // Directly trigger quick connect for now as the main action
   handleQuickConnect(session);
 };
 
-const handleQuickConnect = async (session: SSHSession) => {
+const handleQuickConnect = async (session: SavedSessionDisplay) => {
   if (isQuickConnecting.value) return;
 
-  console.log('Quick connect initiated for session:', session.name);
+  console.log('Quick connect initiated for session:', session.server_name);
   isQuickConnecting.value = true;
   const sessionId = uuidv4();
   // Use the same id for tab and session to avoid duplicate mounts/creates
@@ -691,7 +658,7 @@ const handleQuickConnect = async (session: SSHSession) => {
   showQuickConnectProgress.value = true;
   quickConnectProgress.value = 0;
   quickConnectCurrentStep.value = 0;
-  quickConnectMessage.value = `Connecting to ${session.name}...`;
+  quickConnectMessage.value = `Connecting to ${session.server_name}...`;
   quickConnectStatus.value = 'connecting';
   quickConnectErrorMessage.value = '';
   quickConnectErrorTitle.value = '';
@@ -699,7 +666,7 @@ const handleQuickConnect = async (session: SSHSession) => {
   try {
     // Step 1: Fetch saved credentials from keychain
     quickConnectProgress.value = 15;
-    quickConnectMessage.value = `Loading credentials for ${session.name}...`;
+    quickConnectMessage.value = `Loading credentials for ${session.server_name}...`;
     await new Promise(resolve => setTimeout(resolve, 200));
 
     let password = '';
@@ -728,8 +695,8 @@ const handleQuickConnect = async (session: SSHSession) => {
     await sessionStore.createSSHSession(
       sessionId,
       tabId,
-      session.name,
-      session.host,
+      session.server_name,
+      session.addr,
       session.port,
       session.username,
       password, // Use loaded password from keychain
@@ -739,19 +706,19 @@ const handleQuickConnect = async (session: SSHSession) => {
 
     // Step 3: After session is created, add tab so TerminalView receives an existing session
     quickConnectProgress.value = 70;
-    quickConnectMessage.value = `Opening terminal for ${session.name}...`;
+    quickConnectMessage.value = `Opening terminal for ${session.server_name}...`;
 
     if (tabManagement) {
       tabManagement.addTab({
         id: tabId,
-        label: session.name,
+        label: session.server_name,
         type: 'ssh',
         closable: true,
       });
     }
 
     quickConnectProgress.value = 100;
-    quickConnectMessage.value = `Connected to ${session.name}`;
+    quickConnectMessage.value = `Connected to ${session.server_name}`;
     quickConnectStatus.value = 'success';
     quickConnectCurrentStep.value = 2;
 
@@ -766,11 +733,11 @@ const handleQuickConnect = async (session: SSHSession) => {
     await new Promise(resolve => setTimeout(resolve, 1000));
     showQuickConnectProgress.value = false;
 
-    console.log('Quick connect successful:', session.name);
+    console.log('Quick connect successful:', session.server_name);
   } catch (error: unknown) {
     console.error('Quick connect failed:', error);
     quickConnectStatus.value = 'error';
-    quickConnectErrorTitle.value = `Failed to connect to ${session.name}`;
+    quickConnectErrorTitle.value = `Failed to connect to ${session.server_name}`;
 
     let errorDetails = 'Unknown error occurred';
     if (error && typeof error === 'object' && 'message' in error) {
@@ -858,8 +825,15 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
 };
 
 // Context menu handlers
-const handleSessionContextMenu = (event: MouseEvent, session: SSHSession) => {
-  console.log('Context menu opened for session:', session.id, session.name);
+const handleSessionContextMenu = (
+  event: MouseEvent,
+  session: SavedSessionDisplay
+) => {
+  console.log(
+    'Context menu opened for session:',
+    session.id,
+    session.server_name
+  );
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   selectedSession.value = session;
@@ -902,17 +876,17 @@ const handleContextMenuSelect = async (key: string) => {
   }
 };
 
-const handleEditSession = (session: SSHSession) => {
+const handleEditSession = (session: SavedSessionDisplay) => {
   console.log('Edit session:', session.id);
   // Emit event to trigger edit session in App.vue
   eventBus.emit(APP_EVENTS.EDIT_SESSION, session);
 };
 
-const handleDeleteSession = (session: SSHSession) => {
+const handleDeleteSession = (session: SavedSessionDisplay) => {
   pendingDeleteSession = session;
   confirmDialogTitle.value = t('home.deleteSession');
   confirmDialogMessage.value = t('home.deleteSessionConfirm', {
-    name: session.name,
+    name: session.server_name,
   });
   showConfirmDialog.value = true;
 };

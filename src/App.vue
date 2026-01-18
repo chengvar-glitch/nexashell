@@ -25,14 +25,14 @@ import {
   SHOW_SETTINGS_KEY,
 } from '@/core/types';
 interface SSHConnectionFormData {
-  name: string;
-  host: string;
+  server_name: string;
+  addr: string;
   port: number | null;
   username: string;
   password: string;
-  privateKey: string;
-  keyPassphrase: string;
-  saveSession: boolean;
+  private_key_path: string;
+  key_passphrase: string;
+  save_session: boolean;
   groups?: string[];
   tags?: string[];
 }
@@ -137,14 +137,14 @@ onMounted(() => {
     editingSessionId.value = session.id;
 
     savedSSHFormData.value = {
-      name: session.name,
-      host: session.host,
+      server_name: session.server_name,
+      addr: session.addr,
       port: session.port,
       username: session.username,
       password: credentials[1] || '',
-      privateKey: session.privateKeyPath || '',
-      keyPassphrase: credentials[2] || '',
-      saveSession: true,
+      private_key_path: session.private_key_path || '',
+      key_passphrase: credentials[2] || '',
+      save_session: true,
       groups: session.groups || [],
       tags: session.tags || [],
     };
@@ -167,8 +167,8 @@ onBeforeUnmount(() => {
 // Handle SSH connection with improved error handling
 const handleSSHConnect = async (data: SSHConnectionFormData) => {
   logger.info('Initiating SSH connection', {
-    name: data.name,
-    host: data.host,
+    name: data.server_name,
+    host: data.addr,
     port: data.port,
   });
 
@@ -243,14 +243,14 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       // This avoids creating duplicate entries in the sessions table
       await invoke('save_session_with_credentials', {
         id: editingSessionId.value,
-        addr: data.host,
+        addr: data.addr,
         port: data.port || 22,
-        serverName: data.name,
+        serverName: data.server_name,
         username: data.username,
         authType: authType,
-        privateKeyPath: data.privateKey || null,
+        privateKeyPath: data.private_key_path || null,
         password: data.password || null,
-        keyPassphrase: data.keyPassphrase || null,
+        keyPassphrase: data.key_passphrase || null,
         groupIds: groupIds.length > 0 ? groupIds : null,
         tagIds: tagIds.length > 0 ? tagIds : null,
       });
@@ -265,8 +265,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
       logger.info('SSH session updated successfully', {
         sessionId: editingSessionId.value,
-        name: data.name,
-        host: data.host,
+        name: data.server_name,
+        host: data.addr,
       });
 
       // Auto-close after 1 second
@@ -276,8 +276,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
       // Emit event to refresh the session list
       eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-        name: data.name,
-        host: data.host,
+        name: data.server_name,
+        host: data.addr,
         port: data.port || 22,
       });
 
@@ -309,8 +309,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     await sessionStore.createSSHSession(
       sessionId,
       sessionId, // Use sessionId as tabId for now
-      data.name,
-      data.host,
+      data.server_name,
+      data.addr,
       data.port || 22,
       data.username,
       data.password || '',
@@ -320,7 +320,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     logger.info('SSH session created successfully', { sessionId });
 
     // 1.5. Save session to database AFTER successful connection if user requested it
-    if (data.saveSession) {
+    if (data.save_session) {
       try {
         const authType = data.password ? 'password' : 'key';
 
@@ -329,8 +329,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         logger.info(
           'Attempting to save session after successful connection...',
           {
-            name: data.name,
-            host: data.host,
+            name: data.server_name,
+            host: data.addr,
             authType,
             hasGroups: groupIds.length > 0,
             hasTags: tagIds.length > 0,
@@ -341,14 +341,14 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
         const savePayload = {
           id: null, // New connection, id is null
-          addr: data.host,
+          addr: data.addr,
           port: data.port || 22,
-          serverName: data.name,
+          serverName: data.server_name,
           username: data.username,
           authType: authType,
-          privateKeyPath: data.privateKey || null,
+          privateKeyPath: data.private_key_path || null,
           password: data.password || null,
-          keyPassphrase: data.keyPassphrase || null,
+          keyPassphrase: data.key_passphrase || null,
           groupIds: groupIds.length > 0 ? groupIds : null,
           tagIds: tagIds.length > 0 ? tagIds : null,
         };
@@ -365,14 +365,14 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
         logger.info('SSH session saved to database', {
           sessionId: savedSessionId,
-          name: data.name,
-          host: data.host,
+          name: data.server_name,
+          host: data.addr,
         });
 
         // Emit event to notify other components that a new session has been saved
         eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-          name: data.name,
-          host: data.host,
+          name: data.server_name,
+          host: data.addr,
           port: data.port || 22,
         });
       } catch (saveError) {
@@ -402,7 +402,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       setTimeout(() => {
         tabManagement.addTab({
           id: sessionId,
-          label: data.name || data.host,
+          label: data.server_name || data.addr,
           type: TAB_TYPE.SSH,
           closable: true,
         });
