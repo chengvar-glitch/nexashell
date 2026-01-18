@@ -111,6 +111,72 @@ pub fn add_session(
     Ok(id)
 }
 
+/// Save a new SSH session with groups and tags associations.
+/// This command saves session metadata without storing sensitive data (passwords, passphrases).
+/// 
+/// # Arguments
+/// * `addr` - SSH server address (host or IP)
+/// * `port` - SSH server port
+/// * `server_name` - Human-friendly session name
+/// * `username` - SSH username
+/// * `auth_type` - Authentication type ('password' or 'key')
+/// * `private_key_path` - Path to private key file (optional)
+/// * `group_ids` - List of group IDs to associate with this session (optional)
+/// * `tag_ids` - List of tag IDs to associate with this session (optional)
+/// 
+/// # Returns
+/// The UUID of the newly created session
+#[tauri::command]
+#[allow(dead_code)]
+pub fn save_session(
+    addr: String,
+    port: i64,
+    server_name: String,
+    username: String,
+    auth_type: String,
+    private_key_path: Option<String>,
+    group_ids: Option<Vec<String>>,
+    tag_ids: Option<Vec<String>>,
+) -> Result<String, String> {
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    ensure_groups_and_tags(&conn)?;
+    
+    let id = Uuid::new_v4().to_string();
+    
+    // Insert the session
+    conn.execute(
+        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![id, addr, port, server_name, username, auth_type, private_key_path],
+    )
+    .map_err(|e| e.to_string())?;
+    
+    // Associate with groups
+    if let Some(groups) = group_ids {
+        for group_id in groups {
+            conn.execute(
+                "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
+                params![id, group_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    
+    // Associate with tags
+    if let Some(tags) = tag_ids {
+        for tag_id in tags {
+            conn.execute(
+                "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
+                params![id, tag_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    
+    Ok(id)
+}
+
 #[tauri::command]
 pub fn list_sessions() -> Result<Vec<Session>, String> {
     let db_path = db_path()?;

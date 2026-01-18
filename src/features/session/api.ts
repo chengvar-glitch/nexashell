@@ -143,6 +143,74 @@ class SessionAPI {
       return [];
     }
   }
+
+  /**
+   * Save SSH session metadata to the database.
+   * This saves all session information except sensitive data (passwords, passphrases).
+   * Optionally associates the session with groups and tags.
+   *
+   * @param addr SSH server address (host or IP)
+   * @param port SSH server port
+   * @param serverName Human-friendly session name
+   * @param username SSH username
+   * @param authType Authentication type ('password' or 'key')
+   * @param privateKeyPath Path to private key file (optional)
+   * @param groupIds List of group IDs to associate with this session (optional)
+   * @param tagIds List of tag IDs to associate with this session (optional)
+   * @returns Promise resolving to the UUID of the newly created session
+   * @throws Error if the save operation fails
+   */
+  async saveSession(
+    addr: string,
+    port: number,
+    serverName: string,
+    username: string,
+    authType: string,
+    privateKeyPath?: string,
+    groupIds?: string[],
+    tagIds?: string[]
+  ): Promise<string> {
+    try {
+      const params = {
+        addr,
+        port: Math.floor(port),
+        serverName,
+        username,
+        authType,
+        privateKeyPath: privateKeyPath || null,
+        groupIds: groupIds || null,
+        tagIds: tagIds || null,
+      };
+
+      console.debug('[DEBUG] sessionApi.saveSession invoke', {
+        addr: params.addr,
+        port: params.port,
+        serverName: params.serverName,
+        username: params.username,
+        groupCount: groupIds?.length || 0,
+        tagCount: tagIds?.length || 0,
+      });
+
+      // Invoke save_session Tauri command
+      const sessionId = await invoke<string>(
+        'save_session',
+        params as Record<string, unknown>
+      );
+
+      console.debug('[DEBUG] sessionApi.saveSession returned', { sessionId });
+      logger.info('SSH session saved', {
+        sessionId,
+        serverName,
+        addr,
+        port,
+      });
+
+      return sessionId;
+    } catch (error) {
+      logger.error('Failed to save SSH session', error);
+      throw error;
+    }
+  }
 }
 
 // Singleton instance

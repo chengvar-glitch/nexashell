@@ -121,6 +121,7 @@
               :key="session.id"
               class="session-card"
               @click="handleConnect(session)"
+              @dblclick="handleQuickConnect(session)"
             >
               <div class="card-top">
                 <div class="avatar">
@@ -165,6 +166,21 @@
         </div>
       </section>
     </main>
+
+    <!-- Quick Connect Progress Modal -->
+    <div v-if="showQuickConnectProgress" class="modal-overlay">
+      <div class="modal-content">
+        <ConnectionProgressBar
+          :progress="quickConnectProgress"
+          :current-step="quickConnectCurrentStep"
+          :status="quickConnectStatus"
+          :message="quickConnectMessage"
+          :error-title="quickConnectErrorTitle"
+          :error-message="quickConnectErrorMessage"
+          @close="showQuickConnectProgress = false"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -182,9 +198,12 @@ import {
   Hash,
   Minus,
 } from 'lucide-vue-next';
-import { OPEN_SSH_FORM_KEY } from '@/core/types';
+import ConnectionProgressBar from '@/components/common/ConnectionProgressBar.vue';
+import { OPEN_SSH_FORM_KEY, TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
+import { useSessionStore } from '@/features/session';
+import { v4 as uuidv4 } from 'uuid';
 
 interface SSHSession {
   id: string;
@@ -192,7 +211,9 @@ interface SSHSession {
   host: string;
   port: number;
   username: string;
-  group?: string;
+  authType: string;
+  privateKeyPath?: string;
+  groups?: string[];
   tags?: string[];
 }
 
@@ -213,30 +234,14 @@ interface Tag {
 }
 
 // Mock sessions data (keep for now)
-const sessions = ref<SSHSession[]>([
-  {
-    id: '1',
-    name: 'Production Web 01',
-    host: '192.168.1.10',
-    port: 22,
-    username: 'root',
-    group: 'Production',
-    tags: ['Web', 'Nginx'],
-  },
-  {
-    id: '2',
-    name: 'Database Master',
-    host: 'db.example.com',
-    port: 22,
-    username: 'admin',
-    group: 'Core',
-    tags: ['DB', 'MySQL'],
-  },
-]);
+const sessions = ref<SSHSession[]>([]);
 
 // Real data from backend
 const groups = ref<Group[]>([]);
 const tags = ref<Tag[]>([]);
+
+// Track if component is mounted
+const isMounted = ref(false);
 
 // Input states for adding new groups/tags
 const showAddGroupInput = ref(false);
@@ -244,13 +249,140 @@ const newGroupName = ref('');
 const showAddTagInput = ref(false);
 const newTagName = ref('');
 
-const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
+// Quick connect states
+const isQuickConnecting = ref(false);
+const quickConnectSessionId = ref<string | null>(null);
+const showQuickConnectProgress = ref(false);
+const quickConnectProgress = ref(0);
+const quickConnectCurrentStep = ref(0);
+const quickConnectMessage = ref('');
+const quickConnectStatus = ref<'connecting' | 'success' | 'error'>('connecting');
+const quickConnectErrorMessage = ref('');
+const quickConnectErrorTitle = ref('');
 
-// Fetch groups and tags from backend on mount
-onMounted(async () => {
+const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
+const tabManagement = inject<any>(TAB_MANAGEMENT_KEY);
+const sessionStore = useSessionStore();
+
+// Create wrapper functions for event handlers that can be properly removed
+const handleSessionSaved = async () => {
+  console.log('SESSION_SAVED event received, isMounted:', isMounted.value);
+  if (isMounted.value) {
+    console.log('Component is mounted, reloading sessions...');
+    await loadSessions();
+  } else {
+    console.log('Component not yet mounted, will load on mount');
+  }
+};
+
+const handleGroupsUpdated = async () => {
+  console.log('GROUPS_UPDATED event received');
+  if (!isMounted.value) return;
   try {
     const fetchedGroups = await invoke<Group[]>('list_groups');
     groups.value = fetchedGroups || [];
+    console.log('Refreshed groups:', fetchedGroups);
+    // Reload sessions when groups change
+    await loadSessions();
+  } catch (error) {
+    console.error('Failed to refresh groups:', error);
+  }
+};
+
+const handleTagsUpdated = async () => {
+  console.log('TAGS_UPDATED event received');
+  if (!isMounted.value) return;
+  try {
+    const fetchedTags = await invoke<Tag[]>('list_tags');
+    tags.value = fetchedTags || [];
+    console.log('Refreshed tags:', fetchedTags);
+    // Reload sessions when tags change
+    await loadSessions();
+  } catch (error) {
+    console.error('Failed to refresh tags:', error);
+  }
+};
+
+// Fetch all sessions from the database
+const loadSessions = async () => {
+  try {
+    const dbSessions = await invoke<Array<{
+      id: string;
+      addr: string;
+      port: number;
+      server_name: string;
+      username: string;
+      auth_type: string;
+      private_key_path?: string;
+    }>>('list_sessions');
+    
+    if (!dbSessions || dbSessions.length === 0) {
+      sessions.value = [];
+      return;
+    }
+
+    // Transform database sessions to UI format and fetch associated groups/tags
+    const transformedSessions: SSHSession[] = await Promise.all(
+      dbSessions.map(async (dbSession) => {
+        try {
+          // Fetch groups for this session
+          const sessionGroups = await invoke<Array<{ id: string; name: string }>>('list_groups_for_session', {
+            sessionId: dbSession.id,
+          });
+
+          // Fetch tags for this session
+          const sessionTags = await invoke<Array<{ id: string; name: string }>>('list_tags_for_session', {
+            sessionId: dbSession.id,
+          });
+
+          return {
+            id: dbSession.id,
+            name: dbSession.server_name,
+            host: dbSession.addr,
+            port: dbSession.port,
+            username: dbSession.username,
+            authType: dbSession.auth_type,
+            privateKeyPath: dbSession.private_key_path,
+            groups: sessionGroups?.map(g => g.name) || [],
+            tags: sessionTags?.map(t => t.name) || [],
+          };
+        } catch (error) {
+          console.error(`Failed to fetch groups/tags for session ${dbSession.id}:`, error);
+          return {
+            id: dbSession.id,
+            name: dbSession.server_name,
+            host: dbSession.addr,
+            port: dbSession.port,
+            username: dbSession.username,
+            authType: dbSession.auth_type,
+            privateKeyPath: dbSession.private_key_path,
+            groups: [],
+            tags: [],
+          };
+        }
+      })
+    );
+
+    sessions.value = transformedSessions;
+    console.log('Loaded sessions from database:', transformedSessions);
+  } catch (error) {
+    console.error('Failed to load sessions:', error);
+    sessions.value = [];
+  }
+};
+
+// Fetch groups and tags from backend on mount
+onMounted(async () => {
+  console.log('NexaShellHome mounted');
+  isMounted.value = true;
+  
+  // Load sessions first
+  await loadSessions();
+
+  try {
+    const fetchedGroups = await invoke<Group[]>('list_groups');
+    groups.value = fetchedGroups || [];
+    console.log('Loaded groups:', fetchedGroups);
   } catch (error) {
     console.error('Failed to fetch groups:', error);
   }
@@ -258,38 +390,28 @@ onMounted(async () => {
   try {
     const fetchedTags = await invoke<Tag[]>('list_tags');
     tags.value = fetchedTags || [];
+    console.log('Loaded tags:', fetchedTags);
   } catch (error) {
     console.error('Failed to fetch tags:', error);
   }
 
   // Listen for group and tag updates from other components
-  eventBus.on(APP_EVENTS.GROUPS_UPDATED, refreshGroups);
-  eventBus.on(APP_EVENTS.TAGS_UPDATED, refreshTags);
+  console.log('Registering event listeners...');
+  eventBus.on(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
+  eventBus.on(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
+  // Reload sessions when a new session is saved
+  eventBus.on(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
+  console.log('Event listeners registered');
 });
 
 onUnmounted(() => {
+  console.log('NexaShellHome unmounting');
+  isMounted.value = false;
   // Clean up event listeners
-  eventBus.off(APP_EVENTS.GROUPS_UPDATED, refreshGroups);
-  eventBus.off(APP_EVENTS.TAGS_UPDATED, refreshTags);
+  eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
+  eventBus.off(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
+  eventBus.off(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
 });
-
-const refreshGroups = async () => {
-  try {
-    const fetchedGroups = await invoke<Group[]>('list_groups');
-    groups.value = fetchedGroups || [];
-  } catch (error) {
-    console.error('Failed to refresh groups:', error);
-  }
-};
-
-const refreshTags = async () => {
-  try {
-    const fetchedTags = await invoke<Tag[]>('list_tags');
-    tags.value = fetchedTags || [];
-  } catch (error) {
-    console.error('Failed to refresh tags:', error);
-  }
-};
 
 const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
@@ -297,6 +419,81 @@ const handleNewConnection = () => {
 
 const handleConnect = (_session: SSHSession) => {
   // TODO: emit connect event
+};
+
+const handleQuickConnect = async (session: SSHSession) => {
+  if (isQuickConnecting.value) return;
+  
+  console.log('Quick connect initiated for session:', session.name);
+  isQuickConnecting.value = true;
+  const sessionId = uuidv4();
+  const tabId = uuidv4();
+  quickConnectSessionId.value = sessionId;
+  showQuickConnectProgress.value = true;
+  quickConnectProgress.value = 0;
+  quickConnectCurrentStep.value = 0;
+  quickConnectMessage.value = `Connecting to ${session.name}...`;
+  quickConnectStatus.value = 'connecting';
+  quickConnectErrorMessage.value = '';
+  quickConnectErrorTitle.value = '';
+
+  try {
+    // Add SSH tab first
+    if (tabManagement) {
+      tabManagement.addTab({
+        id: tabId,
+        label: session.name,
+        type: 'ssh',
+        sessionId: sessionId,
+      });
+    }
+
+    // Update progress
+    quickConnectProgress.value = 20;
+    quickConnectMessage.value = `Establishing SSH connection to ${session.host}...`;
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Create SSH session - note: no password for saved sessions
+    quickConnectProgress.value = 50;
+    quickConnectMessage.value = `Authenticating with ${session.username}...`;
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    await sessionStore.createSSHSession(
+      sessionId,
+      tabId,
+      session.name,
+      session.host,
+      session.port,
+      session.username,
+      '', // Empty password - user should use saved session with key-based auth
+      80,
+      24
+    );
+
+    quickConnectProgress.value = 100;
+    quickConnectMessage.value = `Connected to ${session.name}`;
+    quickConnectStatus.value = 'success';
+    quickConnectCurrentStep.value = 2;
+
+    // Auto-close progress after 1 second and stay on terminal tab
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    showQuickConnectProgress.value = false;
+
+    console.log('Quick connect successful:', session.name);
+  } catch (error: any) {
+    console.error('Quick connect failed:', error);
+    quickConnectStatus.value = 'error';
+    quickConnectErrorTitle.value = `Failed to connect to ${session.name}`;
+    quickConnectErrorMessage.value = error?.message || 'Unknown error occurred';
+    quickConnectProgress.value = 100;
+
+    // Remove the tab on failure
+    if (tabManagement) {
+      await tabManagement.closeTab(tabId);
+    }
+  } finally {
+    isQuickConnecting.value = false;
+  }
 };
 
 const handleDeleteGroup = async (groupId: string) => {
@@ -636,6 +833,7 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  user-select: none;
 }
 
 .session-card:hover {
@@ -753,5 +951,40 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
 
 .empty-card .plus {
   font-size: 32px;
+}
+
+/* Modal styles for quick connect progress */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.modal-content {
+  position: relative;
+  border: none;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  animation: modal-appear 0.2s ease-out forwards;
+}
+
+@keyframes modal-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 </style>

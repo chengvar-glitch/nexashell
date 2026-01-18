@@ -15,7 +15,7 @@ import {
 import { themeManager } from '@/core/utils/theme-manager';
 import { useModal } from '@/composables';
 import { useTabManagement } from '@/composables';
-import { useSessionStore } from '@/features/session';
+import { useSessionStore, sessionApi } from '@/features/session';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
@@ -177,6 +177,50 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       24 // Default rows
     );
     logger.info('SSH session created successfully', { sessionId });
+
+    // Save session to database if user requested it
+    if (data.saveSession) {
+      try {
+        // Determine auth type based on whether privateKey is provided
+        const authType = data.privateKey ? 'key' : 'password';
+        
+        logger.info('Attempting to save session...', {
+          name: data.name,
+          host: data.host,
+          authType,
+          hasGroups: !!data.groups,
+          hasTags: !!data.tags,
+        });
+        
+        const savedSessionId = await sessionApi.saveSession(
+          data.host,
+          data.port || 22,
+          data.name,
+          data.username,
+          authType,
+          data.privateKey || undefined,
+          data.groups || undefined,
+          data.tags || undefined
+        );
+        
+        logger.info('SSH session saved to database', {
+          sessionId: savedSessionId,
+          name: data.name,
+          host: data.host,
+        });
+        
+        // Emit event to notify other components that a new session has been saved
+        logger.info('Emitting SESSION_SAVED event...');
+        eventBus.emit(APP_EVENTS.SESSION_SAVED, {
+          name: data.name,
+          host: data.host,
+          port: data.port || 22,
+        });
+      } catch (saveError) {
+        logger.error('Failed to save session to database', saveError);
+        // Don't throw - connection is already established, just log the error
+      }
+    }
 
     clearTimeout(stepInterval);
     connectionCurrentStep.value = 2;

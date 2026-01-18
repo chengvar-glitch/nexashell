@@ -68,6 +68,7 @@ pub fn run() {
             ssh::get_buffered_ssh_output,
                 db::init_db,
                 db::add_session,
+                db::save_session,
                 db::list_sessions,
                 db::add_group,
                 db::list_groups,
