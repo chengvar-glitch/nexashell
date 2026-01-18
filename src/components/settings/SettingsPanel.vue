@@ -169,7 +169,7 @@
                     <div class="about-title-group">
                       <h4 class="about-app-name">NexaShell</h4>
                       <p class="about-version">
-                        {{ $t('settings.version') }} 1.0.0
+                        {{ $t('settings.version') }} {{ appVersion }}
                       </p>
                     </div>
                   </div>
@@ -370,7 +370,7 @@
                   <div class="about-title-group">
                     <h4 class="about-app-name">NexaShell</h4>
                     <p class="about-version">
-                      {{ $t('settings.version') }} 1.0.0
+                      {{ $t('settings.version') }} {{ appVersion }}
                     </p>
                   </div>
                 </div>
@@ -413,6 +413,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { getVersion } from '@tauri-apps/api/app';
 import {
   Palette,
   Terminal,
@@ -443,6 +444,7 @@ const emit = defineEmits<{
 
 const activeMenu = ref('appearance');
 const selectedTheme = ref<ThemeMode>('auto');
+const appVersion = ref('0.1.0');
 
 const contentRef = ref<HTMLElement | null>(null);
 const contentRefFallback = ref<HTMLElement | null>(null);
@@ -594,10 +596,16 @@ const handleThemeChange = (event: Event) => {
   themeManager.setTheme(theme);
 };
 
-onMounted(() => {
+onMounted(async () => {
   selectedTheme.value = themeManager.getTheme();
   if (props.visible) {
     initObserver();
+  }
+
+  try {
+    appVersion.value = await getVersion();
+  } catch (err) {
+    console.warn('Failed to get app version:', err);
   }
 });
 

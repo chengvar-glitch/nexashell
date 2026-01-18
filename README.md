@@ -108,12 +108,18 @@ The terminal subsystem is split between the frontend (renderer) and the Rust bac
 
 **Key IPC / Tauri commands (RPC surface)**
 
-The backend exposes these Tauri commands and events for the renderer to consume (implemented in `src-tauri/src/ssh.rs` and wired in `src-tauri/src/lib.rs`):
+The backend exposes these Tauri commands and events for the renderer to consume (implemented in `src-tauri/src/ssh.rs`, `src-tauri/src/db.rs` and wired in `src-tauri/src/lib.rs`):
 
-- Commands:
+- SSH Commands:
   - `connect_ssh` — open and initialize an SSH session and PTY
   - `disconnect_ssh` — terminate a session and clean up resources
   - `send_ssh_input` — forward user input to the SSH channel
+
+- Database Commands (Management):
+  - `list_sessions`, `add_session`, `edit_session`, `delete_session` — manage SSH connections
+  - `list_groups`, `add_group`, `edit_group`, `delete_group` — manage connection groups
+  - `list_tags`, `add_tag`, `edit_tag`, `delete_tag` — manage session tags
+  - `link_session_group`, `link_session_tag` — create associations
 
 - Events (emitted by backend):
   - `ssh-output-<session_id>` — carries `OutputChunk` payloads with seq, output, and timestamp
@@ -131,10 +137,13 @@ The terminal frontend uses `xterm.js` with WebGL acceleration for GPU-accelerate
 **Project structure (high level)**
 
 - `src/` — frontend renderer (Vue 3 + TypeScript)
-  - `src/components/terminal/TerminalView.vue` — terminal rendering
-  - `src/services/session-api.ts` — Tauri RPC wrappers
+  - `src/components/` — reusable UI components
+  - `src/features/` — feature-based modules (session, settings, tabs, etc.)
+    - `src/features/session/api.ts` — Tauri RPC wrappers
+  - `src/core/` — core utilities, constants, and i18n
 - `src-tauri/` — Rust backend and Tauri config
   - `src-tauri/src/ssh.rs` — SSH manager and channel implementation
+  - `src-tauri/src/db.rs` — SQLite database manager
   - `src-tauri/src/lib.rs` — Tauri initialization and command registration
 
 **Contributing**
