@@ -28,26 +28,61 @@
           <h4 class="section-title">
             {{ $t('home.groups') }}
           </h4>
-          <button class="add-btn">
+          <button class="add-btn" @click="showAddGroupInput = !showAddGroupInput">
             <Plus :size="14" />
           </button>
         </div>
+        <div v-if="showAddGroupInput" class="add-input-wrapper">
+          <input
+            v-model="newGroupName"
+            type="text"
+            class="add-input"
+            placeholder="Group name..."
+            @keydown="handleGroupInputKeydown"
+            autofocus
+          />
+        </div>
         <nav class="sidebar-nav">
-          <button v-for="group in groups" :key="group" class="nav-item">
-            <Folder :size="16" />
-            <span>{{ group }}</span>
-          </button>
+          <div v-for="group in groups" :key="group.id" class="nav-item-wrapper">
+            <button class="nav-item">
+              <Folder :size="16" />
+              <span>{{ group.name }}</span>
+            </button>
+            <button class="delete-btn" @click.stop="handleDeleteGroup(group.id)">
+              <Minus :size="14" />
+            </button>
+          </div>
         </nav>
       </div>
 
       <div class="sidebar-section">
-        <h4 class="section-title">
-          {{ $t('home.tags') }}
-        </h4>
+        <div class="section-header">
+          <h4 class="section-title">
+            {{ $t('home.tags') }}
+          </h4>
+          <button class="add-btn" @click="showAddTagInput = !showAddTagInput">
+            <Plus :size="14" />
+          </button>
+        </div>
+        <div v-if="showAddTagInput" class="add-input-wrapper">
+          <input
+            v-model="newTagName"
+            type="text"
+            class="add-input"
+            placeholder="Tag name..."
+            @keydown="handleTagInputKeydown"
+            autofocus
+          />
+        </div>
         <div class="tag-cloud">
-          <span v-for="tag in tags" :key="tag" class="tag-badge">
-            <Hash :size="12" />{{ tag }}
-          </span>
+          <div v-for="tag in tags" :key="tag.id" class="tag-item-wrapper">
+            <span class="tag-badge">
+              <Hash :size="12" />{{ tag.name }}
+            </span>
+            <button class="tag-delete-btn" @click.stop="handleDeleteTag(tag.id)">
+              <Minus :size="12" />
+            </button>
+          </div>
         </div>
       </div>
     </aside>
@@ -134,7 +169,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject } from 'vue';
+import { ref, inject, onMounted } from 'vue';
+import { invoke } from '@tauri-apps/api/core';
 import {
   Home,
   Star,
@@ -144,6 +180,7 @@ import {
   Plus,
   ChevronRight,
   Hash,
+  Minus,
 } from 'lucide-vue-next';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 
@@ -157,7 +194,23 @@ interface SSHSession {
   tags?: string[];
 }
 
-// Mock data (for design preview)
+interface Group {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Tag {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Mock sessions data (keep for now)
 const sessions = ref<SSHSession[]>([
   {
     id: '1',
@@ -179,23 +232,109 @@ const sessions = ref<SSHSession[]>([
   },
 ]);
 
-const groups = ref(['Production', 'Core', 'Staging']);
-const tags = ref(['Web', 'DB', 'Internal', 'Nginx', 'Docker']);
+// Real data from backend
+const groups = ref<Group[]>([]);
+const tags = ref<Tag[]>([]);
 
-const emit = defineEmits<{
-  newConnection: [];
-  connect: [session: SSHSession];
-}>();
+// Input states for adding new groups/tags
+const showAddGroupInput = ref(false);
+const newGroupName = ref('');
+const showAddTagInput = ref(false);
+const newTagName = ref('');
 
 const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
 
+// Fetch groups and tags from backend on mount
+onMounted(async () => {
+  try {
+    const fetchedGroups = await invoke<Group[]>('list_groups');
+    groups.value = fetchedGroups || [];
+  } catch (error) {
+    console.error('Failed to fetch groups:', error);
+  }
+
+  try {
+    const fetchedTags = await invoke<Tag[]>('list_tags');
+    tags.value = fetchedTags || [];
+  } catch (error) {
+    console.error('Failed to fetch tags:', error);
+  }
+});
+
 const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
-  emit('newConnection');
 };
 
 const handleConnect = (session: SSHSession) => {
-  emit('connect', session);
+  // TODO: emit connect event
+};
+
+const handleDeleteGroup = async (groupId: string) => {
+  try {
+    await invoke('delete_group', { id: groupId });
+    groups.value = groups.value.filter((g) => g.id !== groupId);
+  } catch (error) {
+    console.error('Failed to delete group:', error);
+  }
+};
+
+const handleDeleteTag = async (tagId: string) => {
+  try {
+    await invoke('delete_tag', { id: tagId });
+    tags.value = tags.value.filter((t) => t.id !== tagId);
+  } catch (error) {
+    console.error('Failed to delete tag:', error);
+  }
+};
+
+const handleAddGroup = async () => {
+  const name = newGroupName.value.trim();
+  if (!name) return;
+
+  try {
+    await invoke('add_group', { name });
+    newGroupName.value = '';
+    showAddGroupInput.value = false;
+    // Refresh groups list
+    const fetchedGroups = await invoke<Group[]>('list_groups');
+    groups.value = fetchedGroups || [];
+  } catch (error) {
+    console.error('Failed to add group:', error);
+  }
+};
+
+const handleAddTag = async () => {
+  const name = newTagName.value.trim();
+  if (!name) return;
+
+  try {
+    await invoke('add_tag', { name });
+    newTagName.value = '';
+    showAddTagInput.value = false;
+    // Refresh tags list
+    const fetchedTags = await invoke<Tag[]>('list_tags');
+    tags.value = fetchedTags || [];
+  } catch (error) {
+    console.error('Failed to add tag:', error);
+  }
+};
+
+const handleGroupInputKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter') {
+    handleAddGroup();
+  } else if (e.key === 'Escape') {
+    showAddGroupInput.value = false;
+    newGroupName.value = '';
+  }
+};
+
+const handleTagInputKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter') {
+    handleAddTag();
+  } else if (e.key === 'Escape') {
+    showAddTagInput.value = false;
+    newTagName.value = '';
+  }
 };
 </script>
 
@@ -234,6 +373,12 @@ const handleConnect = (session: SSHSession) => {
   gap: 4px;
 }
 
+.nav-item-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .nav-item {
   display: flex;
   align-items: center;
@@ -246,7 +391,7 @@ const handleConnect = (session: SSHSession) => {
   cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
-  width: 100%;
+  flex: 1;
   text-align: left;
 }
 
@@ -268,6 +413,27 @@ const handleConnect = (session: SSHSession) => {
   border-radius: 10px;
 }
 
+.delete-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.nav-item-wrapper:hover .delete-btn {
+  opacity: 1;
+  color: var(--color-text-secondary);
+}
+
+.delete-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-danger, #ef4444);
+}
+
 .section-header {
   display: flex;
   justify-content: space-between;
@@ -282,6 +448,36 @@ const handleConnect = (session: SSHSession) => {
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
+  transition: all 0.2s;
+}
+
+.add-btn:hover {
+  color: var(--color-primary);
+}
+
+.add-input-wrapper {
+  padding: 0 12px 8px 12px;
+}
+
+.add-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+  outline: none;
+  transition: all 0.2s;
+}
+
+.add-input:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.1);
+}
+
+.add-input::placeholder {
+  color: var(--color-text-tertiary);
 }
 
 .tag-cloud {
@@ -289,6 +485,12 @@ const handleConnect = (session: SSHSession) => {
   flex-wrap: wrap;
   gap: 8px;
   padding: 0 12px;
+}
+
+.tag-item-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .tag-badge {
@@ -302,6 +504,28 @@ const handleConnect = (session: SSHSession) => {
 
 .tag-badge:hover {
   color: var(--color-primary);
+}
+
+.tag-delete-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  opacity: 0;
+  transition: all 0.2s;
+  line-height: 1;
+}
+
+.tag-item-wrapper:hover .tag-delete-btn {
+  opacity: 1;
+  color: var(--color-text-secondary);
+}
+
+.tag-delete-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-danger, #ef4444);
 }
 
 /* 主内容区样式 */
