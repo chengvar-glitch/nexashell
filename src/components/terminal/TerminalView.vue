@@ -3,26 +3,26 @@ import { onMounted, onUnmounted, ref, nextTick, watch, onActivated } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { SearchAddon } from '@xterm/addon-search';
 import '@xterm/xterm/css/xterm.css';
 import { useSessionStore } from '@/features/session';
 import { sessionApi } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
+import { useSettingsStore } from '@/features/settings';
 
 const logger = createLogger('TERMINAL_VIEW');
 
-// Terminal configuration constants
+const sessionStore = useSessionStore();
+const settingsStore = useSettingsStore();
+
+// Terminal configuration constants - Now acting as defaults or base
 const TERMINAL_CONFIG = {
-  SCROLLBACK: 80000,
-  FONT_SIZE: 14,
-  FONT_FAMILY: 'Monaco, Menlo, Ubuntu Mono, monospace',
-  ROWS: 24,
-  COLS: 80,
-  CURSOR_BLINK: true,
-  CURSOR_STYLE: 'block' as const,
   THEME: {
     background: '#1e1e1e',
     foreground: '#d4d4d4',
+    selectionBackground: '#facc15', // 醒目的黄色背景
+    selectionForeground: '#000000', // 黑色文字
   },
 };
 
@@ -53,11 +53,55 @@ const props = withDefaults(defineProps<Props>(), {
   password: '',
 });
 
-const sessionStore = useSessionStore();
-
 const terminalRef = ref<HTMLElement>();
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
+let searchAddon: SearchAddon | null = null;
+
+// Search state
+const showSearch = ref(false);
+const searchQuery = ref('');
+const searchInputRef = ref<HTMLInputElement | null>(null);
+
+/**
+ * Search functionality
+ */
+const toggleSearch = () => {
+  showSearch.value = !showSearch.value;
+  if (showSearch.value) {
+    nextTick(() => {
+      searchInputRef.value?.focus();
+    });
+  } else {
+    terminal?.focus();
+  }
+};
+
+const handleSearch = () => {
+  if (searchAddon && searchQuery.value) {
+    searchAddon.findNext(searchQuery.value, { incremental: true });
+  }
+};
+
+const handleSearchNext = () => {
+  if (searchAddon && searchQuery.value) {
+    searchAddon.findNext(searchQuery.value);
+  }
+};
+
+const handleSearchPrev = () => {
+  if (searchAddon && searchQuery.value) {
+    searchAddon.findPrevious(searchQuery.value);
+  }
+};
+
+const closeSearch = () => {
+  showSearch.value = false;
+  searchQuery.value = '';
+  nextTick(() => {
+    terminal?.focus();
+  });
+};
 
 // Output deduplication tracking
 let lastSeq = 0;
@@ -169,18 +213,52 @@ onMounted(async () => {
 
   // Initialize xterm.js terminal
   terminal = new Terminal({
-    scrollback: TERMINAL_CONFIG.SCROLLBACK,
-    fontSize: TERMINAL_CONFIG.FONT_SIZE,
-    fontFamily: TERMINAL_CONFIG.FONT_FAMILY,
-    rows: TERMINAL_CONFIG.ROWS,
-    cols: TERMINAL_CONFIG.COLS,
-    cursorBlink: TERMINAL_CONFIG.CURSOR_BLINK,
-    cursorStyle: TERMINAL_CONFIG.CURSOR_STYLE,
+    scrollback: settingsStore.terminal.scrollback,
+    fontSize: settingsStore.terminal.fontSize,
+    fontFamily: settingsStore.terminal.fontFamily,
+    rows: 24,
+    cols: 80,
+    cursorBlink: settingsStore.terminal.cursorBlink,
+    cursorStyle: settingsStore.terminal.cursorStyle,
     theme: TERMINAL_CONFIG.THEME,
   });
 
+  // Watch for cursor style changes
+  watch(
+    () => settingsStore.terminal.cursorStyle,
+    newStyle => {
+      if (terminal) {
+        terminal.options.cursorStyle = newStyle;
+      }
+    }
+  );
+
+  // Watch for cursor blink changes
+  watch(
+    () => settingsStore.terminal.cursorBlink,
+    newBlink => {
+      if (terminal) {
+        terminal.options.cursorBlink = newBlink;
+      }
+    }
+  );
+
+  // Watch for font size changes
+  watch(
+    () => settingsStore.terminal.fontSize,
+    newSize => {
+      if (terminal) {
+        terminal.options.fontSize = newSize;
+        fitAddon?.fit();
+      }
+    }
+  );
+
   fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
+
+  searchAddon = new SearchAddon();
+  terminal.loadAddon(searchAddon);
 
   // Use WebGL renderer for better performance
   try {
@@ -190,6 +268,62 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value);
+
+  // Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
+  terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+    if (event.type !== 'keydown') return true;
+
+    const isMac = navigator.userAgent.includes('Mac');
+    const isControlKey = isMac ? event.metaKey : event.ctrlKey;
+
+    // Copy: Cmd+C (Mac) or Ctrl+C (Win/Linux)
+    if (isControlKey && event.code === 'KeyC') {
+      if (terminal?.hasSelection()) {
+        const selection = terminal.getSelection();
+        if (selection) {
+          navigator.clipboard.writeText(selection);
+        }
+        return false;
+      }
+      // If no selection on Windows, return true to let it be handled as SIGINT (Ctrl+C)
+      return isMac ? false : true;
+    }
+
+    // Paste: Cmd+V (Mac) or Ctrl+V (Win/Linux)
+    if (isControlKey && event.code === 'KeyV') {
+      navigator.clipboard.readText().then(text => {
+        if (text && props.sessionId) {
+          // Send pasted text to the backend session
+          emit(`ssh-input-${props.sessionId}`, { input: text });
+        }
+      });
+      return false;
+    }
+
+    // Select All: Cmd+A or Ctrl+A
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyA') {
+      terminal?.selectAll();
+      return false;
+    }
+
+    // Search: Cmd+F or Ctrl+F
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyF') {
+      toggleSearch();
+      return false;
+    }
+
+    // Clear: Cmd+Shift+K or Ctrl+Shift+K
+    if (
+      (event.metaKey || event.ctrlKey) &&
+      event.shiftKey &&
+      event.code === 'KeyK'
+    ) {
+      terminal?.clear();
+      return false;
+    }
+
+    return true;
+  });
 
   // Use ResizeObserver for robust layout management
   const resizeObserver = new ResizeObserver(() => {
@@ -441,6 +575,23 @@ onMounted(async () => {
 <template>
   <div class="terminal-view">
     <div ref="terminalRef" class="terminal-container" />
+    <div v-if="showSearch" class="terminal-search-box">
+      <input
+        ref="searchInputRef"
+        v-model="searchQuery"
+        type="text"
+        placeholder="Search..."
+        @input="handleSearch"
+        @keydown.enter.exact.stop.prevent="handleSearchNext"
+        @keydown.shift.enter.stop.prevent="handleSearchPrev"
+        @keydown.escape.stop.prevent="closeSearch"
+      />
+      <div class="search-actions">
+        <button @click.stop="handleSearchPrev">↑</button>
+        <button @click.stop="handleSearchNext">↓</button>
+        <button @click.stop="closeSearch">×</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -452,6 +603,59 @@ onMounted(async () => {
   background-color: #1e1e1e;
   padding: 10px;
   box-sizing: border-box;
+  position: relative;
+}
+
+.terminal-search-box {
+  position: absolute;
+  top: 10px;
+  right: 20px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  background-color: #2d2d2d;
+  padding: 4px 10px;
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  border: 1px solid #444;
+  transition: border-color 0.2s;
+}
+
+.terminal-search-box:focus-within {
+  border-color: #facc15;
+}
+
+.terminal-search-box input {
+  background: transparent;
+  border: none;
+  color: #fff;
+  outline: none;
+  font-size: 13px;
+  padding: 4px;
+  width: 200px;
+}
+
+.search-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.search-actions button {
+  background: transparent;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  padding: 4px 6px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.search-actions button:hover {
+  color: #fff;
+  background-color: #444;
 }
 
 .terminal-container {
