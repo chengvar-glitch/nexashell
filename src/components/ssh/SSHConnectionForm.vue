@@ -166,30 +166,28 @@
       </div>
 
       <div class="modal-form-row">
-        <div class="input-container">
-          <div class="modal-form-group">
-            <GroupTagsMultiSelect
-              v-model="formData.groups"
-              :groups="allGroups"
-              :label="$t('ssh.groups')"
-              :placeholder="$t('ssh.groupsPlaceholder')"
-              :create-group-text="$t('ssh.createGroup')"
-              :empty-text="$t('ssh.noGroupsAvailable')"
-              @group-added="(group) => allGroups.push(group)"
-            />
-          </div>
+        <div class="modal-form-group">
+          <GroupsMultiSelect
+            v-model="formData.groups"
+            :groups="allGroups"
+            :label="$t('ssh.groups')"
+            :placeholder="$t('ssh.groupsPlaceholder')"
+            :create-group-text="$t('ssh.createGroup')"
+            :empty-text="$t('ssh.noGroupsAvailable')"
+            @group-added="(group) => allGroups.push(group)"
+          />
+        </div>
 
-          <div class="modal-form-group">
-            <TagsMultiSelect
-              v-model="formData.tags"
-              :tags="allTags"
-              :label="$t('ssh.tags')"
-              :placeholder="$t('ssh.tagsPlaceholder')"
-              :create-tag-text="$t('ssh.createTag')"
-              :empty-text="$t('ssh.noTagsAvailable')"
-              @tag-added="(tag) => allTags.push(tag)"
-            />
-          </div>
+        <div class="modal-form-group">
+          <TagsMultiSelect
+            v-model="formData.tags"
+            :tags="allTags"
+            :label="$t('ssh.tags')"
+            :placeholder="$t('ssh.tagsPlaceholder')"
+            :create-tag-text="$t('ssh.createTag')"
+            :empty-text="$t('ssh.noTagsAvailable')"
+            @tag-added="(tag) => allTags.push(tag)"
+          />
         </div>
       </div>
 
@@ -245,7 +243,7 @@ import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
 import ConnectionProgressBar from '../common/ConnectionProgressBar.vue';
-import GroupTagsMultiSelect from '../common/GroupTagsMultiSelect.vue';
+import GroupsMultiSelect from '../common/GroupsMultiSelect.vue';
 import TagsMultiSelect from '../common/TagsMultiSelect.vue';
 
 type ConnectionStatus = 'connecting' | 'success' | 'error';
@@ -298,9 +296,9 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const formData = reactive<SSHConnectionFormData>({
-  name: props.initialData?.name || '', // Initialize with empty string
+  name: props.initialData?.name || '',
   host: props.initialData?.host || '',
-  port: props.initialData?.port || 22,
+  port: props.initialData?.port !== undefined && props.initialData?.port !== null ? props.initialData.port : 22,
   username: props.initialData?.username || '',
   password: props.initialData?.password || '',
   privateKey: props.initialData?.privateKey || '',
@@ -431,13 +429,16 @@ const onSubmit = () => {
     return;
   }
 
-  // Use default port 22 if not specified
-  const submitData = {
+  // 确保 port 有默认值
+  const port = formData.port || 22;
+
+  // 构建连接数据
+  const submitData: SSHConnectionFormData = {
     ...formData,
-    port: formData.port || 22,
+    port: port,
   };
 
-  // Remove optional fields if empty to avoid passing empty arrays
+  // 移除空的组和标签数组
   if (!submitData.groups || submitData.groups.length === 0) {
     delete submitData.groups;
   }
@@ -445,6 +446,7 @@ const onSubmit = () => {
     delete submitData.tags;
   }
 
+  // 将会话数据发送给父组件，由后端统一处理保存逻辑
   emit('connect', submitData);
 };
 
@@ -562,23 +564,54 @@ const handleTabKey = (event: KeyboardEvent) => {
   color: var(--color-text-secondary);
 }
 
-/* Enhance form group spacing for better visual hierarchy */
-.modal-form-group {
-  margin-bottom: 8px; /* Consistent spacing between form groups */
+/* Form layout styles - inheriting from common.css standards */
+.modal-form-group.host-field {
+  flex: 1 70%;
 }
 
-/* Style labels consistently */
-.modal-form-group label {
-  display: block;
-  margin-bottom: 4px;
+.modal-form-group.port-field {
+  flex: 1 30%;
+}
+
+/* Standard input field styling - aligned with common.css .modal-input */
+.input {
+  width: 100%;
+  padding: 6px 8px;
+  height: 34px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: 0.9em;
-  font-weight: 500;
+  box-sizing: border-box;
+  transition: all var(--transition-fast);
 }
 
-/* Adjust form row spacing */
-.modal-form-row {
-  margin-bottom: 10px; /* Reduced from 12px by 2px to meet compactness requirement */
+.input:hover {
+  border-color: var(--color-border-primary);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.08);
+}
+
+.input::placeholder {
+  color: var(--color-text-placeholder);
+}
+
+.input.error {
+  border-color: #ff4757;
+}
+
+.input.error:focus {
+  box-shadow: 0 0 0 2px rgba(255, 71, 87, 0.08);
+}
+
+/* Override modal-form overflow to allow dropdown menus to show properly */
+.modal-form {
+  overflow: visible;
 }
 
 /* Style error messages consistently */
@@ -592,10 +625,34 @@ const handleTabKey = (event: KeyboardEvent) => {
 
 /* Style actions consistently */
 .modal-form-actions {
-  margin-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
-  padding-top: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
-  gap: 6px; /* Reduced from 8px by 2px to meet compactness requirement */
-  flex-direction: column;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border-secondary);
+}
+
+/* Button styles for action buttons */
+.modal-btn {
+  padding: 6px 16px;
+  height: 34px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.9em;
+  font-weight: 500;
+  transition: var(--transition-fast);
+  box-sizing: border-box;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.modal-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .form-general-error {

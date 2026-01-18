@@ -128,6 +128,124 @@ pub fn add_session(
 /// The UUID of the newly created session
 #[tauri::command]
 #[allow(dead_code)]
+pub fn save_session_with_credentials(
+    addr: String,
+    port: i64,
+    server_name: String,
+    username: String,
+    auth_type: String,
+    private_key_path: Option<String>,
+    password: Option<String>,
+    key_passphrase: Option<String>,
+    group_ids: Option<Vec<String>>,
+    tag_ids: Option<Vec<String>>,
+) -> Result<String, String> {
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    ensure_groups_and_tags(&conn)?;
+    
+    let session_id = Uuid::new_v4().to_string();
+    
+    println!("[save_session_with_credentials] Starting to save session:");
+    println!("  session_id: {}", session_id);
+    println!("  server_name: {}", server_name);
+    println!("  addr: {}, port: {}", addr, port);
+    println!("  username: {}", username);
+    println!("  auth_type: {}", auth_type);
+    println!("  group_ids: {:?}", group_ids);
+    println!("  tag_ids: {:?}", tag_ids);
+    
+    // 1. Save session metadata to database (without sensitive information)
+    match conn.execute(
+        "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![session_id, addr, port, server_name, username, auth_type, private_key_path],
+    ) {
+        Ok(_) => println!("[save_session_with_credentials] Session inserted successfully"),
+        Err(e) => {
+            println!("[save_session_with_credentials] Failed to insert session: {}", e);
+            return Err(e.to_string());
+        }
+    }
+    
+    // 2. Save sensitive information to system keychain
+    if password.is_some() || key_passphrase.is_some() {
+        println!("[save_session_with_credentials] Saving credentials to keychain...");
+        crate::keychain::KeychainManager::save_credentials(
+            &session_id,
+            &crate::keychain::SensitiveData {
+                password: password.clone(),
+                key_passphrase: key_passphrase.clone(),
+            },
+        )?;
+        println!("[save_session_with_credentials] Credentials saved to keychain");
+    } else {
+        println!("[save_session_with_credentials] No credentials to save (password and passphrase are both None)");
+    }
+    
+    // 3. Associate with groups
+    if let Some(groups) = group_ids {
+        println!("[save_session_with_credentials] Linking {} groups", groups.len());
+        for group_id in groups {
+            match conn.execute(
+                "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
+                params![session_id, group_id],
+            ) {
+                Ok(_) => println!("  Linked to group: {}", group_id),
+                Err(e) => println!("  Failed to link group {}: {}", group_id, e),
+            }
+        }
+    }
+    
+    // 4. Associate with tags
+    if let Some(tags) = tag_ids {
+        println!("[save_session_with_credentials] Linking {} tags", tags.len());
+        for tag_id in tags {
+            match conn.execute(
+                "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
+                params![session_id, tag_id],
+            ) {
+                Ok(_) => println!("  Linked to tag: {}", tag_id),
+                Err(e) => println!("  Failed to link tag {}: {}", tag_id, e),
+            }
+        }
+    }
+    
+    println!("[save_session_with_credentials] Session saved successfully: {}", session_id);
+    Ok(session_id)
+}
+
+/// Retrieve sensitive credentials (password and key passphrase) from system keychain
+///
+/// # Arguments
+/// * `session_id` - Session UUID
+///
+/// # Returns
+/// Tuple of (session_id, password_option, key_passphrase_option)
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn get_session_credentials(sessionId: String) -> Result<(String, Option<String>, Option<String>), String> {
+    let credentials = crate::keychain::KeychainManager::retrieve_credentials(&sessionId)?;
+    Ok((sessionId, credentials.password, credentials.key_passphrase))
+}
+
+/// Save a new SSH session with groups and tags associations.
+/// This command saves session metadata without storing sensitive data (passwords, passphrases).
+/// 
+/// # Arguments
+/// * `addr` - SSH server address (host or IP)
+/// * `port` - SSH server port
+/// * `server_name` - Human-friendly session name
+/// * `username` - SSH username
+/// * `auth_type` - Authentication type ('password' or 'key')
+/// * `private_key_path` - Path to private key file (optional)
+/// * `group_ids` - List of group IDs to associate with this session (optional)
+/// * `tag_ids` - List of tag IDs to associate with this session (optional)
+/// 
+/// # Returns
+/// The UUID of the newly created session
+#[tauri::command]
+#[allow(dead_code)]
 pub fn save_session(
     addr: String,
     port: i64,
@@ -312,7 +430,7 @@ pub fn edit_group(id: String, name: Option<String>, sort: Option<i64>) -> Result
     }
     // always update updated_at
     sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
-    let mut sql = format!("UPDATE groups SET {} WHERE id = ?", sets.join(", "));
+    let sql = format!("UPDATE groups SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
     let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
@@ -349,7 +467,7 @@ pub fn edit_tag(id: String, name: Option<String>, sort: Option<i64>) -> Result<(
         return Ok(());
     }
     sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
-    let mut sql = format!("UPDATE tags SET {} WHERE id = ?", sets.join(", "));
+    let sql = format!("UPDATE tags SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
     let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
@@ -392,7 +510,7 @@ pub fn edit_session(
     }
     if sets.is_empty() { return Ok(()); }
     sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
-    let mut sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
+    let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
     let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
     conn.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
@@ -402,11 +520,26 @@ pub fn edit_session(
 /// Delete a session and its logical associations.
 #[tauri::command]
 pub fn delete_session(id: String) -> Result<(), String> {
+    println!("delete_session called with id: {}", id);
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM session_groups WHERE session_id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM session_tags WHERE session_id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM sessions WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    
+    // Delete session_groups
+    let rows1 = conn.execute("DELETE FROM session_groups WHERE session_id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
+    println!("Deleted {} rows from session_groups", rows1);
+    
+    // Delete session_tags
+    let rows2 = conn.execute("DELETE FROM session_tags WHERE session_id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
+    println!("Deleted {} rows from session_tags", rows2);
+    
+    // Delete session
+    let rows3 = conn.execute("DELETE FROM sessions WHERE id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
+    println!("Deleted {} rows from sessions table", rows3);
+    
+    // Also delete sensitive credentials from keychain
+    let _ = crate::keychain::KeychainManager::delete_credentials(&id);
+    
+    println!("Session {} deleted successfully", id);
     Ok(())
 }
 

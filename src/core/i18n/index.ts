@@ -2,6 +2,10 @@ import { createI18n } from 'vue-i18n';
 
 const messages = {
   en: {
+    common: {
+      delete: 'Delete',
+      cancel: 'Cancel',
+    },
     home: {
       views: 'Views',
       allSessions: 'All Sessions',
@@ -14,6 +18,8 @@ const messages = {
       defaultGroup: 'Default Group',
       connect: 'Connect',
       addFirst: 'Add your first connection',
+      deleteSession: 'Delete Session',
+      deleteSessionConfirm: 'Are you sure you want to delete "{name}"?',
     },
     search: {
       placeholder: 'Quick search ({shortcut})',
@@ -113,6 +119,10 @@ const messages = {
     },
   },
   zh: {
+    common: {
+      delete: '删除',
+      cancel: '取消',
+    },
     home: {
       views: '视图',
       allSessions: '全部会话',
@@ -125,6 +135,8 @@ const messages = {
       defaultGroup: '默认分组',
       connect: '点击连接',
       addFirst: '添加首个连接',
+      deleteSession: '删除会话',
+      deleteSessionConfirm: '确定要删除"{name}"吗？',
     },
     search: {
       placeholder: '快速搜索 ({shortcut})',
@@ -223,6 +235,10 @@ const messages = {
     },
   },
   'zh-TW': {
+    common: {
+      delete: '刪除',
+      cancel: '取消',
+    },
     home: {
       views: '視圖',
       allSessions: '全部會話',
@@ -235,6 +251,8 @@ const messages = {
       defaultGroup: '默認分組',
       connect: '點擊連接',
       addFirst: '添加首個連接',
+      deleteSession: '刪除會話',
+      deleteSessionConfirm: '確定要刪除"{name}"嗎？',
     },
     search: {
       placeholder: '快速搜索 ({shortcut})',
@@ -315,6 +333,10 @@ const messages = {
     },
   },
   ja: {
+    common: {
+      delete: '削除',
+      cancel: 'キャンセル',
+    },
     home: {
       views: 'ビュー',
       allSessions: 'すべてのセッション',
@@ -327,6 +349,8 @@ const messages = {
       defaultGroup: 'デフォルトグループ',
       connect: '接続する',
       addFirst: '最初の接続を追加',
+      deleteSession: 'セッション削除',
+      deleteSessionConfirm: '"{name}"を削除しますか？',
     },
     settings: {
       title: '設定',
@@ -404,6 +428,10 @@ const messages = {
     },
   },
   ko: {
+    common: {
+      delete: '삭제',
+      cancel: '취소',
+    },
     home: {
       views: '보기',
       allSessions: '모든 세션',
@@ -416,6 +444,8 @@ const messages = {
       defaultGroup: '기본 그룹',
       connect: '연결',
       addFirst: '첫 번째 연결 추가',
+      deleteSession: '세션 삭제',
+      deleteSessionConfirm: '"{name}"을(를) 삭제하시겠습니까?',
     },
     settings: {
       title: '설정',
@@ -468,6 +498,10 @@ const messages = {
     },
   },
   fr: {
+    common: {
+      delete: 'Supprimer',
+      cancel: 'Annuler',
+    },
     home: {
       views: 'Vues',
       allSessions: 'Toutes les sessions',
@@ -480,6 +514,8 @@ const messages = {
       defaultGroup: 'Groupe par défaut',
       connect: 'Connecter',
       addFirst: 'Ajoutez votre première connexion',
+      deleteSession: 'Supprimer la session',
+      deleteSessionConfirm: 'Êtes-vous sûr de vouloir supprimer "{name}" ?',
     },
     settings: {
       title: 'Paramètres',
@@ -488,6 +524,10 @@ const messages = {
     },
   },
   de: {
+    common: {
+      delete: 'Löschen',
+      cancel: 'Abbrechen',
+    },
     home: {
       views: 'Ansichten',
       allSessions: 'Alle Sitzungen',
@@ -500,6 +540,8 @@ const messages = {
       defaultGroup: 'Standardgruppe',
       connect: 'Verbinden',
       addFirst: 'Erste Verbindung hinzufügen',
+      deleteSession: 'Sitzung löschen',
+      deleteSessionConfirm: 'Möchten Sie "{name}" wirklich löschen?',
     },
     settings: {
       title: 'Einstellungen',
@@ -508,6 +550,10 @@ const messages = {
     },
   },
   ru: {
+    common: {
+      delete: 'Удалить',
+      cancel: 'Отмена',
+    },
     home: {
       views: 'Виды',
       allSessions: 'Все сессии',
@@ -520,6 +566,8 @@ const messages = {
       defaultGroup: 'Группа по умолчанию',
       connect: 'Подключиться',
       addFirst: 'Добавьте ваше первое соединение',
+      deleteSession: 'Удалить сессию',
+      deleteSessionConfirm: 'Вы уверены, что хотите удалить "{name}"?',
     },
     settings: {
       title: 'Настройки',
@@ -528,6 +576,10 @@ const messages = {
     },
   },
   ar: {
+    common: {
+      delete: 'حذف',
+      cancel: 'إلغاء',
+    },
     home: {
       views: 'المشاهدات',
       allSessions: 'كل الجلسات',
@@ -540,6 +592,8 @@ const messages = {
       defaultGroup: 'المجموعة الافتراضية',
       connect: 'اتصال',
       addFirst: 'أضف اتصالك الأول',
+      deleteSession: 'حذف الجلسة',
+      deleteSessionConfirm: 'هل أنت متأكد من حذف "{name}"؟',
     },
     settings: {
       title: 'الإعدادات',
@@ -548,6 +602,10 @@ const messages = {
     },
   },
   es: {
+    common: {
+      delete: 'Eliminar',
+      cancel: 'Cancelar',
+    },
     home: {
       views: 'Vistas',
       allSessions: 'Todas las sesiones',
@@ -560,6 +618,8 @@ const messages = {
       defaultGroup: 'Grupo por defecto',
       connect: 'Conectar',
       addFirst: 'Añade tu primera conexión',
+      deleteSession: 'Eliminar sesión',
+      deleteSessionConfirm: '¿Estás seguro de que quieres eliminar "{name}"?',
     },
     settings: {
       title: 'Ajustes',
@@ -573,6 +633,10 @@ const messages = {
     },
   },
   ms: {
+    common: {
+      delete: 'Padam',
+      cancel: 'Batal',
+    },
     home: {
       views: 'Paparan',
       allSessions: 'Semua Sesi',
@@ -585,6 +649,8 @@ const messages = {
       defaultGroup: 'Kumpulan Lalai',
       connect: 'Sambung',
       addFirst: 'Tambah sambungan pertama anda',
+      deleteSession: 'Padam Sesi',
+      deleteSessionConfirm: 'Adakah anda pasti ingin memadamkan "{name}"?',
     },
     settings: {
       title: 'Tetapan',
@@ -598,6 +664,10 @@ const messages = {
     },
   },
   it: {
+    common: {
+      delete: 'Elimina',
+      cancel: 'Annulla',
+    },
     home: {
       views: 'Viste',
       allSessions: 'Tutte le sessioni',
@@ -610,6 +680,8 @@ const messages = {
       defaultGroup: 'Gruppo predefinito',
       connect: 'Connetti',
       addFirst: 'Aggiungi la tua prima connessione',
+      deleteSession: 'Elimina sessione',
+      deleteSessionConfirm: 'Sei sicuro di voler eliminare "{name}"?',
     },
     settings: {
       title: 'Impostazioni',

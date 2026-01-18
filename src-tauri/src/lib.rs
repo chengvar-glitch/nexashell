@@ -1,6 +1,7 @@
 mod system;
 mod ssh;
 mod db;
+mod keychain;
 
 use tauri::Manager;
 use ssh::SshManager;
@@ -69,7 +70,9 @@ pub fn run() {
                 db::init_db,
                 db::add_session,
                 db::save_session,
+                db::save_session_with_credentials,
                 db::list_sessions,
+                db::get_session_credentials,
                 db::add_group,
                 db::list_groups,
                 db::add_tag,

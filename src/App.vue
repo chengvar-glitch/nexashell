@@ -2,6 +2,7 @@
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
 // i18n not used in this file for progress messages (messages are plain English)
 import { v4 as uuidv4 } from 'uuid';
+import { invoke } from '@tauri-apps/api/core';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
@@ -15,7 +16,7 @@ import {
 import { themeManager } from '@/core/utils/theme-manager';
 import { useModal } from '@/composables';
 import { useTabManagement } from '@/composables';
-import { useSessionStore, sessionApi } from '@/features/session';
+import { useSessionStore } from '@/features/session';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
@@ -56,6 +57,8 @@ const {
 } = useModal();
 const isConnecting = ref(false);
 const sshErrorMessage = ref<string | null>(null);
+const sshFormMode = ref<'create' | 'edit'>('create');
+const editingSessionId = ref<string | null>(null);
 
 // Save form data for restoration on cancel
 const savedSSHFormData = ref<SSHConnectionFormData | null>(null);
@@ -75,6 +78,8 @@ provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, () => {
   sshErrorMessage.value = null;
   isConnecting.value = false;
+  sshFormMode.value = 'create';
+  editingSessionId.value = null;
   openSSHForm();
 });
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
@@ -118,6 +123,34 @@ onMounted(() => {
   eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
     openSSHForm();
   });
+
+  eventBus.on(APP_EVENTS.EDIT_SESSION, async (session: any) => {
+    // Handle edit session event
+    const credentials = await invoke<[string, string | null, string | null]>(
+      'get_session_credentials',
+      { sessionId: session.id }
+    ).catch(() => [session.id, null, null]);
+
+    sshFormMode.value = 'edit';
+    editingSessionId.value = session.id;
+    
+    savedSSHFormData.value = {
+      name: session.name,
+      host: session.host,
+      port: session.port,
+      username: session.username,
+      password: credentials[1] || '',
+      privateKey: session.privateKeyPath || '',
+      keyPassphrase: credentials[2] || '',
+      saveSession: true,
+      groups: session.groups || [],
+      tags: session.tags || [],
+    };
+
+    sshErrorMessage.value = null;
+    isConnecting.value = false;
+    openSSHForm();
+  });
 });
 
 onBeforeUnmount(() => {
@@ -153,13 +186,137 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   connectionErrorMessage.value = '';
   connectionErrorTitle.value = '';
 
+  // Check if we're in edit mode
+  if (sshFormMode.value === 'edit' && editingSessionId.value) {
+    try {
+      const authType = data.password ? 'password' : 'key';
+      
+      // Update the session metadata
+      await invoke('edit_session', {
+        id: editingSessionId.value,
+        addr: data.host,
+        port: data.port || 22,
+        serverName: data.name,
+        username: data.username,
+        authType: authType,
+        privateKeyPath: data.privateKey || null,
+      });
+
+      // Update sensitive credentials in keychain
+      if (data.password || data.keyPassphrase) {
+        await invoke('save_session_with_credentials', {
+          addr: data.host,
+          port: data.port || 22,
+          serverName: data.name,
+          username: data.username,
+          authType: authType,
+          privateKeyPath: data.privateKey || null,
+          password: data.password || null,
+          keyPassphrase: data.keyPassphrase || null,
+          groupIds: data.groups || null,
+          tagIds: data.tags || null,
+        });
+      }
+
+      connectionProgress.value = 100;
+      connectionCurrentStep.value = 1;
+      connectionStatus.value = 'success';
+      connectionMessage.value = 'Session updated successfully';
+
+      logger.info('SSH session updated successfully', {
+        sessionId: editingSessionId.value,
+        name: data.name,
+        host: data.host,
+      });
+
+      // Auto-close after 1 second
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      closeSSHForm();
+      showConnectionProgress.value = false;
+      
+      // Emit event to refresh the session list
+      eventBus.emit(APP_EVENTS.SESSION_SAVED, {
+        name: data.name,
+        host: data.host,
+        port: data.port || 22,
+      });
+
+      // Reset form mode
+      sshFormMode.value = 'create';
+      editingSessionId.value = null;
+    } catch (error) {
+      logger.error('Failed to update session', error);
+      connectionStatus.value = 'error';
+      connectionProgress.value = 100;
+      connectionErrorTitle.value = 'Failed to update session';
+      connectionErrorMessage.value = String(error);
+    }
+    return;
+  }
+
   // 1. Generate a unique session ID
   const sessionId = uuidv4();
+
+  // 1.5. Save session to database FIRST if user requested it (before attempting connection)
+  if (data.saveSession) {
+    try {
+      const authType = data.password ? 'password' : 'key';
+      
+      logger.info('Attempting to save session...', {
+        name: data.name,
+        host: data.host,
+        authType,
+        hasGroups: !!data.groups,
+        hasTags: !!data.tags,
+        groups: data.groups,
+        tags: data.tags,
+      });
+      
+      const savePayload = {
+        addr: data.host,
+        port: data.port || 22,
+        serverName: data.name,
+        username: data.username,
+        authType: authType,
+        privateKeyPath: data.privateKey || null,
+        password: data.password || null,
+        keyPassphrase: data.keyPassphrase || null,
+        groupIds: data.groups && data.groups.length > 0 ? data.groups : null,
+        tagIds: data.tags && data.tags.length > 0 ? data.tags : null,
+      };
+      
+      logger.info('Save session payload:', savePayload);
+      
+      const savedSessionId = await invoke('save_session_with_credentials', savePayload);
+      
+      logger.info('SSH session saved to database', {
+        sessionId: savedSessionId,
+        name: data.name,
+        host: data.host,
+      });
+      
+      // Emit event to notify other components that a new session has been saved
+      logger.info('Emitting SESSION_SAVED event...');
+      eventBus.emit(APP_EVENTS.SESSION_SAVED, {
+        name: data.name,
+        host: data.host,
+        port: data.port || 22,
+      });
+    } catch (saveError) {
+      logger.error('Failed to save session to database', {
+        error: saveError,
+        errorString: String(saveError),
+        errorMessage: (saveError as any)?.message,
+      });
+      console.error('Save session error:', saveError);
+      // Don't throw - we'll still try to connect
+    }
+  }
 
   // 2. Initiate backend connection via Pinia store
   try {
     // Simulate step transitions for better UX
-    const stepInterval = setTimeout(() => {
+    setTimeout(() => {
       connectionCurrentStep.value = 1;
       connectionProgress.value = 30;
       connectionMessage.value = 'Authenticating user';
@@ -177,52 +334,6 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       24 // Default rows
     );
     logger.info('SSH session created successfully', { sessionId });
-
-    // Save session to database if user requested it
-    if (data.saveSession) {
-      try {
-        // Determine auth type based on whether privateKey is provided
-        const authType = data.privateKey ? 'key' : 'password';
-        
-        logger.info('Attempting to save session...', {
-          name: data.name,
-          host: data.host,
-          authType,
-          hasGroups: !!data.groups,
-          hasTags: !!data.tags,
-        });
-        
-        const savedSessionId = await sessionApi.saveSession(
-          data.host,
-          data.port || 22,
-          data.name,
-          data.username,
-          authType,
-          data.privateKey || undefined,
-          data.groups || undefined,
-          data.tags || undefined
-        );
-        
-        logger.info('SSH session saved to database', {
-          sessionId: savedSessionId,
-          name: data.name,
-          host: data.host,
-        });
-        
-        // Emit event to notify other components that a new session has been saved
-        logger.info('Emitting SESSION_SAVED event...');
-        eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-          name: data.name,
-          host: data.host,
-          port: data.port || 22,
-        });
-      } catch (saveError) {
-        logger.error('Failed to save session to database', saveError);
-        // Don't throw - connection is already established, just log the error
-      }
-    }
-
-    clearTimeout(stepInterval);
     connectionCurrentStep.value = 2;
     connectionProgress.value = 70;
     connectionMessage.value = 'Initializing terminal';

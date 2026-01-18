@@ -122,6 +122,7 @@
               class="session-card"
               @click="handleConnect(session)"
               @dblclick="handleQuickConnect(session)"
+              @contextmenu.prevent="handleSessionContextMenu($event, session)"
             >
               <div class="card-top">
                 <div class="avatar">
@@ -168,24 +169,46 @@
     </main>
 
     <!-- Quick Connect Progress Modal -->
-    <div v-if="showQuickConnectProgress" class="modal-overlay">
-      <div class="modal-content">
-        <ConnectionProgressBar
-          :progress="quickConnectProgress"
-          :current-step="quickConnectCurrentStep"
-          :status="quickConnectStatus"
-          :message="quickConnectMessage"
-          :error-title="quickConnectErrorTitle"
-          :error-message="quickConnectErrorMessage"
-          @close="showQuickConnectProgress = false"
-        />
-      </div>
+    <div v-if="showQuickConnectProgress" class="quick-connect-modal">
+      <ConnectionProgressBar
+        :visible="showQuickConnectProgress"
+        :progress="quickConnectProgress"
+        :current-step="quickConnectCurrentStep"
+        :status="quickConnectStatus"
+        :title="quickConnectErrorTitle"
+        :message="quickConnectMessage"
+        :error-message="quickConnectErrorMessage"
+        @close="showQuickConnectProgress = false"
+      />
     </div>
+
+    <!-- Context Menu for Session Card -->
+    <DropdownMenu
+      :visible="contextMenuVisible"
+      :items="contextMenuItems"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      @update:visible="contextMenuVisible = $event"
+      @select="handleContextMenuSelect"
+    />
+
+    <!-- Confirm Delete Dialog -->
+    <ConfirmDialog
+      :visible="showConfirmDialog"
+      :title="confirmDialogTitle"
+      :message="confirmDialogMessage"
+      :confirm-text="$t('common.delete')"
+      :cancel-text="$t('common.cancel')"
+      :is-danger="true"
+      @confirm="onConfirmDelete"
+      @cancel="onCancelDelete"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, inject, onMounted, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Home,
@@ -199,6 +222,8 @@ import {
   Minus,
 } from 'lucide-vue-next';
 import ConnectionProgressBar from '@/components/common/ConnectionProgressBar.vue';
+import DropdownMenu from '@/components/common/DropdownMenu.vue';
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import { OPEN_SSH_FORM_KEY, TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
@@ -260,9 +285,28 @@ const quickConnectStatus = ref<'connecting' | 'success' | 'error'>('connecting')
 const quickConnectErrorMessage = ref('');
 const quickConnectErrorTitle = ref('');
 
+// Context menu states
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+const contextMenuItems = ref<Array<{
+  key: string;
+  label: string;
+  danger?: boolean;
+  divider?: boolean;
+}>>([]);
+const selectedSession = ref<SSHSession | null>(null);
+
+// Confirm dialog states
+const showConfirmDialog = ref(false);
+const confirmDialogTitle = ref('');
+const confirmDialogMessage = ref('');
+let pendingDeleteSession: SSHSession | null = null;
+
 const openSSHForm = inject<() => void>(OPEN_SSH_FORM_KEY);
 const tabManagement = inject<any>(TAB_MANAGEMENT_KEY);
 const sessionStore = useSessionStore();
+const { t } = useI18n();
 
 // Create wrapper functions for event handlers that can be properly removed
 const handleSessionSaved = async () => {
@@ -427,7 +471,8 @@ const handleQuickConnect = async (session: SSHSession) => {
   console.log('Quick connect initiated for session:', session.name);
   isQuickConnecting.value = true;
   const sessionId = uuidv4();
-  const tabId = uuidv4();
+  // Use the same id for tab and session to avoid duplicate mounts/creates
+  const tabId = sessionId;
   quickConnectSessionId.value = sessionId;
   showQuickConnectProgress.value = true;
   quickConnectProgress.value = 0;
@@ -438,23 +483,28 @@ const handleQuickConnect = async (session: SSHSession) => {
   quickConnectErrorTitle.value = '';
 
   try {
-    // Add SSH tab first
-    if (tabManagement) {
-      tabManagement.addTab({
-        id: tabId,
-        label: session.name,
-        type: 'ssh',
-        sessionId: sessionId,
-      });
+    // Step 1: Fetch saved credentials from keychain
+    quickConnectProgress.value = 15;
+    quickConnectMessage.value = `Loading credentials for ${session.name}...`;
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    let password = '';
+    
+    try {
+      const [_, pwd] = await invoke<[string, string | null, string | null]>(
+        'get_session_credentials',
+        { sessionId: session.id }
+      );
+      password = pwd || '';
+      console.log('Loaded credentials for session:', session.id);
+    } catch (credError) {
+      console.warn('Failed to load credentials, continuing with empty password:', credError);
+      // Continue without credentials - may fail at SSH level with proper error
     }
 
-    // Update progress
-    quickConnectProgress.value = 20;
-    quickConnectMessage.value = `Establishing SSH connection to ${session.host}...`;
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    // Create SSH session - note: no password for saved sessions
-    quickConnectProgress.value = 50;
+    // Step 2: Create SSH session in store BEFORE adding the tab so TerminalView
+    // doesn't attempt to connect with empty props. Use same id for both.
+    quickConnectProgress.value = 30;
     quickConnectMessage.value = `Authenticating with ${session.username}...`;
     await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -465,10 +515,23 @@ const handleQuickConnect = async (session: SSHSession) => {
       session.host,
       session.port,
       session.username,
-      '', // Empty password - user should use saved session with key-based auth
+      password, // Use loaded password from keychain
       80,
       24
     );
+
+    // Step 3: After session is created, add tab so TerminalView receives an existing session
+    quickConnectProgress.value = 70;
+    quickConnectMessage.value = `Opening terminal for ${session.name}...`;
+    
+    if (tabManagement) {
+      tabManagement.addTab({
+        id: tabId,
+        label: session.name,
+        type: 'ssh',
+        closable: true,
+      });
+    }
 
     quickConnectProgress.value = 100;
     quickConnectMessage.value = `Connected to ${session.name}`;
@@ -560,6 +623,90 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
     showAddTagInput.value = false;
     newTagName.value = '';
   }
+};
+
+// Context menu handlers
+const handleSessionContextMenu = (event: MouseEvent, session: SSHSession) => {
+  console.log('Context menu opened for session:', session.id, session.name);
+  contextMenuX.value = event.clientX;
+  contextMenuY.value = event.clientY;
+  selectedSession.value = session;
+  contextMenuItems.value = [
+    { key: 'edit', label: 'Edit' },
+    { key: 'divider', label: '', divider: true },
+    { key: 'delete', label: 'Delete', danger: true },
+  ];
+  contextMenuVisible.value = true;
+  console.log('Context menu visible, items:', contextMenuItems.value);
+};
+
+const handleContextMenuSelect = async (key: string) => {
+  console.log('Context menu item selected:', key);
+  
+  // Skip divider
+  if (key === 'divider') {
+    console.log('Skipping divider');
+    return;
+  }
+  
+  console.log('Selected session:', selectedSession.value);
+  
+  if (!selectedSession.value) {
+    console.warn('No session selected');
+    return;
+  }
+
+  switch (key) {
+    case 'edit':
+      console.log('Handling edit for:', selectedSession.value.id);
+      handleEditSession(selectedSession.value);
+      break;
+    case 'delete':
+      console.log('Handling delete for:', selectedSession.value.id);
+      await handleDeleteSession(selectedSession.value);
+      break;
+    default:
+      console.log('Unknown menu action:', key);
+  }
+};
+
+const handleEditSession = (session: SSHSession) => {
+  console.log('Edit session:', session.id);
+  // Emit event to trigger edit session in App.vue
+  eventBus.emit(APP_EVENTS.EDIT_SESSION, session);
+};
+
+const handleDeleteSession = (session: SSHSession) => {
+  pendingDeleteSession = session;
+  confirmDialogTitle.value = t('home.deleteSession');
+  confirmDialogMessage.value = t('home.deleteSessionConfirm', { name: session.name });
+  showConfirmDialog.value = true;
+};
+
+const onConfirmDelete = async () => {
+  if (!pendingDeleteSession) return;
+
+  showConfirmDialog.value = false;
+  const session = pendingDeleteSession;
+  pendingDeleteSession = null;
+
+  try {
+    console.log('Invoking delete_session for session ID:', session.id);
+    const result = await invoke('delete_session', { id: session.id });
+    console.log('Delete result:', result);
+    
+    sessions.value = sessions.value.filter(s => s.id !== session.id);
+    await loadSessions();
+    
+  } catch (error) {
+    console.error('Failed to delete session:', error);
+    alert(`Failed to delete session: ${error}`);
+  }
+};
+
+const onCancelDelete = () => {
+  showConfirmDialog.value = false;
+  pendingDeleteSession = null;
 };
 </script>
 
@@ -986,5 +1133,20 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* Quick connect modal container */
+.quick-connect-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
 }
 </style>

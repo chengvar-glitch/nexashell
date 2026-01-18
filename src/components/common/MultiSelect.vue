@@ -12,14 +12,14 @@
             :key="itemId"
             class="selected-item"
           >
-            <span>{{ getItemName(itemId) }}</span>
+            <span class="tag-text">{{ getItemName(itemId) }}</span>
             <button
               type="button"
               class="remove-btn"
               :aria-label="`Remove ${getItemName(itemId)}`"
               @click="removeItem(itemId)"
             >
-              ×
+              ✕
             </button>
           </span>
         </div>
@@ -126,7 +126,7 @@ const searchQuery = ref('');
 const selectedItems = ref<string[]>(props.modelValue || []);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const allItems = ref<any[]>(props.items || []);
-const dropdownDirection = ref<'down' | 'up'>('down');
+const dropdownDirection = ref<'down' | 'up'>('up');
 
 // Watch for changes to the items prop and update local state
 watch(() => props.items, (newItems) => {
@@ -148,19 +148,23 @@ const filteredItems = computed(() => {
 
 // Computed: calculate dropdown max-height based on number of visible items
 const dropdownMaxHeight = computed(() => {
-  // Each item is approximately 24px (6px padding + 12px text + 6px padding)
+  // Each item is approximately 24px
   const itemHeight = 24;
-  const maxVisibleItems = 6;
-  const padding = 8; // padding for item-list and other elements
-  const maxHeight = itemHeight * maxVisibleItems + padding;
+  const maxVisibleItems = 5;
+  const itemListPadding = 12; // top + bottom padding of item-list (6px + 6px)
+  const dividerHeight = 5; // 1px height + 4px margin
+  const newItemSectionHeight = 30; // button with padding
+  const totalMaxHeight = itemHeight * maxVisibleItems + itemListPadding + dividerHeight + newItemSectionHeight;
   
-  // If actual items count is less than or equal to maxVisibleItems, show all without scrolling
+  // Always return a pixel value to ensure proper scrolling
+  // If actual items count is less than or equal to maxVisibleItems, use auto-height but as pixel value
   if (filteredItems.value.length <= maxVisibleItems) {
-    return 'auto';
+    const autoHeight = itemHeight * filteredItems.value.length + itemListPadding;
+    return `${autoHeight}px`;
   }
   
   // Otherwise, set max-height and enable scrolling
-  return `${maxHeight}px`;
+  return `${totalMaxHeight}px`;
 });
 
 const toggleItem = (itemId: string) => {
@@ -264,12 +268,12 @@ const checkDropdownPosition = async () => {
   const spaceBelow = window.innerHeight - containerRect.bottom;
   const spaceAbove = containerRect.top;
   
-  // If there's not enough space below (less than menu height + 10px buffer)
-  // and there's more space above, open menu upwards
-  if (spaceBelow < menuHeight + 10 && spaceAbove > menuHeight + 10) {
-    dropdownDirection.value = 'up';
-  } else {
+  // Default to opening upwards
+  // Only switch to downwards if there's not enough space above and more space below
+  if (spaceAbove < menuHeight + 10 && spaceBelow > menuHeight + 10) {
     dropdownDirection.value = 'down';
+  } else {
+    dropdownDirection.value = 'up';
   }
 };
 
@@ -281,18 +285,22 @@ watch(isOpen, async (newVal) => {
 </script>
 
 <style scoped>
+/* ==================== Layout ==================== */
 .multi-select {
   width: 100%;
 }
 
+/* ==================== Label ==================== */
 .select-label {
   display: block;
-  margin-bottom: 2px;
+  margin-bottom: 4px;
   color: var(--color-text-primary);
-  font-size: 0.85em;
+  font-size: 0.9em;
   font-weight: 500;
+  letter-spacing: -0.2px;
 }
 
+/* ==================== Input Wrapper ==================== */
 .select-container {
   position: relative;
   width: 100%;
@@ -301,118 +309,214 @@ watch(isOpen, async (newVal) => {
 .input-wrapper {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: 6px;
   align-items: center;
-  min-height: 28px;
-  padding: 3px 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border-primary);
-  border-radius: 0px;
+  border-radius: var(--radius-sm);
   cursor: text;
-  transition: border-color 0.15s ease;
+  box-sizing: border-box;
+  transition: 
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .input-wrapper:focus-within {
   border-color: var(--color-primary);
-  box-shadow: none;
+  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.08);
 }
 
+/* ==================== Selected Items (Tags) ==================== */
 .selected-items {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px;
+  gap: 6px;
 }
 
 .selected-item {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 6px;
-  background: var(--color-primary);
-  color: white;
-  border-radius: 2px;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border-radius: 6px;
   font-size: 0.8em;
   line-height: 1;
+  border: 1px solid var(--color-border-secondary);
+  transition: 
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
+.selected-item:hover {
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-border-primary);
+}
+
+.tag-text {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ==================== Remove Button ==================== */
 .remove-btn {
   background: none;
   border: none;
-  color: white;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  padding: 0;
-  font-size: 1em;
+  padding: 0 2px;
+  font-size: 0.9em;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 14px;
-  height: 14px;
-  transition: none;
+  width: 16px;
+  height: 16px;
+  transition: 
+    color var(--transition-fast),
+    transform var(--transition-fast);
+  border-radius: 3px;
 }
 
 .remove-btn:hover {
-  opacity: 0.8;
+  color: var(--color-text-primary);
+  transform: scale(1.1);
 }
 
+.remove-btn:active {
+  transform: scale(0.95);
+}
+
+/* ==================== Input Field ==================== */
 .select-input {
   flex: 1;
-  min-width: 80px;
+  min-width: 60px;
   border: none;
   background: transparent;
-  padding: 2px 3px;
+  padding: 4px 4px;
   font-size: 0.85em;
   color: var(--color-text-primary);
   outline: none;
+  transition: background-color var(--transition-fast);
 }
 
 .select-input::placeholder {
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
 }
 
+.select-input:focus {
+  background-color: transparent;
+}
+
+/* ==================== Dropdown Menu ==================== */
 .dropdown-menu {
   position: absolute;
   top: 100%;
   left: 0;
   right: 0;
-  margin-top: 2px;
+  margin-top: 8px;
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border-primary);
-  border-radius: 0px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  z-index: 1000;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 10000;
   overflow-y: auto;
   overflow-x: hidden;
+  animation: slideDown var(--transition-fast) ease;
+  min-width: 100%;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-primary) transparent;
+}
+
+/* Webkit scrollbar styling for Chrome/Safari */
+.dropdown-menu::-webkit-scrollbar {
+  width: 6px;
+}
+
+.dropdown-menu::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.dropdown-menu::-webkit-scrollbar-thumb {
+  background-color: var(--color-border-primary);
+  border-radius: 3px;
+}
+
+.dropdown-menu::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-text-tertiary);
 }
 
 .dropdown-menu-up {
   top: auto;
   bottom: 100%;
   margin-top: 0;
-  margin-bottom: 2px;
+  margin-bottom: 8px;
+  animation: slideUp var(--transition-fast) ease;
 }
 
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==================== Item List ==================== */
 .item-list {
-  padding: 2px 0;
+  padding: 6px 0;
 }
 
 .item {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 6px 10px;
   cursor: pointer;
-  transition: none;
+  font-size: 0.85em;
+  transition: 
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .item:hover {
   background-color: var(--color-bg-secondary);
 }
 
+.item:active {
+  background-color: var(--color-bg-tertiary);
+}
+
 .item-checkbox {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
   accent-color: var(--color-primary);
+  transition: transform var(--transition-fast);
+}
+
+.item-checkbox:hover {
+  transform: scale(1.05);
 }
 
 .item-name {
@@ -421,54 +525,74 @@ watch(isOpen, async (newVal) => {
   font-size: 0.85em;
 }
 
+/* ==================== Divider ==================== */
 .divider {
   height: 1px;
-  background: var(--color-border-primary);
-  margin: 2px 0;
+  background: var(--color-border-secondary);
+  margin: 4px 0;
 }
 
+/* ==================== New Item Section ==================== */
 .new-item-section {
-  padding: 2px 0;
+  padding: 6px 0;
 }
 
 .new-item-btn {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+  gap: 8px;
+  padding: 6px 10px;
   background: transparent;
   border: none;
   cursor: pointer;
   color: var(--color-primary);
   font-size: 0.85em;
   text-align: left;
-  transition: none;
+  transition: 
+    background-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .new-item-btn:hover {
   background-color: var(--color-bg-secondary);
+  color: var(--color-primary);
+}
+
+.new-item-btn:active {
+  background-color: var(--color-bg-tertiary);
 }
 
 .plus-icon {
   font-weight: 600;
-  font-size: 0.95em;
+  font-size: 1.1em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
 }
 
+/* ==================== Empty State ==================== */
 .empty-state {
-  padding: 8px;
+  padding: 8px 10px;
   text-align: center;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   font-size: 0.85em;
 }
 
+/* ==================== Transitions ==================== */
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: opacity 0.1s ease;
+  transition: all var(--transition-fast) ease;
 }
 
-.dropdown-enter-from,
+.dropdown-enter-from {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 .dropdown-leave-to {
   opacity: 0;
+  transform: translateY(4px);
 }
 </style>
