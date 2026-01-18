@@ -38,8 +38,8 @@
             type="text"
             class="add-input"
             placeholder="Group name..."
-            @keydown="handleGroupInputKeydown"
             autofocus
+            @keydown="handleGroupInputKeydown"
           />
         </div>
         <nav class="sidebar-nav">
@@ -70,8 +70,8 @@
             type="text"
             class="add-input"
             placeholder="Tag name..."
-            @keydown="handleTagInputKeydown"
             autofocus
+            @keydown="handleTagInputKeydown"
           />
         </div>
         <div class="tag-cloud">
@@ -169,7 +169,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, onMounted } from 'vue';
+import { ref, inject, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import {
   Home,
@@ -183,6 +183,8 @@ import {
   Minus,
 } from 'lucide-vue-next';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
+import { eventBus } from '@/core/utils';
+import { APP_EVENTS } from '@/core/constants';
 
 interface SSHSession {
   id: string;
@@ -259,13 +261,41 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to fetch tags:', error);
   }
+
+  // Listen for group and tag updates from other components
+  eventBus.on(APP_EVENTS.GROUPS_UPDATED, refreshGroups);
+  eventBus.on(APP_EVENTS.TAGS_UPDATED, refreshTags);
 });
+
+onUnmounted(() => {
+  // Clean up event listeners
+  eventBus.off(APP_EVENTS.GROUPS_UPDATED, refreshGroups);
+  eventBus.off(APP_EVENTS.TAGS_UPDATED, refreshTags);
+});
+
+const refreshGroups = async () => {
+  try {
+    const fetchedGroups = await invoke<Group[]>('list_groups');
+    groups.value = fetchedGroups || [];
+  } catch (error) {
+    console.error('Failed to refresh groups:', error);
+  }
+};
+
+const refreshTags = async () => {
+  try {
+    const fetchedTags = await invoke<Tag[]>('list_tags');
+    tags.value = fetchedTags || [];
+  } catch (error) {
+    console.error('Failed to refresh tags:', error);
+  }
+};
 
 const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
 };
 
-const handleConnect = (session: SSHSession) => {
+const handleConnect = (_session: SSHSession) => {
   // TODO: emit connect event
 };
 
@@ -273,6 +303,7 @@ const handleDeleteGroup = async (groupId: string) => {
   try {
     await invoke('delete_group', { id: groupId });
     groups.value = groups.value.filter((g) => g.id !== groupId);
+    // The backend cascades deletion to session_groups, clearing SSH sessions' group association
   } catch (error) {
     console.error('Failed to delete group:', error);
   }
@@ -282,6 +313,7 @@ const handleDeleteTag = async (tagId: string) => {
   try {
     await invoke('delete_tag', { id: tagId });
     tags.value = tags.value.filter((t) => t.id !== tagId);
+    // The backend cascades deletion to session_tags, clearing SSH sessions' tag association
   } catch (error) {
     console.error('Failed to delete tag:', error);
   }
@@ -295,9 +327,7 @@ const handleAddGroup = async () => {
     await invoke('add_group', { name });
     newGroupName.value = '';
     showAddGroupInput.value = false;
-    // Refresh groups list
-    const fetchedGroups = await invoke<Group[]>('list_groups');
-    groups.value = fetchedGroups || [];
+    // Event listener will handle refresh
   } catch (error) {
     console.error('Failed to add group:', error);
   }
@@ -311,9 +341,7 @@ const handleAddTag = async () => {
     await invoke('add_tag', { name });
     newTagName.value = '';
     showAddTagInput.value = false;
-    // Refresh tags list
-    const fetchedTags = await invoke<Tag[]>('list_tags');
-    tags.value = fetchedTags || [];
+    // Event listener will handle refresh
   } catch (error) {
     console.error('Failed to add tag:', error);
   }

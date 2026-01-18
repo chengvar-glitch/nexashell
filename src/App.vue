@@ -28,9 +28,12 @@ interface SSHConnectionFormData {
   host: string;
   port: number | null;
   username: string;
-  password?: string;
-  privateKey?: string;
-  keyPassphrase?: string;
+  password: string;
+  privateKey: string;
+  keyPassphrase: string;
+  saveSession: boolean;
+  groups?: string[];
+  tags?: string[];
 }
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
@@ -309,7 +312,7 @@ const handleCreateTab = (tab: any) => {
           <SSHConnectionForm
             :is-loading="isConnecting"
             :error-message="sshErrorMessage"
-            :initial-data="savedSSHFormData"
+            :initial-data="savedSSHFormData || undefined"
             :show-progress="showConnectionProgress"
             :connection-status="connectionStatus"
             :connection-progress="connectionProgress"

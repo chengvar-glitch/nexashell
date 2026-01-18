@@ -165,6 +165,34 @@
         </div>
       </div>
 
+      <div class="modal-form-row">
+        <div class="input-container">
+          <div class="modal-form-group">
+            <GroupTagsMultiSelect
+              v-model="formData.groups"
+              :groups="allGroups"
+              :label="$t('ssh.groups')"
+              :placeholder="$t('ssh.groupsPlaceholder')"
+              :create-group-text="$t('ssh.createGroup')"
+              :empty-text="$t('ssh.noGroupsAvailable')"
+              @group-added="(group) => allGroups.push(group)"
+            />
+          </div>
+
+          <div class="modal-form-group">
+            <TagsMultiSelect
+              v-model="formData.tags"
+              :tags="allTags"
+              :label="$t('ssh.tags')"
+              :placeholder="$t('ssh.tagsPlaceholder')"
+              :create-tag-text="$t('ssh.createTag')"
+              :empty-text="$t('ssh.noTagsAvailable')"
+              @tag-added="(tag) => allTags.push(tag)"
+            />
+          </div>
+        </div>
+      </div>
+
       <div class="modal-form-row checkbox-row">
         <label class="checkbox-container">
           <input
@@ -212,10 +240,13 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref } from 'vue';
+import { reactive, ref, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
 import ConnectionProgressBar from '../common/ConnectionProgressBar.vue';
+import GroupTagsMultiSelect from '../common/GroupTagsMultiSelect.vue';
+import TagsMultiSelect from '../common/TagsMultiSelect.vue';
 
 type ConnectionStatus = 'connecting' | 'success' | 'error';
 
@@ -242,6 +273,8 @@ interface SSHConnectionFormData {
   privateKey: string;
   keyPassphrase: string;
   saveSession: boolean;
+  groups?: string[]; // Selected group IDs (optional)
+  tags?: string[]; // Selected tag IDs (optional)
 }
 
 interface ValidationErrors {
@@ -276,7 +309,25 @@ const formData = reactive<SSHConnectionFormData>({
     props.initialData?.saveSession !== undefined
       ? props.initialData.saveSession
       : true,
+  groups: props.initialData?.groups || [],
+  tags: props.initialData?.tags || [],
 });
+
+interface Group {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Tag {
+  id: string;
+  name: string;
+  sort: number;
+  created_at: string;
+  updated_at: string;
+}
 
 const validationErrors = reactive<ValidationErrors>({});
 
@@ -293,6 +344,10 @@ const emit = defineEmits<{
 const showPassword = ref(false);
 const showKeyPassphrase = ref(false);
 
+// Groups and Tags state
+const allGroups = ref<Group[]>([]);
+const allTags = ref<Tag[]>([]);
+
 // Form input references for tab navigation
 const nameInput = ref<HTMLInputElement | null>(null);
 const hostInput = ref<HTMLInputElement | null>(null);
@@ -304,6 +359,25 @@ const keyPassphraseInput = ref<HTMLInputElement | null>(null);
 const saveSessionInput = ref<HTMLInputElement | null>(null);
 const connectButton = ref<HTMLElement | null>(null);
 const cancelButton = ref<HTMLElement | null>(null);
+
+// Fetch groups and tags on component mount
+onMounted(async () => {
+  try {
+    const groups = await invoke<Group[]>('list_groups');
+    allGroups.value = groups || [];
+    console.log('Loaded groups:', allGroups.value);
+  } catch (error) {
+    console.error('Failed to fetch groups:', error);
+  }
+
+  try {
+    const tags = await invoke<Tag[]>('list_tags');
+    allTags.value = tags || [];
+    console.log('Loaded tags:', allTags.value);
+  } catch (error) {
+    console.error('Failed to fetch tags:', error);
+  }
+});
 
 // Platform-specific UI detection removed; header is now platform-agnostic
 
@@ -362,6 +436,14 @@ const onSubmit = () => {
     ...formData,
     port: formData.port || 22,
   };
+
+  // Remove optional fields if empty to avoid passing empty arrays
+  if (!submitData.groups || submitData.groups.length === 0) {
+    delete submitData.groups;
+  }
+  if (!submitData.tags || submitData.tags.length === 0) {
+    delete submitData.tags;
+  }
 
   emit('connect', submitData);
 };
