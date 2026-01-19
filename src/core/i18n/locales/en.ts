@@ -2,6 +2,7 @@ export default {
   common: {
     delete: 'Delete',
     cancel: 'Cancel',
+    connect: 'Connect',
   },
   home: {
     views: 'Views',
@@ -17,6 +18,10 @@ export default {
     addFirst: 'Add your first connection',
     deleteSession: 'Delete Session',
     deleteSessionConfirm: 'Are you sure you want to delete "{name}"?',
+    gridView: 'Grid View',
+    tableView: 'Table View',
+    serverName: 'Server Name',
+    host: 'Host',
   },
   search: {
     placeholder: 'Quick search ({shortcut})',

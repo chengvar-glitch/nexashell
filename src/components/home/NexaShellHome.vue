@@ -62,22 +62,44 @@
         </div>
         <nav class="sidebar-nav">
           <div v-for="group in groups" :key="group.id" class="nav-item-wrapper">
-            <button
-              class="nav-item"
-              :class="{
-                active: activeView === 'group' && selectedGroupId === group.id,
-              }"
-              @click="setActiveGroup(group.id)"
-            >
-              <Folder :size="16" />
-              <span>{{ group.name }}</span>
-            </button>
-            <button
-              class="delete-btn"
-              @click.stop="handleDeleteGroup(group.id)"
-            >
-              <Minus :size="14" />
-            </button>
+            <template v-if="editingGroupId === group.id">
+              <input
+                v-model="renamingGroupName"
+                type="text"
+                class="rename-input"
+                autofocus
+                @blur="handleSaveGroupRename"
+                @keydown.enter="handleSaveGroupRename"
+                @keydown.esc="editingGroupId = null"
+              />
+            </template>
+            <template v-else>
+              <button
+                class="nav-item"
+                :class="{
+                  active:
+                    activeView === 'group' && selectedGroupId === group.id,
+                }"
+                @click="setActiveGroup(group.id)"
+              >
+                <Folder :size="16" />
+                <span>{{ group.name }}</span>
+              </button>
+              <div class="item-actions">
+                <button
+                  class="action-btn small"
+                  @click.stop="startEditGroup(group)"
+                >
+                  <Pencil :size="12" />
+                </button>
+                <button
+                  class="action-btn small delete"
+                  @click.stop="handleDeleteGroup(group.id)"
+                >
+                  <Minus :size="12" />
+                </button>
+              </div>
+            </template>
           </div>
         </nav>
       </div>
@@ -103,21 +125,65 @@
         </div>
         <div class="tag-cloud">
           <div v-for="tag in tags" :key="tag.id" class="tag-item-wrapper">
-            <span
-              class="tag-badge"
-              :class="{
-                active: activeView === 'tag' && selectedTagId === tag.id,
-              }"
-              @click="setActiveTag(tag.id)"
-            >
-              <Hash :size="12" />{{ tag.name }}
-            </span>
-            <button
-              class="tag-delete-btn"
-              @click.stop="handleDeleteTag(tag.id)"
-            >
-              <Minus :size="12" />
-            </button>
+            <template v-if="editingTagId === tag.id">
+              <div class="tag-edit-container">
+                <input
+                  v-model="renamingTagName"
+                  type="text"
+                  class="rename-tag-input"
+                  autofocus
+                  @keydown.enter="handleSaveTagRename"
+                  @keydown.esc="editingTagId = null"
+                />
+                <div class="color-picker-mini">
+                  <button
+                    v-for="color in TAG_COLORS"
+                    :key="color.value"
+                    class="color-dot"
+                    :class="{ active: renamingTagColor === color.value }"
+                    :style="{
+                      backgroundColor:
+                        color.value || 'var(--color-bg-tertiary)',
+                    }"
+                    @click="renamingTagColor = color.value"
+                  ></button>
+                </div>
+                <div class="edit-confirm-actions">
+                  <button class="action-btn tiny" @click="handleSaveTagRename">
+                    <Check :size="10" />
+                  </button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <span
+                class="tag-badge"
+                :class="{
+                  active: activeView === 'tag' && selectedTagId === tag.id,
+                }"
+                :style="
+                  activeView === 'tag' && selectedTagId === tag.id
+                    ? {}
+                    : { color: tag.color }
+                "
+                @click="setActiveTag(tag.id)"
+              >
+                <Hash :size="12" :style="{ color: tag.color || 'inherit' }" />{{
+                  tag.name
+                }}
+              </span>
+              <div class="item-actions">
+                <button class="action-btn tiny" @click.stop="startEditTag(tag)">
+                  <Pencil :size="10" />
+                </button>
+                <button
+                  class="action-btn tiny delete"
+                  @click.stop="handleDeleteTag(tag.id)"
+                >
+                  <Minus :size="10" />
+                </button>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -133,16 +199,42 @@
           </p>
         </div>
         <div class="action-area">
+          <div class="view-toggle-wrapper">
+            <button class="btn-secondary" @click="toggleViewMenu">
+              <component
+                :is="viewMode === 'grid' ? LayoutGrid : List"
+                :size="18"
+              />
+              <ChevronDown :size="14" />
+            </button>
+            <DropdownMenu
+              :visible="viewMenuVisible"
+              :items="viewMenuItems"
+              :x="viewMenuX"
+              :y="viewMenuY"
+              @update:visible="viewMenuVisible = $event"
+              @select="handleViewModeSelect"
+            />
+          </div>
           <button class="btn-primary" @click="handleNewConnection">
             <Plus :size="18" /> {{ $t('home.newSession') }}
           </button>
         </div>
       </header>
 
-      <!-- Session Grid Area -->
+      <!-- Session Grid/Table Area -->
       <section class="session-manager">
+        <!-- Empty State (Globally if no sessions at all) -->
+        <div v-if="filteredSessions.length === 0" class="empty-state-container">
+          <button class="empty-card" @click="handleNewConnection">
+            <Plus :size="32" class="plus" />
+            <span>{{ $t('home.addFirst') }}</span>
+          </button>
+        </div>
+
         <div
           v-for="groupName in groupDisplayItems"
+          v-else
           :key="groupName"
           class="group-container"
         >
@@ -151,7 +243,8 @@
             <span class="name">{{ groupName }}</span>
           </div>
 
-          <div class="session-grid">
+          <!-- Grid View -->
+          <div v-if="viewMode === 'grid'" class="session-grid">
             <div
               v-for="session in getSessionsInGroup(groupName)"
               :key="session.id"
@@ -162,7 +255,7 @@
             >
               <div class="card-top">
                 <div class="avatar">
-                  {{ session.server_name[0].toUpperCase() }}
+                  {{ (session.server_name || 'S')[0].toUpperCase() }}
                 </div>
                 <button
                   class="favorite-btn"
@@ -191,26 +284,101 @@
                     v-for="tag in session.tags"
                     :key="tag"
                     class="mini-tag"
-                    >{{ tag }}</span
+                    :style="getTagStyles(tag)"
                   >
+                    {{ tag }}
+                  </span>
                 </div>
               </div>
             </div>
+          </div>
 
-            <!-- Empty State -->
-            <div
-              v-if="filteredSessions.length === 0"
-              class="empty-state-container"
-            >
-              <button class="empty-card" @click="handleNewConnection">
-                <Plus :size="32" class="plus" />
-                <span>{{
-                  searchQuery
-                    ? 'No sessions match your search'
-                    : $t('home.addFirst')
-                }}</span>
-              </button>
-            </div>
+          <!-- Table View -->
+          <div v-else class="session-table-wrapper">
+            <table class="session-table">
+              <thead>
+                <tr>
+                  <th class="col-favorite"></th>
+                  <th class="col-name">{{ $t('home.serverName') }}</th>
+                  <th class="col-host">{{ $t('home.host') }}</th>
+                  <th class="col-tags">{{ $t('home.tags') }}</th>
+                  <th class="col-actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="session in getSessionsInGroup(groupName)"
+                  :key="session.id"
+                  class="session-row"
+                  @click="handleConnect(session)"
+                  @dblclick="handleQuickConnect(session)"
+                  @contextmenu.prevent="
+                    handleSessionContextMenu($event, session)
+                  "
+                >
+                  <td class="col-favorite">
+                    <button
+                      class="favorite-btn-small"
+                      :class="{ active: session.is_favorite }"
+                      @click.stop="toggleFavorite(session)"
+                    >
+                      <Star
+                        :size="14"
+                        :fill="session.is_favorite ? 'currentColor' : 'none'"
+                      />
+                    </button>
+                  </td>
+                  <td class="col-name">
+                    <div class="name-with-icon">
+                      <Server :size="14" class="row-icon" />
+                      {{ session.server_name }}
+                    </div>
+                  </td>
+                  <td class="col-host">
+                    <span class="host-text"
+                      >{{ session.username }}@{{ session.addr }}</span
+                    >
+                  </td>
+                  <td class="col-tags">
+                    <div class="table-tags">
+                      <span
+                        v-for="tag in session.tags"
+                        :key="tag"
+                        class="mini-tag compact"
+                        :style="getTagStyles(tag)"
+                      >
+                        {{ tag }}
+                      </span>
+                    </div>
+                  </td>
+                  <td class="col-actions">
+                    <div class="action-buttons">
+                      <button
+                        class="icon-action-btn connect"
+                        :title="$t('common.connect')"
+                        @click.stop="handleQuickConnect(session)"
+                      >
+                        <Terminal :size="14" />
+                      </button>
+                      <button
+                        class="icon-action-btn edit"
+                        :title="$t('common.edit') || 'Edit'"
+                        @click.stop="handleEditSession(session)"
+                      >
+                        <Pencil :size="14" />
+                      </button>
+                      <button
+                        class="icon-action-btn delete"
+                        :title="$t('common.delete')"
+                        @click.stop="handleDeleteSession(session)"
+                      >
+                        <Trash2 :size="14" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
@@ -253,6 +421,14 @@ import {
   Plus,
   Hash,
   Minus,
+  LayoutGrid,
+  List,
+  ChevronDown,
+  Server,
+  Terminal,
+  Pencil,
+  Trash2,
+  Check,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
@@ -276,10 +452,23 @@ interface Group {
 interface Tag {
   id: string;
   name: string;
+  color?: string;
   sort: number;
   created_at: string;
   updated_at: string;
 }
+
+// Predefined professional tag colors (Modern palette)
+const TAG_COLORS = [
+  { name: 'Default', value: '' },
+  { name: 'Rose', value: '#f43f5e' },
+  { name: 'Amber', value: '#f59e0b' },
+  { name: 'Emerald', value: '#10b981' },
+  { name: 'Cyan', value: '#06b6d4' },
+  { name: 'Indigo', value: '#6366f1' },
+  { name: 'Violet', value: '#8b5cf6' },
+  { name: 'Fuchsia', value: '#d946ef' },
+];
 
 // Global states
 const sessions = ref<SavedSessionDisplay[]>([]);
@@ -291,16 +480,56 @@ const isMounted = ref(false);
 const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
 const selectedGroupId = ref<string | null>(null);
 const selectedTagId = ref<string | null>(null);
+const viewMode = ref<'grid' | 'table'>('table');
 
 const favoriteCount = computed(
   () => sessions.value.filter(s => s.is_favorite).length
 );
+
+// View menu states
+const viewMenuVisible = ref(false);
+const viewMenuX = ref(0);
+const viewMenuY = ref(0);
+const viewMenuItems = computed(() => [
+  {
+    key: 'grid',
+    label: t('home.gridView'),
+    icon: LayoutGrid,
+    active: viewMode.value === 'grid',
+  },
+  {
+    key: 'table',
+    label: t('home.tableView'),
+    icon: List,
+    active: viewMode.value === 'table',
+  },
+]);
+
+const toggleViewMenu = (event: MouseEvent) => {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  viewMenuX.value = rect.left;
+  viewMenuY.value = rect.bottom + 8;
+  viewMenuVisible.value = !viewMenuVisible.value;
+};
+
+const handleViewModeSelect = (key: string) => {
+  if (key === 'grid' || key === 'table') {
+    viewMode.value = key;
+  }
+};
 
 // Input states for adding new groups/tags
 const showAddGroupInput = ref(false);
 const newGroupName = ref('');
 const showAddTagInput = ref(false);
 const newTagName = ref('');
+
+// Renaming states
+const editingGroupId = ref<string | null>(null);
+const renamingGroupName = ref('');
+const editingTagId = ref<string | null>(null);
+const renamingTagName = ref('');
+const renamingTagColor = ref('');
 
 // Computed values for UI
 const viewTitle = computed(() => {
@@ -388,6 +617,18 @@ const getSessionsInGroup = (groupName: string) => {
 };
 
 // Selection handlers
+const getTagStyles = (tagName: string) => {
+  const tag = tags.value.find(t => t.name === tagName);
+  if (!tag?.color) return {};
+
+  // For colors, we create a soft background and a matching border
+  return {
+    backgroundColor: `${tag.color}15`, // 15% opacity hex
+    borderColor: `${tag.color}40`, // 25% opacity hex for border
+    color: tag.color,
+  };
+};
+
 const setActiveView = (view: 'all' | 'favorites' | 'recent') => {
   activeView.value = view;
   selectedGroupId.value = null;
@@ -663,6 +904,59 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
   }
 };
 
+const startEditGroup = (group: Group) => {
+  editingGroupId.value = group.id;
+  renamingGroupName.value = group.name;
+};
+
+const handleSaveGroupRename = async () => {
+  if (!editingGroupId.value) return;
+  const newName = renamingGroupName.value.trim();
+  if (newName) {
+    try {
+      await invoke('edit_group', { id: editingGroupId.value, name: newName });
+      const group = groups.value.find(g => g.id === editingGroupId.value);
+      if (group) group.name = newName;
+      // Also reload sessions since they might display group names
+      await loadSessions();
+    } catch (error) {
+      console.error('Failed to rename group:', error);
+    }
+  }
+  editingGroupId.value = null;
+};
+
+const startEditTag = (tag: Tag) => {
+  editingTagId.value = tag.id;
+  renamingTagName.value = tag.name;
+  renamingTagColor.value = tag.color || '';
+};
+
+const handleSaveTagRename = async () => {
+  if (!editingTagId.value) return;
+  const newName = renamingTagName.value.trim();
+  const newColor = renamingTagColor.value;
+  if (newName) {
+    try {
+      await invoke('edit_tag', {
+        id: editingTagId.value,
+        name: newName,
+        color: newColor,
+      });
+      const tag = tags.value.find(t => t.id === editingTagId.value);
+      if (tag) {
+        tag.name = newName;
+        tag.color = newColor;
+      }
+      // Also reload sessions since they might display tag names/colors
+      await loadSessions();
+    } catch (error) {
+      console.error('Failed to update tag:', error);
+    }
+  }
+  editingTagId.value = null;
+};
+
 // Context menu handlers
 const handleSessionContextMenu = (
   event: MouseEvent,
@@ -830,25 +1124,126 @@ const onCancelDelete = () => {
   border-radius: 10px;
 }
 
-.delete-btn {
+.nav-item-wrapper:hover .item-actions,
+.tag-item-wrapper:hover .item-actions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.item-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.2s,
+    visibility 0.2s;
+  padding-right: 4px;
+}
+
+.action-btn {
   background: none;
   border: none;
   color: var(--color-text-tertiary);
   cursor: pointer;
-  padding: 6px;
-  border-radius: var(--radius-md);
-  opacity: 0;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transition: all 0.2s;
 }
 
-.nav-item-wrapper:hover .delete-btn {
-  opacity: 1;
-  color: var(--color-text-secondary);
+.action-btn.small {
+  padding: 4px;
 }
 
-.delete-btn:hover {
+.action-btn.tiny {
+  padding: 2px;
+}
+
+.action-btn:hover {
   background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.action-btn.delete:hover {
   color: var(--color-danger, #ef4444);
+}
+
+.rename-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  outline: none;
+  margin: 2px 4px;
+}
+
+.rename-tag-input {
+  width: 80px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.tag-edit-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  z-index: 10;
+}
+
+.color-picker-mini {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px;
+  background: var(--color-bg-secondary);
+  border-radius: 6px;
+  border: 1px solid var(--color-border-primary);
+  margin-bottom: 4px;
+}
+
+.color-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+
+.color-dot:hover {
+  transform: scale(1.2);
+}
+
+.color-dot.active {
+  border-color: #fff;
+  box-shadow:
+    0 0 0 1.5px var(--color-primary),
+    0 2px 4px rgba(0, 0, 0, 0.1);
+  transform: scale(1.1);
+}
+
+.edit-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-border-secondary);
+  padding-top: 4px;
 }
 
 .section-header {
@@ -923,28 +1318,6 @@ const onCancelDelete = () => {
   color: var(--color-primary);
 }
 
-.tag-delete-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-tertiary);
-  cursor: pointer;
-  padding: 2px 4px;
-  border-radius: var(--radius-sm);
-  opacity: 0;
-  transition: all 0.2s;
-  line-height: 1;
-}
-
-.tag-item-wrapper:hover .tag-delete-btn {
-  opacity: 1;
-  color: var(--color-text-secondary);
-}
-
-.tag-delete-btn:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-danger, #ef4444);
-}
-
 .tag-badge.active {
   background: var(--color-primary);
   color: white;
@@ -986,7 +1359,31 @@ const onCancelDelete = () => {
 .action-area {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+}
+
+.view-toggle-wrapper {
+  position: relative;
+}
+
+.btn-secondary {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-primary);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-primary);
 }
 
 .btn-primary {
@@ -1154,12 +1551,32 @@ const onCancelDelete = () => {
 }
 
 .mini-tag {
-  font-size: 9px;
+  font-size: 11px;
+  font-weight: 500;
   background: var(--color-bg-tertiary);
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 3px 10px;
+  border-radius: 6px;
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border-primary);
+  white-space: nowrap;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.mini-tag.compact {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.mini-tag:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 .connect-hint {
@@ -1235,5 +1652,162 @@ const onCancelDelete = () => {
     opacity: 1;
     transform: scale(1);
   }
+}
+
+/* Table View Styles */
+.session-table-wrapper {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.session-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.session-table th {
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border-primary);
+}
+
+.session-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border-primary);
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.session-row {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.session-row:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.session-row:last-child td {
+  border-bottom: none;
+}
+
+.col-favorite {
+  width: 32px;
+  text-align: center;
+}
+
+.favorite-btn-small {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s;
+}
+
+.favorite-btn-small:hover,
+.favorite-btn-small.active {
+  color: #facc15;
+}
+
+.col-name {
+  font-weight: 500;
+  width: 25%;
+}
+
+.name-with-icon {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.row-icon {
+  color: var(--color-primary);
+}
+
+.col-host {
+  width: 35%;
+  color: var(--color-text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.table-tags {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.col-actions {
+  text-align: right;
+  width: 120px;
+}
+
+.action-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.icon-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-tertiary);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.icon-action-btn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+.icon-action-btn.connect {
+  color: var(--color-primary);
+  background: var(--color-interactive-selected);
+}
+
+.icon-action-btn.connect:hover {
+  background: var(--color-primary);
+  color: white;
+}
+
+.icon-action-btn.delete:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.row-action-btn {
+  background: transparent;
+  border: 1px solid var(--color-primary);
+  color: var(--color-primary);
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.row-action-btn:hover {
+  background: var(--color-primary);
+  color: white;
 }
 </style>

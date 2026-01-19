@@ -12,6 +12,7 @@ interface MenuItem {
   key: string;
   label: string;
   danger?: boolean;
+  active?: boolean;
   disabled?: boolean;
   divider?: boolean;
   shortcut?: string;
@@ -120,6 +121,7 @@ onUnmounted(() => {
               class="menu-item"
               :class="{
                 'menu-item-danger': item.danger,
+                'menu-item-active': item.active,
                 disabled: item.disabled,
               }"
               @click="handleItemClick(item)"
@@ -220,6 +222,12 @@ onUnmounted(() => {
 
 .menu-item-danger {
   color: #ff3b30;
+}
+
+.menu-item-active {
+  color: var(--color-primary);
+  background-color: var(--color-bg-tertiary);
+  font-weight: 500;
 }
 
 .menu-item-danger:hover {

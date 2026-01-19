@@ -498,7 +498,7 @@ pub fn delete_group(id: String) -> Result<(), String> {
 
 /// Edit an existing tag. Only provided fields are updated.
 #[tauri::command]
-pub fn edit_tag(id: String, name: Option<String>, sort: Option<i64>) -> Result<(), String> {
+pub fn edit_tag(id: String, name: Option<String>, color: Option<String>, sort: Option<i64>) -> Result<(), String> {
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     ensure_groups_and_tags(&conn)?;
@@ -507,6 +507,10 @@ pub fn edit_tag(id: String, name: Option<String>, sort: Option<i64>) -> Result<(
     if let Some(n) = name {
         sets.push("name = ?".to_string());
         params_vec.push(Box::new(n));
+    }
+    if let Some(c) = color {
+        sets.push("color = ?".to_string());
+        params_vec.push(Box::new(c));
     }
     if let Some(s) = sort {
         sets.push("sort = ?".to_string());
@@ -619,6 +623,8 @@ pub struct Tag {
     pub id: String,
     /// Tag name (default: empty string)
     pub name: String,
+    /// Tag color (hex string, e.g., "#FF0000")
+    pub color: Option<String>,
     /// Sort order (default: 1)
     pub sort: i64,
     /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
@@ -645,6 +651,7 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
         "CREATE TABLE IF NOT EXISTS tags (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
+            color TEXT,
             sort INTEGER NOT NULL DEFAULT 1,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
@@ -652,6 +659,9 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
         [],
     )
     .map_err(|e| e.to_string())?;
+
+    // Try to add color column if it doesn't exist (for existing databases)
+    let _ = conn.execute("ALTER TABLE tags ADD COLUMN color TEXT", []);
 
     // Junction table for sessions <-> groups (logical association only)
     conn.execute(
@@ -786,7 +796,7 @@ pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String>
 
 /// Create a new tag and return its UUID.
 #[tauri::command]
-pub fn add_tag(name: Option<String>, sort: Option<i64>) -> Result<String, String> {
+pub fn add_tag(name: Option<String>, color: Option<String>, sort: Option<i64>) -> Result<String, String> {
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     ensure_groups_and_tags(&conn)?;
@@ -794,8 +804,8 @@ pub fn add_tag(name: Option<String>, sort: Option<i64>) -> Result<String, String
     let name = name.unwrap_or_else(|| "".to_string());
     let sort = sort.unwrap_or(1);
     conn.execute(
-        "INSERT INTO tags (id, name, sort) VALUES (?1, ?2, ?3)",
-        params![id, name, sort],
+        "INSERT INTO tags (id, name, color, sort) VALUES (?1, ?2, ?3, ?4)",
+        params![id, name, color, sort],
     )
     .map_err(|e| e.to_string())?;
     Ok(id)
@@ -808,16 +818,17 @@ pub fn list_tags() -> Result<Vec<Tag>, String> {
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     ensure_groups_and_tags(&conn)?;
     let mut stmt = conn
-        .prepare("SELECT id, name, sort, created_at, updated_at FROM tags ORDER BY sort, created_at")
+        .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags ORDER BY sort, created_at")
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], |row| {
             Ok(Tag {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                sort: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                color: row.get(2)?,
+                sort: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -863,7 +874,7 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT t.id, t.name, t.sort, t.created_at, t.updated_at
+            "SELECT t.id, t.name, t.color, t.sort, t.created_at, t.updated_at
              FROM tags t
              JOIN session_tags st ON t.id = st.tag_id
              WHERE st.session_id = ?1
@@ -875,9 +886,10 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
             Ok(Tag {
                 id: row.get(0)?,
                 name: row.get(1)?,
-                sort: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+                color: row.get(2)?,
+                sort: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;

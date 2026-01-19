@@ -2,6 +2,7 @@ export default {
   common: {
     delete: '删除',
     cancel: '取消',
+    connect: '连接',
   },
   home: {
     views: '视图',
@@ -17,6 +18,10 @@ export default {
     addFirst: '添加首个连接',
     deleteSession: '删除会话',
     deleteSessionConfirm: '确定要删除"{name}"吗？',
+    gridView: '卡片视图',
+    tableView: '列表视图',
+    serverName: '服务器名称',
+    host: '主机地址',
   },
   search: {
     placeholder: '快速搜索 ({shortcut})',
