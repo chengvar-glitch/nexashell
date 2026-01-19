@@ -312,12 +312,8 @@ onMounted(async () => {
       return false;
     }
 
-    // Clear: Cmd+Shift+K or Ctrl+Shift+K
-    if (
-      (event.metaKey || event.ctrlKey) &&
-      event.shiftKey &&
-      event.code === 'KeyK'
-    ) {
+    // Clear: Cmd+L or Ctrl+L
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyL') {
       terminal?.clear();
       return false;
     }

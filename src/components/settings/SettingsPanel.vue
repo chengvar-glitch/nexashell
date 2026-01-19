@@ -504,7 +504,7 @@ const terminalShortcutList = computed(() => [
   { label: t('settings.paste'), value: `${cmdKey}+V` },
   { label: t('settings.selectAll'), value: `${cmdKey}+A` },
   { label: t('settings.search'), value: `${cmdKey}+F` },
-  { label: t('settings.clearTerminal'), value: `${cmdKey}+${shiftKey}+K` },
+  { label: t('settings.clearTerminal'), value: `${cmdKey}+L` },
 ]);
 
 const handleClose = () => {
