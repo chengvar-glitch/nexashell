@@ -326,7 +326,7 @@ const filteredItems = computed(() => {
   }
 
   // Final limit: 12 (Headers don't count much but let's keep it tight)
-  // Actually the user said "内容行最多10条", so let's limit the content items.
+  // Limit the display to a maximum of 10 content items as per requirements.
   const contentItems = results.filter(i => !i.isHeader);
   if (contentItems.length > 10) {
     // Re-calculating to strictly limit to 10 content items

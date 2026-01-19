@@ -455,16 +455,16 @@ const onSubmit = () => {
     return;
   }
 
-  // 确保 port 有默认值
+  // Ensure port has a default value
   const port = formData.port || 22;
 
-  // 构建连接数据
+  // Build connection data
   const submitData: SSHConnectionFormData = {
     ...formData,
     port: port,
   };
 
-  // 移除空的组和标签数组
+  // Remove empty groups and tags arrays
   if (!submitData.groups || submitData.groups.length === 0) {
     delete submitData.groups;
   }
@@ -472,7 +472,7 @@ const onSubmit = () => {
     delete submitData.tags;
   }
 
-  // 将会话数据发送给父组件，由后端统一处理保存逻辑
+  // Send session data to parent component for unified saving/processing
   emit('connect', submitData);
 };
 
@@ -481,16 +481,16 @@ const onSaveOnly = () => {
     return;
   }
 
-  // 确保 port 有默认值
+  // Ensure port has a default value
   const port = formData.port || 22;
 
-  // 构建连接数据
+  // Build connection data
   const submitData: SSHConnectionFormData = {
     ...formData,
     port: port,
   };
 
-  // 移除空的组和标签数组
+  // Remove empty groups and tags arrays
   if (!submitData.groups || submitData.groups.length === 0) {
     delete submitData.groups;
   }
@@ -498,7 +498,7 @@ const onSaveOnly = () => {
     delete submitData.tags;
   }
 
-  // 将会话数据发送给父组件，执行仅保存逻辑
+  // Send session data to parent component for only save logic
   emit('save', submitData);
 };
 

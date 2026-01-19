@@ -1057,7 +1057,7 @@ const onCancelDelete = () => {
   overflow: hidden;
 }
 
-/* 侧边栏样式 */
+/* Sidebar Styles */
 .home-sidebar {
   width: 220px;
   background: var(--color-bg-secondary);
@@ -1328,7 +1328,7 @@ const onCancelDelete = () => {
   opacity: 0.9;
 }
 
-/* 主内容区样式 */
+/* Main Content Area Styles */
 .home-main {
   flex: 1;
   overflow-y: auto;
@@ -1404,7 +1404,7 @@ const onCancelDelete = () => {
   filter: brightness(1.1);
 }
 
-/* 分组与网格 */
+/* Groups and Grids */
 .group-container {
   margin-bottom: 24px;
 }

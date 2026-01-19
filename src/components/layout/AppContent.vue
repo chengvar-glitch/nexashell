@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue';
 import NexaShellHome from '@/components/home/NexaShellHome.vue';
-import TerminalView from '@/components/terminal/TerminalView.vue';
+import RemoteConnectionView from '@/components/terminal/RemoteConnectionView.vue';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
 
 // Emit createTab event to parent
@@ -35,7 +35,7 @@ const currentComponent = computed(() => {
   switch (activeTab.type) {
     case 'terminal':
     case 'ssh':
-      return TerminalView;
+      return RemoteConnectionView;
     case 'home':
     default:
       return NexaShellHome;

@@ -70,7 +70,7 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 获取最近的N条日志
+       * Get most recent N log entries
        * Usage: __logger__.recent(10)
        */
       recent: (count: number = 20) => {
@@ -79,7 +79,7 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 清空所有日志
+       * Clear all log history
        */
       clear: () => {
         manager.clearAllHistory();
@@ -87,29 +87,29 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 导出日志为JSON
+       * Export logs as JSON string
        */
       exportJSON: () => {
         return manager.exportAllAsJSON();
       },
 
       /**
-       * 导出日志为CSV
+       * Export logs as CSV string
        */
       exportCSV: () => {
         return manager.exportAllAsCSV();
       },
 
       /**
-       * 下载日志文件
-       * Usage: __logger__.download('json') // 或 'csv'
+       * Download log file
+       * Usage: __logger__.download('json') // or 'csv'
        */
       download: (format: 'json' | 'csv' = 'json') => {
         manager.downloadLogs(format);
       },
 
       /**
-       * 显示日志统计
+       * Show log statistics
        */
       stats: () => {
         const history = manager.getAllHistory();
@@ -133,7 +133,7 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 设置日志级别
+       * Set current log level
        * Usage: __logger__.setLevel('INFO')
        */
       setLevel: (level: 'DEBUG' | 'INFO' | 'WARN' | 'ERROR') => {
@@ -142,7 +142,7 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 设置模块过滤
+       * Set module filters
        * Usage: __logger__.setModuleFilters(['SESSION', 'TERMINAL'])
        */
       setModuleFilters: (filters: string[]) => {
@@ -153,12 +153,12 @@ export function setupLoggerDevTools(): void {
       },
 
       /**
-       * 获取所有日志
+       * Get all log history
        */
       getAll: () => manager.getAllHistory(),
 
       /**
-       * 帮助信息
+       * Get help information
        */
       help: () => {
         console.log(`

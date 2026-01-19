@@ -11,7 +11,7 @@ import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { useSettingsStore } from '@/features/settings';
 
-const logger = createLogger('TERMINAL_VIEW');
+const logger = createLogger('REMOTE_CONNECTION_VIEW');
 
 const sessionStore = useSessionStore();
 const settingsStore = useSettingsStore();
@@ -21,8 +21,8 @@ const TERMINAL_CONFIG = {
   THEME: {
     background: '#1e1e1e',
     foreground: '#d4d4d4',
-    selectionBackground: '#facc15', // 醒目的黄色背景
-    selectionForeground: '#000000', // 黑色文字
+    selectionBackground: '#facc15', // Bright yellow background for selection
+    selectionForeground: '#000000', // Black text for selected content
   },
 };
 
@@ -137,9 +137,9 @@ const connectSSH = async (cols: number, rows: number): Promise<void> => {
       rows
     );
 
-    // ✅ Get buffered initial output (welcome banner, etc.)
-    // Wait for backend to complete initial buffering phase (2 seconds)
-    // This ensures SSH welcome banner and login prompts are fully captured
+    // Retrieve buffered initial output (e.g., welcome banner, login prompts)
+    // Wait for the backend to complete the initial buffering phase.
+    // A delay of ~2 seconds ensures the full initial sequence is captured.
     await new Promise(resolve => setTimeout(resolve, 2100));
 
     const bufferedOutput = await sessionApi.getBufferedSSHOutput(
@@ -349,14 +349,14 @@ onMounted(async () => {
 
   // Initial connection is handled when a valid `sessionId` is provided
 
-  // Handle activation when switching back to this tab (KeepAlive)
+  // Handle activation when switching back to this tab (KeepAlive support)
   onActivated(() => {
     nextTick(() => {
       if (fitAddon) {
         fitAddon.fit();
         terminal?.focus();
 
-        // Force a sync after activation
+        // Re-sync terminal dimensions with the backend after activation
         if (terminal && props.sessionId) {
           emit(`ssh-resize-${props.sessionId}`, {
             cols: terminal.cols,
@@ -569,7 +569,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="terminal-view">
+  <div class="remote-connection-view">
     <div ref="terminalRef" class="terminal-container" />
     <div v-if="showSearch" class="terminal-search-box">
       <input
@@ -592,7 +592,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.terminal-view {
+.remote-connection-view {
   width: 100%;
   height: 100%;
   overflow: hidden;

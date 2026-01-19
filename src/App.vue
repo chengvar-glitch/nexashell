@@ -819,7 +819,7 @@ body,
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  /* 取消全局拖拽功能 */
+  /* Disable global dragging feature */
   -webkit-app-region: no-drag;
 }
 
@@ -828,7 +828,7 @@ div[role='region'] {
   -moz-user-select: none;
   -ms-user-select: none;
   user-select: none;
-  /* 确保这些区域也不可拖拽 */
+  /* Ensure these regions are also non-draggable */
   -webkit-app-region: no-drag;
 }
 </style>
