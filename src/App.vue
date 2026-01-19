@@ -162,7 +162,7 @@ onMounted(() => {
     openSSHForm();
   });
 
-  eventBus.on(APP_EVENTS.CONNECT_SESSION, async (session: SavedSession) => {
+  eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (session: SavedSession) => {
     // 1. Fetch credentials
     try {
       // Use create mode to allow connection (edit mode only updates DB)
@@ -206,7 +206,7 @@ onMounted(() => {
       isConnecting.value = false;
       showConnectionProgress.value = false;
     }
-  });
+  }) as any);
 
   // Global right-click handling: prevent browser default menu in production
   // but only when clicking on empty areas (not on interactive components)

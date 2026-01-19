@@ -7,7 +7,7 @@
 
 import { APP_EVENTS, type AppEventType } from '@/core/constants';
 
-type EventHandler = (...args: unknown[]) => void;
+type EventHandler = (...args: unknown[]) => void | Promise<void>;
 type WrappedHandler = (e: Event) => void;
 
 /**

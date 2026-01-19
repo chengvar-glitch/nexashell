@@ -146,6 +146,7 @@ interface Props {
   createItemText?: string;
   emptyText?: string;
   allowCreate?: boolean;
+  itemType?: string;
   /**
    * Optional async function to create a new item.
    * If provided, the component will wait for it and use the returned item.
@@ -162,6 +163,7 @@ const props = withDefaults(defineProps<Props>(), {
   createItemText: 'Create',
   emptyText: 'No items available',
   allowCreate: true,
+  itemType: 'item',
 });
 
 const emit = defineEmits<{
@@ -330,11 +332,11 @@ const addNewItem = async () => {
       const newItem = await props.onCreateItem(name);
 
       // Add to local items list and select it
-      allItems.value.push(newItem);
+      (allItems.value as T[]).push(newItem);
       selectedItems.value.push(newItem.id);
 
       emit('update:modelValue', selectedItems.value);
-      emit('item-added', newItem);
+      emit('item-added', newItem as T);
 
       searchQuery.value = '';
       isOpen.value = false;
@@ -354,11 +356,11 @@ const addNewItem = async () => {
       updated_at: new Date().toISOString(),
     } as T;
 
-    allItems.value.push(newItem);
+    (allItems.value as unknown[]).push(newItem);
     selectedItems.value.push(tempId);
 
     emit('update:modelValue', selectedItems.value);
-    emit('item-added', newItem);
+    emit('item-added', newItem as T);
 
     searchQuery.value = '';
     isOpen.value = false;
