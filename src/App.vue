@@ -6,7 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
-import SSHConnectionForm from '@/components/ssh/SSHConnectionForm.vue';
+import SSHConnectionForm from '@/components/connections/SSHConnectionForm.vue';
 import SettingsPanel from '@/components/settings/SettingsPanel.vue';
 import WelcomeScreen from '@/components/common/WelcomeScreen.vue';
 import {

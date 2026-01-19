@@ -257,7 +257,7 @@ import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
-import ConnectionProgressBar from '../common/ConnectionProgressBar.vue';
+import ConnectionProgressBar from './ConnectionProgressBar.vue';
 import GroupsMultiSelect from '../common/GroupsMultiSelect.vue';
 import TagsMultiSelect from '../common/TagsMultiSelect.vue';
 import type { MetadataItem } from '@/core/types/common';

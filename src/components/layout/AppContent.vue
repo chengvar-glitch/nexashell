@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue';
 import NexaShellHome from '@/components/home/NexaShellHome.vue';
-import RemoteConnectionView from '@/components/terminal/RemoteConnectionView.vue';
+import RemoteConnectionView from '@/components/connections/RemoteConnectionView.vue';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
 
 // Emit createTab event to parent

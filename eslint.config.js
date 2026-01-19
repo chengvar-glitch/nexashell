@@ -165,7 +165,10 @@ export default [
               const sourceCode = context.sourceCode;
               return {
                 Literal(node) {
-                  if (typeof node.value === 'string' && chineseRegex.test(node.value)) {
+                  if (
+                    typeof node.value === 'string' &&
+                    chineseRegex.test(node.value)
+                  ) {
                     context.report({
                       node,
                       message:
