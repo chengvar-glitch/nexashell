@@ -10,6 +10,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/core/utils/logger';
+import type { SavedSession } from './types';
 
 const logger = createLogger('SESSION_API');
 
@@ -228,6 +229,20 @@ class SessionAPI {
     } catch (error) {
       logger.error('Failed to toggle session favorite status', error);
       throw error;
+    }
+  }
+
+  /**
+   * List all saved SSH sessions from the database.
+   * @returns Promise resolving to an array of saved sessions
+   */
+  async listSessions(): Promise<SavedSession[]> {
+    try {
+      const sessions = await invoke<SavedSession[]>('list_sessions');
+      return sessions || [];
+    } catch (error) {
+      logger.error('Failed to list sessions', error);
+      return [];
     }
   }
 }

@@ -3,7 +3,7 @@
  */
 
 export const NEW_TAB_MENU_ITEMS = [
-  { key: 'local', label: 'home.newSession', shortcut: 'Cmd+Shift+T' },
+  { key: 'local', label: 'settings.newLocalTab', shortcut: 'Cmd+Shift+T' },
   { key: 'ssh', label: 'ssh.title', shortcut: 'Cmd+T' },
 ];
 

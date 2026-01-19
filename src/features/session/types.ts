@@ -18,8 +18,10 @@ export interface SavedSession {
  * Extended session type for UI (including relationships)
  */
 export interface SavedSessionDisplay extends SavedSession {
-  groups?: string[];
-  tags?: string[];
+  groups?: string[]; // names
+  tags?: string[]; // names
+  group_ids?: string[];
+  tag_ids?: string[];
   // Transient/UI only properties
   password?: string;
   key_passphrase?: string;

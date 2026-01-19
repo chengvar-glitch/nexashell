@@ -27,6 +27,7 @@ const emit = defineEmits<{
   search: [value: string];
   focus: [];
   blur: [];
+  input: [value: string];
   keydown: [event: KeyboardEvent];
   keyup: [event: KeyboardEvent];
 }>();
@@ -43,6 +44,7 @@ const isFocused = ref(false);
 const onInput = (event: Event) => {
   const target = event.target as HTMLInputElement;
   emit('update:modelValue', target.value);
+  emit('input', target.value);
 };
 
 /**

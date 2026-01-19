@@ -11,7 +11,14 @@ import { useI18n } from 'vue-i18n';
 import TabItem from '@/components/common/TabItem.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
-import { Plus, ChevronDown, X, MoreHorizontal } from 'lucide-vue-next';
+import {
+  Plus,
+  ChevronDown,
+  X,
+  MoreHorizontal,
+  Terminal,
+  Server,
+} from 'lucide-vue-next';
 import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
@@ -45,6 +52,7 @@ const translatedMenuItems = computed(() =>
   NEW_TAB_MENU_ITEMS.map(item => ({
     ...item,
     label: t(item.label),
+    icon: item.key === 'local' ? Terminal : Server,
   }))
 );
 
@@ -62,7 +70,7 @@ const handleTabClose = async (id: string) => {
 const handleAddTab = async () => {
   const newTab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
-    label: `Terminal ${tabCounter}`,
+    label: `${t('settings.newLocalTab')} ${tabCounter}`,
     type: 'terminal' as const,
     closable: true,
   };
@@ -102,7 +110,7 @@ const handleMenuSelect = async (key: string) => {
   if (key === 'local') {
     const newTab = {
       id: `tab-${Date.now()}-${tabCounter++}`,
-      label: `Local Terminal ${tabCounter}`,
+      label: `${t('settings.newLocalTab')} ${tabCounter}`,
       type: 'terminal' as const,
       closable: true,
     };
@@ -129,7 +137,7 @@ const handleCloseTabShortcut = () => {
 const handleNewLocalTab = async () => {
   const newTab = {
     id: `tab-${Date.now()}-${tabCounter++}`,
-    label: `Local Terminal ${tabCounter}`,
+    label: `${t('settings.newLocalTab')} ${tabCounter}`,
     type: 'terminal' as const,
     closable: true,
   };

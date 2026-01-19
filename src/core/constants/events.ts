@@ -19,6 +19,7 @@ export const APP_EVENTS = {
   GROUPS_UPDATED: 'app:groups-updated',
   TAGS_UPDATED: 'app:tags-updated',
   SESSION_SAVED: 'app:session-saved',
+  CONNECT_SESSION: 'app:connect-session',
 } as const;
 
 export type AppEventType = (typeof APP_EVENTS)[keyof typeof APP_EVENTS];

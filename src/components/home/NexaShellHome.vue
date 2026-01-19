@@ -133,15 +133,6 @@
           </p>
         </div>
         <div class="action-area">
-          <div class="search-container">
-            <Search :size="16" class="search-icon" />
-            <input
-              v-model="searchQuery"
-              type="text"
-              class="search-input"
-              :placeholder="$t('search.placeholder').split('(')[0].trim()"
-            />
-          </div>
           <button class="btn-primary" @click="handleNewConnection">
             <Plus :size="18" /> {{ $t('home.newSession') }}
           </button>
@@ -225,20 +216,6 @@
       </section>
     </main>
 
-    <!-- Quick Connect Progress Modal -->
-    <div v-if="showQuickConnectProgress" class="quick-connect-modal">
-      <ConnectionProgressBar
-        :visible="showQuickConnectProgress"
-        :progress="quickConnectProgress"
-        :current-step="quickConnectCurrentStep"
-        :status="quickConnectStatus"
-        :title="quickConnectErrorTitle"
-        :message="quickConnectMessage"
-        :error-message="quickConnectErrorMessage"
-        @close="showQuickConnectProgress = false"
-      />
-    </div>
-
     <!-- Context Menu for Session Card -->
     <DropdownMenu
       :visible="contextMenuVisible"
@@ -276,20 +253,17 @@ import {
   Plus,
   Hash,
   Minus,
-  Search,
 } from 'lucide-vue-next';
-import ConnectionProgressBar from '@/components/common/ConnectionProgressBar.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
-import { OPEN_SSH_FORM_KEY, TAB_MANAGEMENT_KEY } from '@/core/types';
+import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
-import { useSessionStore, sessionApi } from '@/features/session';
+import { sessionApi } from '@/features/session';
 import type {
   SavedSession,
   SavedSessionDisplay,
 } from '@/features/session/types';
-import { v4 as uuidv4 } from 'uuid';
 
 interface Group {
   id: string;
@@ -315,7 +289,6 @@ const isMounted = ref(false);
 
 // View and filter states
 const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
-const searchQuery = ref('');
 const selectedGroupId = ref<string | null>(null);
 const selectedTagId = ref<string | null>(null);
 
@@ -375,17 +348,6 @@ const filteredSessions = computed(() => {
     if (tagName) {
       result = result.filter(s => s.tags?.includes(tagName));
     }
-  }
-
-  // Filter by search query
-  if (searchQuery.value.trim()) {
-    const query = searchQuery.value.toLowerCase();
-    result = result.filter(
-      s =>
-        s.server_name.toLowerCase().includes(query) ||
-        s.addr.toLowerCase().includes(query) ||
-        (s.username && s.username.toLowerCase().includes(query))
-    );
   }
 
   return result;
@@ -459,18 +421,6 @@ const toggleFavorite = async (session: SavedSessionDisplay) => {
   }
 };
 
-const isQuickConnecting = ref(false);
-const quickConnectSessionId = ref<string | null>(null);
-const showQuickConnectProgress = ref(false);
-const quickConnectProgress = ref(0);
-const quickConnectCurrentStep = ref(0);
-const quickConnectMessage = ref('');
-const quickConnectStatus = ref<'connecting' | 'success' | 'error'>(
-  'connecting'
-);
-const quickConnectErrorMessage = ref('');
-const quickConnectErrorTitle = ref('');
-
 // Context menu states
 const contextMenuVisible = ref(false);
 const contextMenuX = ref(0);
@@ -492,8 +442,6 @@ const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
 
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
-const tabManagement = inject(TAB_MANAGEMENT_KEY);
-const sessionStore = useSessionStore();
 const { t } = useI18n();
 
 // Create wrapper functions for event handlers that can be properly removed
@@ -567,7 +515,9 @@ const loadSessions = async () => {
           return {
             ...dbSession,
             groups: sessionGroups?.map(g => g.name) || [],
+            group_ids: sessionGroups?.map(g => g.id) || [],
             tags: sessionTags?.map(t => t.name) || [],
+            tag_ids: sessionTags?.map(t => t.id) || [],
           } as SavedSessionDisplay;
         } catch (error) {
           console.error(
@@ -643,115 +593,8 @@ const handleConnect = (session: SavedSessionDisplay) => {
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
-  if (isQuickConnecting.value) return;
-
   console.log('Quick connect initiated for session:', session.server_name);
-  isQuickConnecting.value = true;
-  const sessionId = uuidv4();
-  // Use the same id for tab and session to avoid duplicate mounts/creates
-  const tabId = sessionId;
-  quickConnectSessionId.value = sessionId;
-  showQuickConnectProgress.value = true;
-  quickConnectProgress.value = 0;
-  quickConnectCurrentStep.value = 0;
-  quickConnectMessage.value = `Connecting to ${session.server_name}...`;
-  quickConnectStatus.value = 'connecting';
-  quickConnectErrorMessage.value = '';
-  quickConnectErrorTitle.value = '';
-
-  try {
-    // Step 1: Fetch saved credentials from keychain
-    quickConnectProgress.value = 15;
-    quickConnectMessage.value = `Loading credentials for ${session.server_name}...`;
-    await new Promise(resolve => setTimeout(resolve, 200));
-
-    let password = '';
-
-    try {
-      const credentials = await invoke<[string, string | null, string | null]>(
-        'get_session_credentials',
-        { sessionId: session.id }
-      );
-      password = credentials[1] || '';
-      console.log('Loaded credentials for session:', session.id);
-    } catch (credError) {
-      console.warn(
-        'Failed to load credentials, continuing with empty password:',
-        credError
-      );
-      // Continue without credentials - may fail at SSH level with proper error
-    }
-
-    // Step 2: Create SSH session in store BEFORE adding the tab so TerminalView
-    // doesn't attempt to connect with empty props. Use same id for both.
-    quickConnectProgress.value = 30;
-    quickConnectMessage.value = `Authenticating with ${session.username}...`;
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    await sessionStore.createSSHSession(
-      sessionId,
-      tabId,
-      session.server_name,
-      session.addr,
-      session.port,
-      session.username,
-      password, // Use loaded password from keychain
-      80,
-      24
-    );
-
-    // Step 3: After session is created, add tab so TerminalView receives an existing session
-    quickConnectProgress.value = 70;
-    quickConnectMessage.value = `Opening terminal for ${session.server_name}...`;
-
-    if (tabManagement) {
-      tabManagement.addTab({
-        id: tabId,
-        label: session.server_name,
-        type: 'ssh',
-        closable: true,
-      });
-    }
-
-    quickConnectProgress.value = 100;
-    quickConnectMessage.value = `Connected to ${session.server_name}`;
-    quickConnectStatus.value = 'success';
-    quickConnectCurrentStep.value = 2;
-
-    // Update timestamp in database
-    try {
-      await invoke('update_session_timestamp', { id: session.id });
-    } catch (e) {
-      console.warn('Failed to update session timestamp:', e);
-    }
-
-    // Auto-close progress after 1 second and stay on terminal tab
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    showQuickConnectProgress.value = false;
-
-    console.log('Quick connect successful:', session.server_name);
-  } catch (error: unknown) {
-    console.error('Quick connect failed:', error);
-    quickConnectStatus.value = 'error';
-    quickConnectErrorTitle.value = `Failed to connect to ${session.server_name}`;
-
-    let errorDetails = 'Unknown error occurred';
-    if (error && typeof error === 'object' && 'message' in error) {
-      errorDetails = String(error.message);
-    } else if (typeof error === 'string') {
-      errorDetails = error;
-    }
-
-    quickConnectErrorMessage.value = errorDetails;
-    quickConnectProgress.value = 100;
-
-    // Remove the tab on failure
-    if (tabManagement) {
-      await tabManagement.closeTab(tabId);
-    }
-  } finally {
-    isQuickConnecting.value = false;
-  }
+  eventBus.emit(APP_EVENTS.CONNECT_SESSION, session);
 };
 
 const handleDeleteGroup = async (groupId: string) => {
@@ -1146,38 +989,6 @@ const onCancelDelete = () => {
   gap: 16px;
 }
 
-.search-container {
-  position: relative;
-  width: 280px;
-}
-
-.search-icon {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--color-text-tertiary);
-  pointer-events: none;
-}
-
-.search-input {
-  width: 100%;
-  padding: 10px 12px 10px 38px;
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  font-size: 14px;
-  outline: none;
-  transition: all 0.2s;
-}
-
-.search-input:focus {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb), 0.1);
-  background: var(--color-bg-primary);
-}
-
 .btn-primary {
   background: var(--color-primary);
   color: white;
@@ -1424,20 +1235,5 @@ const onCancelDelete = () => {
     opacity: 1;
     transform: scale(1);
   }
-}
-
-/* Quick connect modal container */
-.quick-connect-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
 }
 </style>

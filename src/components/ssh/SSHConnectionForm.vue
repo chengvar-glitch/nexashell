@@ -167,8 +167,8 @@
         </div>
       </div>
 
-      <div class="modal-form-row">
-        <div class="modal-form-group">
+      <div class="modal-form-row tags-row">
+        <div class="modal-form-group full-width">
           <GroupsMultiSelect
             v-model="formData.groups"
             :groups="allGroups"
@@ -176,12 +176,14 @@
             :placeholder="$t('ssh.groupsPlaceholder')"
             :create-group-text="$t('ssh.createGroup')"
             :empty-text="$t('ssh.noGroupsAvailable')"
-            :immediate-save="false"
-            @group-added="group => allGroups.push(group)"
+            :immediate-save="true"
+            @group-added="handleGroupAdded"
           />
         </div>
+      </div>
 
-        <div class="modal-form-group">
+      <div class="modal-form-row tags-row">
+        <div class="modal-form-group full-width">
           <TagsMultiSelect
             v-model="formData.tags"
             :tags="allTags"
@@ -189,8 +191,8 @@
             :placeholder="$t('ssh.tagsPlaceholder')"
             :create-tag-text="$t('ssh.createTag')"
             :empty-text="$t('ssh.noTagsAvailable')"
-            :immediate-save="false"
-            @tag-added="tag => allTags.push(tag)"
+            :immediate-save="true"
+            @tag-added="handleTagAdded"
           />
         </div>
       </div>
@@ -214,6 +216,14 @@
           :disabled="isLoading"
         >
           {{ isLoading ? $t('ssh.connecting') : $t('ssh.connect') }}
+        </button>
+        <button
+          type="button"
+          class="modal-btn modal-btn-secondary"
+          :disabled="isLoading"
+          @click="onSaveOnly"
+        >
+          {{ $t('ssh.saveOnly') }}
         </button>
         <button
           ref="cancelButton"
@@ -243,13 +253,16 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue';
+import { reactive, ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
 import ConnectionProgressBar from '../common/ConnectionProgressBar.vue';
 import GroupsMultiSelect from '../common/GroupsMultiSelect.vue';
 import TagsMultiSelect from '../common/TagsMultiSelect.vue';
+import type { MetadataItem } from '@/core/types/common';
+import { eventBus } from '@/core/utils';
+import { APP_EVENTS } from '@/core/constants';
 
 type ConnectionStatus = 'connecting' | 'success' | 'error';
 
@@ -321,28 +334,13 @@ const formData = reactive<SSHConnectionFormData>({
   tags: props.initialData?.tags || [],
 });
 
-interface Group {
-  id: string;
-  name: string;
-  sort: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface Tag {
-  id: string;
-  name: string;
-  sort: number;
-  created_at: string;
-  updated_at: string;
-}
-
 const validationErrors = reactive<ValidationErrors>({});
 
 const { t } = useI18n({ useScope: 'global' });
 
 const emit = defineEmits<{
   connect: [data: SSHConnectionFormData];
+  save: [data: SSHConnectionFormData];
   cancel: [];
   retry: [];
   'close-progress': [];
@@ -353,8 +351,10 @@ const showPassword = ref(false);
 const showKeyPassphrase = ref(false);
 
 // Groups and Tags state
-const allGroups = ref<Group[]>([]);
-const allTags = ref<Tag[]>([]);
+const allGroups = ref<MetadataItem[]>([]);
+const allTags = ref<MetadataItem[]>([]);
+const newlyCreatedGroups = ref<string[]>([]);
+const newlyCreatedTags = ref<string[]>([]);
 
 // Form input references for tab navigation
 const nameInput = ref<HTMLInputElement | null>(null);
@@ -370,8 +370,10 @@ const cancelButton = ref<HTMLElement | null>(null);
 
 // Fetch groups and tags on component mount
 onMounted(async () => {
+  eventBus.on(APP_EVENTS.CLOSE_DIALOG, onCancel);
+
   try {
-    const groups = await invoke<Group[]>('list_groups');
+    const groups = await invoke<MetadataItem[]>('list_groups');
     allGroups.value = groups || [];
     console.log('Loaded groups:', allGroups.value);
   } catch (error) {
@@ -379,7 +381,7 @@ onMounted(async () => {
   }
 
   try {
-    const tags = await invoke<Tag[]>('list_tags');
+    const tags = await invoke<MetadataItem[]>('list_tags');
     allTags.value = tags || [];
     console.log('Loaded tags:', allTags.value);
   } catch (error) {
@@ -387,7 +389,21 @@ onMounted(async () => {
   }
 });
 
+onUnmounted(() => {
+  eventBus.off(APP_EVENTS.CLOSE_DIALOG, onCancel);
+});
+
 // Platform-specific UI detection removed; header is now platform-agnostic
+
+const handleGroupAdded = (group: MetadataItem) => {
+  allGroups.value.push(group);
+  newlyCreatedGroups.value.push(group.id);
+};
+
+const handleTagAdded = (tag: MetadataItem) => {
+  allTags.value.push(tag);
+  newlyCreatedTags.value.push(tag.id);
+};
 
 // Toggle password visibility
 const togglePasswordVisibility = () => {
@@ -460,7 +476,64 @@ const onSubmit = () => {
   emit('connect', submitData);
 };
 
-const onCancel = () => {
+const onSaveOnly = () => {
+  if (!validateForm()) {
+    return;
+  }
+
+  // 确保 port 有默认值
+  const port = formData.port || 22;
+
+  // 构建连接数据
+  const submitData: SSHConnectionFormData = {
+    ...formData,
+    port: port,
+  };
+
+  // 移除空的组和标签数组
+  if (!submitData.groups || submitData.groups.length === 0) {
+    delete submitData.groups;
+  }
+  if (!submitData.tags || submitData.tags.length === 0) {
+    delete submitData.tags;
+  }
+
+  // 将会话数据发送给父组件，执行仅保存逻辑
+  emit('save', submitData);
+};
+
+const onCancel = async () => {
+  // If connection was successful, we don't rollback
+  if (props.connectionStatus === 'success') {
+    emit('cancel');
+    return;
+  }
+
+  // Rollback newly created groups and tags if cancelled
+  if (newlyCreatedGroups.value.length > 0) {
+    for (const id of newlyCreatedGroups.value) {
+      try {
+        await invoke('delete_group', { id });
+      } catch (error) {
+        console.error('Failed to rollback group:', id, error);
+      }
+    }
+    eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
+    newlyCreatedGroups.value = [];
+  }
+
+  if (newlyCreatedTags.value.length > 0) {
+    for (const id of newlyCreatedTags.value) {
+      try {
+        await invoke('delete_tag', { id });
+      } catch (error) {
+        console.error('Failed to rollback tag:', id, error);
+      }
+    }
+    eventBus.emit(APP_EVENTS.TAGS_UPDATED);
+    newlyCreatedTags.value = [];
+  }
+
   emit('cancel');
 };
 
@@ -572,6 +645,11 @@ const handleTabKey = (event: KeyboardEvent) => {
 .password-toggle-btn:hover {
   background: var(--color-interactive-hover);
   color: var(--color-text-secondary);
+}
+
+.tags-row {
+  margin-top: -4px;
+  margin-bottom: 8px;
 }
 
 /* Form layout styles - inheriting from common.css standards */

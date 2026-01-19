@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Home } from 'lucide-vue-next';
+import { Home, Terminal, Server } from 'lucide-vue-next';
 import { type TabType } from '@/features/tabs';
 
 interface Props {
@@ -39,11 +39,19 @@ const handleClose = (e: Event) => {
     :class="{
       active,
       'home-tab': type === 'home',
+      'terminal-tab': type === 'terminal',
+      'ssh-tab': type === 'ssh',
     }"
     :data-id="id"
     @click="handleClick"
   >
-    <Home v-if="type === 'home'" class="home-icon" :size="14" />
+    <Home v-if="type === 'home'" class="tab-icon home-icon" :size="14" />
+    <Terminal
+      v-else-if="type === 'terminal'"
+      class="tab-icon terminal-icon"
+      :size="14"
+    />
+    <Server v-else-if="type === 'ssh'" class="tab-icon ssh-icon" :size="14" />
     <span class="tab-label">{{ label }}</span>
     <div v-if="closable" class="close-btn-wrapper">
       <button class="close-btn" aria-label="Close tab" @click="handleClose">
@@ -160,7 +168,25 @@ const handleClose = (e: Event) => {
   color: white;
 }
 
+.tab-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.tab-item:hover .tab-icon,
+.tab-item.active .tab-icon {
+  opacity: 1;
+}
+
 .home-icon {
+  color: var(--color-primary);
+}
+
+.terminal-icon {
+  color: var(--color-text-secondary);
+}
+
+.ssh-icon {
   color: var(--color-primary);
 }
 

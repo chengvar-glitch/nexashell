@@ -15,6 +15,7 @@ interface MenuItem {
   disabled?: boolean;
   divider?: boolean;
   shortcut?: string;
+  icon?: any;
 }
 
 interface Props {
@@ -123,7 +124,15 @@ onUnmounted(() => {
               }"
               @click="handleItemClick(item)"
             >
-              <span class="menu-label">{{ item.label }}</span>
+              <div class="menu-item-content">
+                <component
+                  :is="item.icon"
+                  v-if="item.icon"
+                  class="menu-icon"
+                  :size="16"
+                />
+                <span class="menu-label">{{ item.label }}</span>
+              </div>
               <span v-if="item.shortcut" class="menu-shortcut">{{
                 item.shortcut
               }}</span>
@@ -156,6 +165,23 @@ onUnmounted(() => {
   cursor: pointer;
   transition: all var(--transition-base);
   border-radius: var(--radius-md);
+  gap: 12px;
+}
+
+.menu-item-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.menu-icon {
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.menu-item:hover .menu-icon {
+  color: var(--color-primary);
 }
 
 .menu-item:hover {

@@ -7,27 +7,22 @@
     :create-item-text="createGroupText"
     :empty-text="emptyText"
     :allow-create="allowCreateGroup"
-    :immediate-save="immediateSave"
-    item-type="group"
+    :on-create-item="handleCreateGroup"
     @update:model-value="val => emit('update:modelValue', val)"
-    @item-added="item => emit('group-added', item as Group)"
+    @item-added="item => emit('group-added', item)"
   />
 </template>
 
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core';
 import MultiSelect from './MultiSelect.vue';
-
-interface Group {
-  id: string;
-  name: string;
-  sort: number;
-  created_at: string;
-  updated_at: string;
-}
+import type { MetadataItem } from '@/core/types/common';
+import { eventBus } from '@/core/utils';
+import { APP_EVENTS } from '@/core/constants';
 
 interface Props {
   modelValue?: string[];
-  groups?: Group[];
+  groups?: MetadataItem[];
   label?: string;
   placeholder?: string;
   createGroupText?: string;
@@ -36,7 +31,7 @@ interface Props {
   immediateSave?: boolean;
 }
 
-withDefaults(defineProps<Props>(), {
+const props = withDefaults(defineProps<Props>(), {
   modelValue: () => [],
   groups: () => [],
   label: '',
@@ -49,6 +44,36 @@ withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<{
   'update:modelValue': [value: string[]];
-  'group-added': [group: Group];
+  'group-added': [group: MetadataItem];
 }>();
+
+const handleCreateGroup = async (name: string): Promise<MetadataItem> => {
+  if (props.immediateSave) {
+    try {
+      const id = await invoke<string>('add_group', { name });
+      const newGroup: MetadataItem = {
+        id,
+        name,
+        sort: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
+      return newGroup;
+    } catch (error) {
+      console.error('Failed to create group:', error);
+      throw error;
+    }
+  } else {
+    // Return a temporary item that will be saved later by the parent
+    return {
+      id: `new:${name}`,
+      name,
+      sort: 1,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+  }
+};
 </script>

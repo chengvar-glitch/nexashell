@@ -17,6 +17,7 @@ import { themeManager } from '@/core/utils/theme-manager';
 import { useModal } from '@/composables';
 import { useTabManagement } from '@/composables';
 import { useSessionStore } from '@/features/session';
+import type { SavedSession } from '@/features/session/types';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
@@ -85,6 +86,8 @@ provide(OPEN_SSH_FORM_KEY, () => {
   isConnecting.value = false;
   sshFormMode.value = 'create';
   editingSessionId.value = null;
+  savedSSHFormData.value = null;
+  showConnectionProgress.value = false;
   openSSHForm();
 });
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
@@ -139,6 +142,7 @@ onMounted(() => {
     sshFormMode.value = 'edit';
     editingSessionId.value = session.id;
 
+    // Use deep copy patterns to isolate form state from home page state
     savedSSHFormData.value = {
       server_name: session.server_name,
       addr: session.addr,
@@ -148,13 +152,60 @@ onMounted(() => {
       private_key_path: session.private_key_path || '',
       key_passphrase: credentials[2] || '',
       save_session: true,
-      groups: session.groups || [],
-      tags: session.tags || [],
+      // Pass IDs to the form, as MultiSelect expects IDs
+      groups: session.group_ids ? [...session.group_ids] : [],
+      tags: session.tag_ids ? [...session.tag_ids] : [],
     };
 
     sshErrorMessage.value = null;
     isConnecting.value = false;
     openSSHForm();
+  });
+
+  eventBus.on(APP_EVENTS.CONNECT_SESSION, async (session: SavedSession) => {
+    // 1. Fetch credentials
+    try {
+      // Use create mode to allow connection (edit mode only updates DB)
+      sshFormMode.value = 'create';
+      editingSessionId.value = session.id;
+
+      const credentials = await invoke<[string, string | null, string | null]>(
+        'get_session_credentials',
+        { sessionId: session.id }
+      ).catch(() => [session.id, null, null]);
+
+      const connectData = {
+        server_name: session.server_name,
+        addr: session.addr,
+        port: session.port,
+        username: session.username,
+        password: credentials[1] || '',
+        private_key_path: session.private_key_path || '',
+        key_passphrase: credentials[2] || '',
+        save_session: false, // Don't save again as it's already in DB
+        groups: [],
+        tags: [],
+      };
+
+      // Ensure form is open and showing progress immediately to avoid form field flash
+      savedSSHFormData.value = connectData;
+      showConnectionProgress.value = true;
+      sshErrorMessage.value = null;
+      isConnecting.value = true;
+      openSSHForm();
+
+      // Update timestamp to mark as recent
+      await invoke('update_session_timestamp', { id: session.id }).catch(err =>
+        logger.error('Failed to update timestamp', err)
+      );
+
+      // Trigger connection logic
+      handleSSHConnect(connectData);
+    } catch (error) {
+      logger.error('Failed to connect to saved session', error);
+      isConnecting.value = false;
+      showConnectionProgress.value = false;
+    }
   });
 
   // Global right-click handling: prevent browser default menu in production
@@ -211,6 +262,40 @@ onBeforeUnmount(() => {
   }
 });
 
+// Process any new groups or tags first
+const processMetadata = async (data: SSHConnectionFormData) => {
+  const finalGroupIds = [...(data.groups || [])];
+  const finalTagIds = [...(data.tags || [])];
+
+  // Handle new groups
+  for (let i = 0; i < finalGroupIds.length; i++) {
+    if (finalGroupIds[i].startsWith('new:')) {
+      const name = finalGroupIds[i].substring(4);
+      try {
+        const id = await invoke<string>('add_group', { name });
+        finalGroupIds[i] = id;
+      } catch (error) {
+        logger.error(`Failed to create group: ${name}`, error);
+      }
+    }
+  }
+
+  // Handle new tags
+  for (let i = 0; i < finalTagIds.length; i++) {
+    if (finalTagIds[i].startsWith('new:')) {
+      const name = finalTagIds[i].substring(4);
+      try {
+        const id = await invoke<string>('add_tag', { name });
+        finalTagIds[i] = id;
+      } catch (error) {
+        logger.error(`Failed to create tag: ${name}`, error);
+      }
+    }
+  }
+
+  return { groupIds: finalGroupIds, tagIds: finalTagIds };
+};
+
 // Handle SSH connection with improved error handling
 const handleSSHConnect = async (data: SSHConnectionFormData) => {
   logger.info('Initiating SSH connection', {
@@ -245,103 +330,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   connectionErrorMessage.value = '';
   connectionErrorTitle.value = '';
 
-  // Process any new groups or tags first
-  const processMetadata = async () => {
-    const finalGroupIds = [...(data.groups || [])];
-    const finalTagIds = [...(data.tags || [])];
-
-    // Handle new groups
-    for (let i = 0; i < finalGroupIds.length; i++) {
-      if (finalGroupIds[i].startsWith('new:')) {
-        const name = finalGroupIds[i].substring(4);
-        try {
-          const id = await invoke<string>('add_group', { name });
-          finalGroupIds[i] = id;
-        } catch (error) {
-          logger.error(`Failed to create group: ${name}`, error);
-        }
-      }
-    }
-
-    // Handle new tags
-    for (let i = 0; i < finalTagIds.length; i++) {
-      if (finalTagIds[i].startsWith('new:')) {
-        const name = finalTagIds[i].substring(4);
-        try {
-          const id = await invoke<string>('add_tag', { name });
-          finalTagIds[i] = id;
-        } catch (error) {
-          logger.error(`Failed to create tag: ${name}`, error);
-        }
-      }
-    }
-
-    return { groupIds: finalGroupIds, tagIds: finalTagIds };
-  };
-
-  // Check if we're in edit mode
-  if (sshFormMode.value === 'edit' && editingSessionId.value) {
-    try {
-      const authType = data.password ? 'password' : 'key';
-
-      const { groupIds, tagIds } = await processMetadata();
-
-      // Update the session metadata and credentials in one go
-      // This avoids creating duplicate entries in the sessions table
-      await invoke('save_session_with_credentials', {
-        id: editingSessionId.value,
-        addr: data.addr,
-        port: data.port || 22,
-        serverName: data.server_name,
-        username: data.username,
-        authType: authType,
-        privateKeyPath: data.private_key_path || null,
-        password: data.password || null,
-        keyPassphrase: data.key_passphrase || null,
-        groupIds: groupIds.length > 0 ? groupIds : null,
-        tagIds: tagIds.length > 0 ? tagIds : null,
-      });
-
-      // Update timestamp to mark as recent
-      await invoke('update_session_timestamp', { id: editingSessionId.value });
-
-      connectionProgress.value = 100;
-      connectionCurrentStep.value = 1;
-      connectionStatus.value = 'success';
-      connectionMessage.value = 'Session updated successfully';
-
-      logger.info('SSH session updated successfully', {
-        sessionId: editingSessionId.value,
-        name: data.server_name,
-        host: data.addr,
-      });
-
-      // Auto-close after 1 second
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      closeSSHForm();
-      showConnectionProgress.value = false;
-
-      // Emit event to refresh the session list
-      eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-        name: data.server_name,
-        host: data.addr,
-        port: data.port || 22,
-      });
-
-      // Reset form mode
-      sshFormMode.value = 'create';
-      editingSessionId.value = null;
-    } catch (error) {
-      logger.error('Failed to update session', error);
-      connectionStatus.value = 'error';
-      connectionProgress.value = 100;
-      connectionErrorTitle.value = 'Failed to update session';
-      connectionErrorMessage.value = String(error);
-    }
-    return;
-  }
-
-  // 1. Generate a unique session ID
+  // 1. Generate a unique session ID for the RUNTIME terminal session
   const sessionId = uuidv4();
 
   // 2. Initiate backend connection via Pinia store
@@ -366,28 +355,32 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     );
     logger.info('SSH session created successfully', { sessionId });
 
-    // 1.5. Save session to database AFTER successful connection if user requested it
-    if (data.save_session) {
+    // 1.5. Save or update session in database AFTER successful connection
+    // We save if it's a new connection and user requested "Save",
+    // OR if we're in "Edit" mode (in which case we always update on success).
+    if (
+      (data.save_session && sshFormMode.value === 'create') ||
+      (sshFormMode.value === 'edit' && editingSessionId.value)
+    ) {
       try {
         const authType = data.password ? 'password' : 'key';
 
-        const { groupIds, tagIds } = await processMetadata();
+        const { groupIds, tagIds } = await processMetadata(data);
 
         logger.info(
-          'Attempting to save session after successful connection...',
+          sshFormMode.value === 'edit'
+            ? 'Updating existing session after successful connection...'
+            : 'Saving new session after successful connection...',
           {
+            id: editingSessionId.value,
             name: data.server_name,
             host: data.addr,
             authType,
-            hasGroups: groupIds.length > 0,
-            hasTags: tagIds.length > 0,
-            groups: groupIds,
-            tags: tagIds,
           }
         );
 
         const savePayload = {
-          id: null, // New connection, id is null
+          id: sshFormMode.value === 'edit' ? editingSessionId.value : null,
           addr: data.addr,
           port: data.port || 22,
           serverName: data.server_name,
@@ -400,31 +393,32 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
           tagIds: tagIds.length > 0 ? tagIds : null,
         };
 
-        const savedSessionId = await invoke(
+        const resultId = await invoke<string>(
           'save_session_with_credentials',
           savePayload
         );
 
-        // Update timestamp for new session too
-        if (savedSessionId) {
-          await invoke('update_session_timestamp', { id: savedSessionId });
+        // Update timestamp for recency tracking
+        const timestampId =
+          sshFormMode.value === 'edit' ? editingSessionId.value : resultId;
+        if (timestampId) {
+          await invoke('update_session_timestamp', { id: timestampId });
         }
 
-        logger.info('SSH session saved to database', {
-          sessionId: savedSessionId,
-          name: data.server_name,
-          host: data.addr,
+        logger.info('SSH session persistence completed', {
+          sessionId: timestampId,
+          mode: sshFormMode.value,
         });
 
-        // Emit event to notify other components that a new session has been saved
+        // Emit event to notify other components to refresh lists
         eventBus.emit(APP_EVENTS.SESSION_SAVED, {
           name: data.server_name,
           host: data.addr,
           port: data.port || 22,
         });
       } catch (saveError) {
-        logger.error('Failed to save session to database', saveError);
-        // We don't throw error here to not fail the already established connection
+        logger.error('Failed to persist session to database', saveError);
+        // We don't throw error here to not fail the already established terminal session
       }
     }
 
@@ -443,6 +437,10 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       // Close the SSH form entirely (including progress bar)
       closeSSHForm();
       showConnectionProgress.value = false;
+
+      // Reset form mode and internal state
+      sshFormMode.value = 'create';
+      editingSessionId.value = null;
 
       // 3. Create and add a new tab AFTER the form is closed
       // Use a small delay to allow the modal to disappear visually
@@ -519,6 +517,65 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   }
 };
 
+// Handle "Save Only" functionality
+const handleSSHSave = async (data: SSHConnectionFormData) => {
+  logger.info('Performing Save Only', {
+    name: data.server_name,
+    host: data.addr,
+    mode: sshFormMode.value,
+  });
+
+  try {
+    const authType = data.password ? 'password' : 'key';
+    const { groupIds, tagIds } = await processMetadata(data);
+
+    const savePayload = {
+      id: sshFormMode.value === 'edit' ? editingSessionId.value : null,
+      addr: data.addr,
+      port: data.port || 22,
+      serverName: data.server_name,
+      username: data.username,
+      authType: authType,
+      privateKeyPath: data.private_key_path || null,
+      password: data.password || null,
+      keyPassphrase: data.key_passphrase || null,
+      groupIds: groupIds.length > 0 ? groupIds : null,
+      tagIds: tagIds.length > 0 ? tagIds : null,
+    };
+
+    const resultId = await invoke<string>(
+      'save_session_with_credentials',
+      savePayload
+    );
+
+    // Update timestamp for recency tracking
+    const timestampId =
+      sshFormMode.value === 'edit' ? editingSessionId.value : resultId;
+    if (timestampId) {
+      await invoke('update_session_timestamp', { id: timestampId });
+    }
+
+    logger.info('SSH session saved via Save Only', {
+      sessionId: timestampId,
+    });
+
+    // Emit event to notify other components to refresh lists
+    eventBus.emit(APP_EVENTS.SESSION_SAVED, {
+      name: data.server_name,
+      host: data.addr,
+      port: data.port || 22,
+    });
+
+    // Close form as we're done
+    closeSSHForm();
+    sshFormMode.value = 'create';
+    editingSessionId.value = null;
+  } catch (error) {
+    logger.error('Failed to save session via Save Only', error);
+    sshErrorMessage.value = String(error);
+  }
+};
+
 // Handle connection progress bar close
 const handleConnectionProgressClose = () => {
   showConnectionProgress.value = false;
@@ -575,6 +632,7 @@ const handleCreateTab = (tab: any) => {
             :connection-error-title="connectionErrorTitle"
             :connection-error-message="connectionErrorMessage"
             @connect="handleSSHConnect"
+            @save="handleSSHSave"
             @cancel="handleSSHCancel"
             @retry="handleConnectionProgressRetry"
             @close-progress="handleConnectionProgressClose"
