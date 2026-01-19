@@ -148,5 +148,61 @@ export default [
       'vite.config.ts',
     ],
   },
+  {
+    // Custom rule to disallow Chinese characters except in i18n locale files
+    files: ['src/**/*.{js,jsx,ts,tsx,vue}'],
+    ignores: [
+      'src/core/i18n/locales/**',
+      'src/components/settings/SettingsPanel.vue',
+      'src/components/common/WelcomeScreen.vue',
+    ],
+    plugins: {
+      'custom-i18n': {
+        rules: {
+          'no-chinese-content': {
+            create(context) {
+              const chineseRegex = /[\u4e00-\u9fa5]/;
+              const sourceCode = context.sourceCode;
+              return {
+                Literal(node) {
+                  if (typeof node.value === 'string' && chineseRegex.test(node.value)) {
+                    context.report({
+                      node,
+                      message:
+                        'Chinese characters are not allowed in string literals. Please use i18n features.',
+                    });
+                  }
+                },
+                TemplateElement(node) {
+                  if (chineseRegex.test(node.value.raw)) {
+                    context.report({
+                      node,
+                      message:
+                        'Chinese characters are not allowed in template literals. Please use i18n features.',
+                    });
+                  }
+                },
+                Program() {
+                  const comments = sourceCode.getAllComments();
+                  comments.forEach(comment => {
+                    if (chineseRegex.test(comment.value)) {
+                      context.report({
+                        loc: comment.loc,
+                        message:
+                          'Chinese characters are not allowed in comments. Please use English.',
+                      });
+                    }
+                  });
+                },
+              };
+            },
+          },
+        },
+      },
+    },
+    rules: {
+      'custom-i18n/no-chinese-content': 'error',
+    },
+  },
   prettier,
 ];
