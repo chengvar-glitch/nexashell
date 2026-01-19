@@ -1,5 +1,5 @@
 use rusqlite::{params, Connection};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use rusqlite::types::ToSql;
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ fn db_path() -> Result<&'static PathBuf, String> {
     DB_PATH.as_ref().map_err(|e| e.clone())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Session {
     pub id: String,
     pub addr: String,
@@ -32,6 +32,53 @@ pub struct Session {
     pub is_favorite: bool,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// Represents a persisted group for organizing sessions.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Group {
+    /// UUID primary key (string)
+    pub id: String,
+    /// Group name (default: "默认分组")
+    pub name: String,
+    /// Sort order (default: 1)
+    pub sort: i64,
+    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
+    pub created_at: String,
+    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
+    pub updated_at: String,
+}
+
+/// Represents a persisted tag.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Tag {
+    /// UUID primary key (string)
+    pub id: String,
+    /// Tag name (default: empty string)
+    pub name: String,
+    /// Tag color (hex string, e.g., "#FF0000")
+    pub color: Option<String>,
+    /// Sort order (default: 1)
+    pub sort: i64,
+    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
+    pub created_at: String,
+    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
+    pub updated_at: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ExportSession {
+    pub metadata: Session,
+    pub encrypted_credentials: Option<String>,
+    pub group_ids: Vec<String>,
+    pub tag_ids: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ExportData {
+    pub sessions: Vec<ExportSession>,
+    pub groups: Vec<Group>,
+    pub tags: Vec<Tag>,
 }
 
 #[tauri::command]
@@ -51,6 +98,7 @@ pub fn init_db() -> Result<String, String> {
             auth_type TEXT NOT NULL,
             private_key_path TEXT,
             is_favorite INTEGER NOT NULL DEFAULT 0,
+            encrypted_credentials TEXT,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )",
@@ -58,8 +106,9 @@ pub fn init_db() -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    // Migration for is_favorite if it doesn't exist
+    // Migration for is_favorite and encrypted_credentials if they don't exist
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0", []);
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN encrypted_credentials TEXT", []);
 
     // Ensure groups/tags and junction tables exist.
     ensure_groups_and_tags(&conn)?;
@@ -154,11 +203,22 @@ pub fn save_session_with_credentials(
     let is_update = id.is_some();
     let session_id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
     
+    // 0. Encrypt sensitive information if present
+    let encrypted_credentials = if password.is_some() || key_passphrase.is_some() {
+        let sensitive = crate::encryption::SensitiveData {
+            password: password.clone(),
+            key_passphrase: key_passphrase.clone(),
+        };
+        Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
+    } else {
+        None
+    };
+
     println!("[save_session_with_credentials] {} session: {}", if is_update { "Updating" } else { "Saving new" }, session_id);
     
-    // 1. Save session metadata to database (without sensitive information)
+    // 1. Save session metadata to database
     if is_update {
-        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, updated_at = CURRENT_TIMESTAMP".to_string();
+        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, encrypted_credentials = ?7, updated_at = CURRENT_TIMESTAMP".to_string();
         let mut params_vec: Vec<Box<dyn ToSql>> = vec![
             Box::new(addr),
             Box::new(port),
@@ -166,6 +226,7 @@ pub fn save_session_with_credentials(
             Box::new(username),
             Box::new(auth_type),
             Box::new(private_key_path),
+            Box::new(encrypted_credentials),
         ];
 
         if let Some(fav) = is_favorite {
@@ -186,33 +247,10 @@ pub fn save_session_with_credentials(
         conn.execute("DELETE FROM session_tags WHERE session_id = ?1", params![session_id]).map_err(|e| e.to_string())?;
     } else {
         conn.execute(
-            "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![session_id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }],
+            "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![session_id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }, encrypted_credentials],
         ).map_err(|e| e.to_string())?;
-    }
-    
-    // 2. Save sensitive information to system keychain only if changed
-    if password.is_some() || key_passphrase.is_some() {
-        let should_save = match crate::keychain::KeychainManager::retrieve_credentials(&session_id) {
-            Ok(existing) => {
-                existing.password != password || existing.key_passphrase != key_passphrase
-            },
-            Err(_) => true,
-        };
-
-        if should_save {
-            println!("[save_session_with_credentials] Credentials changed or new, saving to keychain...");
-            crate::keychain::KeychainManager::save_credentials(
-                &session_id,
-                &crate::keychain::SensitiveData {
-                    password: password.clone(),
-                    key_passphrase: key_passphrase.clone(),
-                },
-            )?;
-        } else {
-            println!("[save_session_with_credentials] Credentials unchanged, skipping keychain write to avoid system prompts");
-        }
     }
     
     // 3. Associate with groups
@@ -238,7 +276,7 @@ pub fn save_session_with_credentials(
     Ok(session_id)
 }
 
-/// Retrieve sensitive credentials (password and key passphrase) from system keychain
+/// Retrieve sensitive credentials (password and key passphrase) from database (decrypted)
 ///
 /// # Arguments
 /// * `session_id` - Session UUID
@@ -248,8 +286,21 @@ pub fn save_session_with_credentials(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn get_session_credentials(sessionId: String) -> Result<(String, Option<String>, Option<String>), String> {
-    let credentials = crate::keychain::KeychainManager::retrieve_credentials(&sessionId)?;
-    Ok((sessionId, credentials.password, credentials.key_passphrase))
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    
+    let encrypted_credentials: Option<String> = conn.query_row(
+        "SELECT encrypted_credentials FROM sessions WHERE id = ?1",
+        params![sessionId],
+        |row| row.get(0),
+    ).map_err(|e| e.to_string())?;
+
+    if let Some(encrypted) = encrypted_credentials {
+        let credentials = crate::encryption::EncryptionManager::decrypt(&encrypted)?;
+        Ok((sessionId, credentials.password, credentials.key_passphrase))
+    } else {
+        Ok((sessionId, None, None))
+    }
 }
 
 /// Save a new SSH session with groups and tags associations.
@@ -594,43 +645,8 @@ pub fn delete_session(id: String) -> Result<(), String> {
     let rows3 = conn.execute("DELETE FROM sessions WHERE id = ?1", params![id.clone()]).map_err(|e| e.to_string())?;
     println!("Deleted {} rows from sessions table", rows3);
     
-    // Also delete sensitive credentials from keychain
-    let _ = crate::keychain::KeychainManager::delete_credentials(&id);
-    
     println!("Session {} deleted successfully", id);
     Ok(())
-}
-
-/// Represents a persisted group for organizing sessions.
-#[derive(Serialize)]
-pub struct Group {
-    /// UUID primary key (string)
-    pub id: String,
-    /// Group name (default: "默认分组")
-    pub name: String,
-    /// Sort order (default: 1)
-    pub sort: i64,
-    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
-    pub created_at: String,
-    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
-    pub updated_at: String,
-}
-
-/// Represents a persisted tag.
-#[derive(Serialize)]
-pub struct Tag {
-    /// UUID primary key (string)
-    pub id: String,
-    /// Tag name (default: empty string)
-    pub name: String,
-    /// Tag color (hex string, e.g., "#FF0000")
-    pub color: Option<String>,
-    /// Sort order (default: 1)
-    pub sort: i64,
-    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
-    pub created_at: String,
-    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
-    pub updated_at: String,
 }
 
 /// Create the `groups` and `tags` tables if they do not exist.
@@ -898,4 +914,157 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
         v.push(r.map_err(|e| e.to_string())?);
     }
     Ok(v)
+}
+
+#[tauri::command]
+pub fn export_sessions(password: String) -> Result<String, String> {
+    let db_path = db_path()?;
+    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+
+    // 1. Get all sessions
+    let mut stmt = conn.prepare("SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at FROM sessions")
+        .map_err(|e| e.to_string())?;
+    
+    let session_rows = stmt.query_map([], |row| {
+        let id: String = row.get(0)?;
+        let metadata = Session {
+            id: id.clone(),
+            addr: row.get(1)?,
+            port: row.get(2)?,
+            server_name: row.get(3)?,
+            username: row.get(4)?,
+            auth_type: row.get(5)?,
+            private_key_path: row.get(6)?,
+            is_favorite: row.get::<_, i64>(7)? != 0,
+            created_at: row.get(9)?,
+            updated_at: row.get(10)?,
+        };
+        let encrypted_creds: Option<String> = row.get(8)?;
+        Ok((metadata, encrypted_creds))
+    }).map_err(|e| e.to_string())?;
+
+    let mut export_sessions = Vec::new();
+    for row in session_rows {
+        let (metadata, encrypted_creds) = row.map_err(|e| e.to_string())?;
+        
+        // Decrypt from machine ID and re-encrypt with export password
+        let re_encrypted = if let Some(creds) = encrypted_creds {
+            let sensitive = crate::encryption::EncryptionManager::decrypt(&creds)?;
+            Some(crate::encryption::EncryptionManager::encrypt_with_key(&sensitive, &password)?)
+        } else {
+            None
+        };
+
+        // Get groups for this session
+        let mut g_stmt = conn.prepare("SELECT group_id FROM session_groups WHERE session_id = ?1").map_err(|e| e.to_string())?;
+        let groups: Vec<String> = g_stmt.query_map(params![metadata.id], |r| r.get(0)).map_err(|e| e.to_string())?
+            .collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
+
+        // Get tags for this session
+        let mut t_stmt = conn.prepare("SELECT tag_id FROM session_tags WHERE session_id = ?1").map_err(|e| e.to_string())?;
+        let tags: Vec<String> = t_stmt.query_map(params![metadata.id], |r| r.get(0)).map_err(|e| e.to_string())?
+            .collect::<Result<Vec<String>, _>>().map_err(|e| e.to_string())?;
+
+        export_sessions.push(ExportSession {
+            metadata,
+            encrypted_credentials: re_encrypted,
+            group_ids: groups,
+            tag_ids: tags,
+        });
+    }
+
+    // 2. Get all groups
+    let mut g_stmt = conn.prepare("SELECT id, name, sort, created_at, updated_at FROM groups").map_err(|e| e.to_string())?;
+    let groups = g_stmt.query_map([], |row| {
+        Ok(Group {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            sort: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<Group>, _>>().map_err(|e| e.to_string())?;
+
+    // 3. Get all tags
+    let mut t_stmt = conn.prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags").map_err(|e| e.to_string())?;
+    let tags = t_stmt.query_map([], |row| {
+        Ok(Tag {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            color: row.get(2)?,
+            sort: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }).map_err(|e| e.to_string())?.collect::<Result<Vec<Tag>, _>>().map_err(|e| e.to_string())?;
+
+    let export_data = ExportData {
+        sessions: export_sessions,
+        groups,
+        tags,
+    };
+
+    serde_json::to_string(&export_data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn import_sessions(json_data: String, password: String) -> Result<(), String> {
+    let db_path = db_path()?;
+    let mut conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
+    let export_data: ExportData = serde_json::from_str(&json_data).map_err(|e| e.to_string())?;
+
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+
+    // 1. Import Groups
+    for group in export_data.groups {
+        tx.execute(
+            "INSERT OR IGNORE INTO groups (id, name, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![group.id, group.name, group.sort, group.created_at, group.updated_at],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // 2. Import Tags
+    for tag in export_data.tags {
+        tx.execute(
+            "INSERT OR IGNORE INTO tags (id, name, color, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![tag.id, tag.name, tag.color, tag.sort, tag.created_at, tag.updated_at],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // 3. Import Sessions
+    for session in export_data.sessions {
+        let metadata = session.metadata;
+        
+        // Decrypt from export password and re-encrypt with machine ID
+        let re_encrypted = if let Some(creds) = session.encrypted_credentials {
+            let sensitive = crate::encryption::EncryptionManager::decrypt_with_key(&creds, &password)?;
+            Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
+        } else {
+            None
+        };
+
+        tx.execute(
+            "INSERT OR REPLACE INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                metadata.id, metadata.addr, metadata.port, metadata.server_name, 
+                metadata.username, metadata.auth_type, metadata.private_key_path, 
+                if metadata.is_favorite { 1 } else { 0 }, re_encrypted, metadata.created_at, metadata.updated_at
+            ],
+        ).map_err(|e| e.to_string())?;
+
+        // Restore group associations
+        tx.execute("DELETE FROM session_groups WHERE session_id = ?1", params![metadata.id]).ok();
+        for gid in session.group_ids {
+            tx.execute("INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)", params![metadata.id, gid]).ok();
+        }
+
+        // Restore tag associations
+        tx.execute("DELETE FROM session_tags WHERE session_id = ?1", params![metadata.id]).ok();
+        for tid in session.tag_ids {
+            tx.execute("INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)", params![metadata.id, tid]).ok();
+        }
+    }
+
+    tx.commit().map_err(|e| e.to_string())
 }

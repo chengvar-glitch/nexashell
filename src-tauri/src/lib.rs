@@ -1,7 +1,7 @@
 mod system;
 mod ssh;
 mod db;
-mod keychain;
+mod encryption;
 
 use tauri::Manager;
 use ssh::SshManager;
@@ -92,6 +92,8 @@ pub fn run() {
                 db::edit_session,
                 db::delete_session,
                 db::toggle_favorite,
+                db::export_sessions,
+                db::import_sessions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
