@@ -39,6 +39,7 @@ const LATENCY_THRESHOLD_MS = 100;
  */
 interface Props {
   sessionId?: string;
+  tabType?: string;
   ip?: string;
   port?: number;
   username?: string;
@@ -47,6 +48,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   sessionId: '',
+  tabType: 'ssh',
   ip: '',
   port: 22,
   username: '',
@@ -108,9 +110,9 @@ let lastSeq = 0;
 let unlistenFn: UnlistenFn | null = null;
 
 /**
- * Establish SSH connection via session store and API
+ * Establish connection via session store and API
  */
-const connectSSH = async (cols: number, rows: number): Promise<void> => {
+const connectSession = async (cols: number, rows: number): Promise<void> => {
   if (!props.sessionId) {
     throw new Error('sessionId is required');
   }
@@ -120,59 +122,73 @@ const connectSSH = async (cols: number, rows: number): Promise<void> => {
   }
 
   try {
-    // Get session info from store (includes serverName)
-    const session = sessionStore.getSession(props.sessionId);
-    const serverName =
-      session?.connectionParams?.serverName || props.ip || 'Unknown';
+    if (props.tabType === 'terminal') {
+      logger.info('Creating local terminal session', {
+        sessionId: props.sessionId,
+      });
+      await sessionStore.createLocalSession(
+        props.sessionId,
+        props.sessionId,
+        cols,
+        rows
+      );
+    } else {
+      // Get session info from store (includes serverName)
+      const session = sessionStore.getSession(props.sessionId);
+      const serverName =
+        session?.connectionParams?.serverName || props.ip || 'Unknown';
 
-    await sessionStore.createSSHSession(
-      props.sessionId,
-      props.sessionId,
-      serverName,
-      props.ip || '',
-      props.port || 22,
-      props.username || '',
-      props.password || '',
-      cols,
-      rows
-    );
+      await sessionStore.createSSHSession(
+        props.sessionId,
+        props.sessionId,
+        serverName,
+        props.ip || '',
+        props.port || 22,
+        props.username || '',
+        props.password || '',
+        cols,
+        rows
+      );
+    }
 
     // Retrieve buffered initial output (e.g., welcome banner, login prompts)
     // Wait for the backend to complete the initial buffering phase.
-    // A delay of ~2 seconds ensures the full initial sequence is captured.
-    await new Promise(resolve => setTimeout(resolve, 2100));
+    // A delay of ~2 seconds ensures the full initial sequence is captured for SSH.
+    if (props.tabType !== 'terminal') {
+      await new Promise(resolve => setTimeout(resolve, 2100));
 
-    const bufferedOutput = await sessionApi.getBufferedSSHOutput(
-      props.sessionId
-    );
-    if (terminal && bufferedOutput.length > 0) {
-      logger.info('Writing buffered SSH output to terminal', {
-        chunks: bufferedOutput.length,
-      });
-      for (const chunk of bufferedOutput) {
-        terminal.write(chunk.output);
-        lastSeq = Math.max(lastSeq, chunk.seq);
+      const bufferedOutput = await sessionApi.getBufferedSSHOutput(
+        props.sessionId
+      );
+      if (terminal && bufferedOutput.length > 0) {
+        logger.info('Writing buffered SSH output to terminal', {
+          chunks: bufferedOutput.length,
+        });
+        for (const chunk of bufferedOutput) {
+          terminal.write(chunk.output);
+          lastSeq = Math.max(lastSeq, chunk.seq);
+        }
+      } else {
+        logger.debug('No buffered SSH output available');
       }
-    } else {
-      logger.debug('No buffered SSH output available');
     }
   } catch (error) {
-    logger.error('SSH connection failed', error);
+    logger.error('Connection failed', error);
     throw error;
   }
 };
 
 /**
- * Disconnect SSH session
+ * Disconnect session
  */
-const disconnectSSH = async (): Promise<void> => {
+const disconnectSession = async (): Promise<void> => {
   if (!props.sessionId) return;
 
   try {
-    await sessionApi.disconnectSSH(props.sessionId);
-    sessionStore.disconnectSession(props.sessionId);
+    // Session store handles the specific disconnect logic based on session type
+    await sessionStore.disconnectSession(props.sessionId);
   } catch (error) {
-    logger.error('SSH disconnect failed', error);
+    logger.error('Disconnect failed', error);
   }
 };
 
@@ -181,7 +197,7 @@ const disconnectSSH = async (): Promise<void> => {
  */
 const cleanupResources = async (): Promise<void> => {
   if (props.sessionId) {
-    await disconnectSSH();
+    await disconnectSession();
   }
 
   terminal?.dispose();
@@ -269,14 +285,24 @@ onMounted(async () => {
 
   terminal.open(terminalRef.value);
 
-  // Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
+  // Handle keyboard shortcuts and allow global app shortcuts to bubble up
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
     if (event.type !== 'keydown') return true;
 
     const isMac = navigator.userAgent.includes('Mac');
     const isControlKey = isMac ? event.metaKey : event.ctrlKey;
+    const key = event.key.toLowerCase();
 
-    // Copy: Cmd+C (Mac) or Ctrl+C (Win/Linux)
+    // 1. Allow global app shortcuts to bubble up to the window
+    // This includes Cmd+T, Cmd+Shift+T, Cmd+W, Cmd+K, Cmd+, and Cmd+Shift+P
+    if (
+      isControlKey &&
+      (['t', 'w', 'k', ','].includes(key) || event.shiftKey)
+    ) {
+      return false;
+    }
+
+    // 2. Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
     if (isControlKey && event.code === 'KeyC') {
       if (terminal?.hasSelection()) {
         const selection = terminal.getSelection();
@@ -285,34 +311,29 @@ onMounted(async () => {
         }
         return false;
       }
-      // If no selection on Windows, return true to let it be handled as SIGINT (Ctrl+C)
       return isMac ? false : true;
     }
 
-    // Paste: Cmd+V (Mac) or Ctrl+V (Win/Linux)
     if (isControlKey && event.code === 'KeyV') {
       navigator.clipboard.readText().then(text => {
         if (text && props.sessionId) {
-          // Send pasted text to the backend session
           emit(`ssh-input-${props.sessionId}`, { input: text });
         }
       });
       return false;
     }
 
-    // Select All: Cmd+A or Ctrl+A
+    // 3. Other internal shortcuts
     if ((event.metaKey || event.ctrlKey) && event.code === 'KeyA') {
       terminal?.selectAll();
       return false;
     }
 
-    // Search: Cmd+F or Ctrl+F
     if ((event.metaKey || event.ctrlKey) && event.code === 'KeyF') {
       toggleSearch();
       return false;
     }
 
-    // Clear: Cmd+L or Ctrl+L
     if ((event.metaKey || event.ctrlKey) && event.code === 'KeyL') {
       terminal?.clear();
       return false;
@@ -431,7 +452,7 @@ onMounted(async () => {
               fitAddon.fit();
             }
 
-            await connectSSH(terminal.cols, terminal.rows);
+            await connectSession(terminal.cols, terminal.rows);
 
             // Re-sync after a short delay to ensure backend is ready and listener is active
             setTimeout(() => {
@@ -445,7 +466,7 @@ onMounted(async () => {
             }, 500);
           }
         } catch (error) {
-          logger.error('SSH connection failed', error);
+          logger.error('Connection failed', error);
         }
       }
     },
@@ -456,63 +477,10 @@ onMounted(async () => {
    * Handle terminal input
    */
   // Key sequence mapping for terminal input
-  const KEY_SEQUENCES: Record<string, string> = {
-    Enter: '\r',
-    Backspace: '\x7f',
-    Tab: '\t',
-    Escape: '\x1b',
-    ArrowUp: '\x1b[A',
-    ArrowDown: '\x1b[B',
-    ArrowRight: '\x1b[C',
-    ArrowLeft: '\x1b[D',
-    Home: '\x1b[H',
-    End: '\x1b[F',
-    PageUp: '\x1b[5~',
-    PageDown: '\x1b[6~',
-    Insert: '\x1b[2~',
-    Delete: '\x1b[3~',
-  };
-
-  // Map raw keyboard events to terminal byte sequences
-  function mapKeyEventToSequence(
-    key: string,
-    domEvent?: KeyboardEvent
-  ): string {
-    if (domEvent) {
-      // Check if this is a global shortcut that should bubble up
-      const isMac = navigator.userAgent.includes('Mac');
-      const isShortcut =
-        (isMac ? domEvent.metaKey : domEvent.ctrlKey) &&
-        ['w', 'k', 't', ','].includes(key.toLowerCase());
-
-      if (!isShortcut) {
-        domEvent.preventDefault();
-        domEvent.stopPropagation();
-      }
-
-      // Ctrl+<char> -> control code
-      if (
-        domEvent.ctrlKey &&
-        !domEvent.altKey &&
-        !domEvent.metaKey &&
-        key.length === 1
-      ) {
-        const code = key.toUpperCase().charCodeAt(0);
-        if (code >= 64 && code <= 95) {
-          return String.fromCharCode(code - 64);
-        }
-      }
-
-      // Alt -> ESC prefix
-      if (domEvent.altKey && !domEvent.ctrlKey && !domEvent.metaKey) {
-        return '\x1b' + (key.length === 1 ? key : '');
-      }
-    }
-
-    return KEY_SEQUENCES[key] ?? key;
-  }
-
-  // Input buffering for batching
+  /**
+   * Terminal input handling
+   * Using onData instead of onKey to properly handle IME (Chinese input)
+   */
   let inputBuffer = '';
   let inputFlushTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -529,16 +497,12 @@ onMounted(async () => {
     }
   };
 
-  terminal.onKey(async (event: { key: string; domEvent?: KeyboardEvent }) => {
-    const seq = mapKeyEventToSequence(
-      event.key,
-      event.domEvent as KeyboardEvent | undefined
-    );
+  terminal.onData(async (data: string) => {
     const hasSession =
       props.sessionId && sessionStore.hasSession(props.sessionId);
 
     if (hasSession) {
-      inputBuffer += seq;
+      inputBuffer += data;
 
       if (inputBuffer.length > INPUT_BUFFER_CONFIG.FLUSH_THRESHOLD) {
         clearTimeout(inputFlushTimeout!);
@@ -550,9 +514,9 @@ onMounted(async () => {
           INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS
         );
       }
-    } else if (seq.length === 1 && seq >= ' ') {
+    } else if (data.length === 1 && data >= ' ') {
       // No active session: echo printable characters locally
-      terminal?.write(seq);
+      terminal?.write(data);
     }
   });
 

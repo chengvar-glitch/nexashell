@@ -31,6 +31,7 @@ dirs = "5.0"
 once_cell = "1.19"
 # keyring is removed
 machine-uid = "0.3"
+portable-pty = "0.9.0"
 
 [dependencies.aes-gcm]
 version = "0.10"

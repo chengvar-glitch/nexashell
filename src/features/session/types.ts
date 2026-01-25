@@ -10,6 +10,7 @@ export interface SavedSession {
   auth_type: string; // 'password' | 'key'
   private_key_path?: string | null;
   is_favorite: boolean;
+  last_connected_at?: string | null;
   created_at: string;
   updated_at: string;
 }

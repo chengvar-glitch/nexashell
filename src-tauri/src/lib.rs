@@ -1,16 +1,19 @@
 mod system;
 mod ssh;
+mod terminal;
 mod db;
 mod encryption;
 
 use tauri::Manager;
 use ssh::SshManager;
+use terminal::TerminalManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(SshManager::default())
+        .manage(TerminalManager::default())
         .setup(|app| {
             // Initialize database before app is fully started. This ensures
             // schema and indexes exist even if the DB file was absent.
@@ -67,6 +70,8 @@ pub fn run() {
             ssh::send_ssh_input,
             ssh::get_ssh_output,
             ssh::get_buffered_ssh_output,
+            terminal::connect_local,
+            terminal::disconnect_local,
                 db::init_db,
                 db::add_session,
                 db::save_session,

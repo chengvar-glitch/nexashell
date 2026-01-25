@@ -8,6 +8,7 @@ import {
   computed,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { v4 as uuidv4 } from 'uuid';
 import TabItem from '@/components/common/TabItem.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
@@ -68,9 +69,10 @@ const handleTabClose = async (id: string) => {
 };
 
 const handleAddTab = async () => {
+  const currentCounter = tabCounter++;
   const newTab = {
-    id: `tab-${Date.now()}-${tabCounter++}`,
-    label: `${t('settings.newLocalTab')} ${tabCounter}`,
+    id: uuidv4(),
+    label: `${t('settings.newLocalTab')} ${currentCounter}`,
     type: 'terminal' as const,
     closable: true,
   };
@@ -108,9 +110,10 @@ const toggleDropdown = (event: MouseEvent) => {
 
 const handleMenuSelect = async (key: string) => {
   if (key === 'local') {
+    const currentCounter = tabCounter++;
     const newTab = {
-      id: `tab-${Date.now()}-${tabCounter++}`,
-      label: `${t('settings.newLocalTab')} ${tabCounter}`,
+      id: uuidv4(),
+      label: `${t('settings.newLocalTab')} ${currentCounter}`,
       type: 'terminal' as const,
       closable: true,
     };
@@ -135,9 +138,10 @@ const handleCloseTabShortcut = () => {
 };
 
 const handleNewLocalTab = async () => {
+  const currentCounter = tabCounter++;
   const newTab = {
-    id: `tab-${Date.now()}-${tabCounter++}`,
-    label: `${t('settings.newLocalTab')} ${tabCounter}`,
+    id: uuidv4(),
+    label: `${t('settings.newLocalTab')} ${currentCounter}`,
     type: 'terminal' as const,
     closable: true,
   };

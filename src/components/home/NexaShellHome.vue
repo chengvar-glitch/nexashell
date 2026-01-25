@@ -82,8 +82,18 @@
                 }"
                 @click="setActiveGroup(group.id)"
               >
-                <Folder :size="16" />
+                <component
+                  :is="
+                    activeView === 'group' && selectedGroupId === group.id
+                      ? FolderOpen
+                      : Folder
+                  "
+                  :size="16"
+                />
                 <span>{{ group.name }}</span>
+                <span v-if="groupCounts[group.name] > 0" class="count">{{
+                  groupCounts[group.name]
+                }}</span>
               </button>
               <div class="item-actions">
                 <button
@@ -168,9 +178,11 @@
                 "
                 @click="setActiveTag(tag.id)"
               >
-                <Hash :size="12" :style="{ color: tag.color || 'inherit' }" />{{
-                  tag.name
-                }}
+                <Hash :size="12" :style="{ color: tag.color || 'inherit' }" />
+                {{ tag.name }}
+                <span v-if="tagCounts[tag.name] > 0" class="tag-count">
+                  {{ tagCounts[tag.name] }}
+                </span>
               </span>
               <div class="item-actions">
                 <button class="action-btn tiny" @click.stop="startEditTag(tag)">
@@ -198,28 +210,6 @@
             {{ $t('home.subtitle') }}
           </p>
         </div>
-        <div class="action-area">
-          <div class="view-toggle-wrapper">
-            <button class="btn-secondary" @click="toggleViewMenu">
-              <component
-                :is="viewMode === 'grid' ? LayoutGrid : List"
-                :size="18"
-              />
-              <ChevronDown :size="14" />
-            </button>
-            <DropdownMenu
-              :visible="viewMenuVisible"
-              :items="viewMenuItems"
-              :x="viewMenuX"
-              :y="viewMenuY"
-              @update:visible="viewMenuVisible = $event"
-              @select="handleViewModeSelect"
-            />
-          </div>
-          <button class="btn-primary" @click="handleNewConnection">
-            <Plus :size="18" /> {{ $t('home.newSession') }}
-          </button>
-        </div>
       </header>
 
       <!-- Session Grid/Table Area -->
@@ -232,126 +222,110 @@
           </button>
         </div>
 
-        <div
-          v-for="groupName in groupDisplayItems"
-          v-else
-          :key="groupName"
-          class="group-container"
-        >
-          <div class="group-header">
-            <FolderOpen :size="18" class="folder-icon" />
-            <span class="name">{{ groupName }}</span>
-          </div>
-
-          <!-- Grid View -->
-          <div v-if="viewMode === 'grid'" class="session-grid">
-            <div
-              v-for="session in getSessionsInGroup(groupName)"
-              :key="session.id"
-              class="session-card"
-              @click="handleConnect(session)"
-              @dblclick="handleQuickConnect(session)"
-              @contextmenu.prevent="handleSessionContextMenu($event, session)"
-            >
-              <div class="card-top">
-                <div class="avatar">
-                  {{ (session.server_name || 'S')[0].toUpperCase() }}
-                </div>
-                <button
-                  class="favorite-btn"
-                  :class="{ active: session.is_favorite }"
-                  @click.stop="toggleFavorite(session)"
-                >
-                  <Star
-                    :size="18"
-                    :fill="session.is_favorite ? 'currentColor' : 'none'"
+        <div v-else class="session-table-wrapper">
+          <table class="session-table">
+            <thead>
+              <tr>
+                <th class="col-drag"></th>
+                <th class="col-checkbox">
+                  <input
+                    type="checkbox"
+                    class="session-checkbox"
+                    @change="toggleSelectAllGlobal($event)"
                   />
-                </button>
-              </div>
-
-              <div class="card-info">
-                <div class="session-name">
-                  {{ session.server_name }}
-                </div>
-                <div class="session-meta">
-                  {{ session.username }}@{{ session.addr }}
-                </div>
-              </div>
-
-              <div class="card-footer">
-                <div class="session-tags">
-                  <span
-                    v-for="tag in session.tags"
-                    :key="tag"
-                    class="mini-tag"
-                    :style="getTagStyles(tag)"
+                </th>
+                <th class="col-favorite"></th>
+                <th class="col-name">{{ $t('home.serverName') }}</th>
+                <th class="col-host">{{ $t('home.host') }}</th>
+                <th class="col-groups-list">{{ $t('home.groups') }}</th>
+                <th class="col-tags">{{ $t('home.tags') }}</th>
+                <th class="col-last-connect">{{ $t('home.lastConnected') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="session in filteredSessions"
+                :key="session.id"
+                class="session-row"
+                :class="{ selected: isSessionSelected(session.id) }"
+                @click="handleConnect(session)"
+                @dblclick="handleQuickConnect(session)"
+                @contextmenu.prevent="handleSessionContextMenu($event, session)"
+              >
+                <td class="col-drag">
+                  <GripVertical :size="14" class="drag-handle" />
+                </td>
+                <td class="col-checkbox" @click.stop>
+                  <input
+                    type="checkbox"
+                    class="session-checkbox"
+                    :checked="isSessionSelected(session.id)"
+                    @change="toggleSessionSelection(session.id)"
+                  />
+                </td>
+                <td class="col-favorite">
+                  <button
+                    class="favorite-btn-small"
+                    :class="{ active: session.is_favorite }"
+                    @click.stop="toggleFavorite(session)"
                   >
-                    {{ tag }}
+                    <Star
+                      :size="14"
+                      :fill="session.is_favorite ? 'currentColor' : 'none'"
+                    />
+                  </button>
+                </td>
+                <td class="col-name">
+                  <div class="name-text">
+                    {{ session.server_name }}
+                  </div>
+                </td>
+                <td class="col-host">
+                  <span class="host-text">
+                    {{ session.username }}@{{ session.addr }}
                   </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Table View -->
-          <div v-else class="session-table-wrapper">
-            <table class="session-table">
-              <thead>
-                <tr>
-                  <th class="col-favorite"></th>
-                  <th class="col-name">{{ $t('home.serverName') }}</th>
-                  <th class="col-host">{{ $t('home.host') }}</th>
-                  <th class="col-tags">{{ $t('home.tags') }}</th>
-                  <th class="col-actions"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  v-for="session in getSessionsInGroup(groupName)"
-                  :key="session.id"
-                  class="session-row"
-                  @click="handleConnect(session)"
-                  @dblclick="handleQuickConnect(session)"
-                  @contextmenu.prevent="
-                    handleSessionContextMenu($event, session)
-                  "
-                >
-                  <td class="col-favorite">
-                    <button
-                      class="favorite-btn-small"
-                      :class="{ active: session.is_favorite }"
-                      @click.stop="toggleFavorite(session)"
+                </td>
+                <td class="col-groups-list">
+                  <div class="table-groups">
+                    <span
+                      v-for="group in session.groups"
+                      :key="group"
+                      class="mini-group-tag"
                     >
-                      <Star
-                        :size="14"
-                        :fill="session.is_favorite ? 'currentColor' : 'none'"
-                      />
-                    </button>
-                  </td>
-                  <td class="col-name">
-                    <div class="name-with-icon">
-                      <Server :size="14" class="row-icon" />
-                      {{ session.server_name }}
-                    </div>
-                  </td>
-                  <td class="col-host">
-                    <span class="host-text"
-                      >{{ session.username }}@{{ session.addr }}</span
+                      {{ group }}
+                    </span>
+                    <span
+                      v-if="!session.groups || session.groups.length === 0"
+                      class="empty-text-dim"
                     >
-                  </td>
-                  <td class="col-tags">
-                    <div class="table-tags">
-                      <span
-                        v-for="tag in session.tags"
-                        :key="tag"
-                        class="mini-tag compact"
-                        :style="getTagStyles(tag)"
-                      >
-                        {{ tag }}
-                      </span>
-                    </div>
-                  </td>
-                  <td class="col-actions">
+                      -
+                    </span>
+                  </div>
+                </td>
+                <td class="col-tags">
+                  <div class="table-tags">
+                    <span
+                      v-for="tag in session.tags"
+                      :key="tag"
+                      class="mini-tag"
+                      :style="getTagStyles(tag)"
+                    >
+                      {{ tag }}
+                    </span>
+                  </div>
+                </td>
+                <td class="col-last-connect">
+                  <div class="time-actions-wrapper">
+                    <span class="timestamp">
+                      {{
+                        session.last_connected_at
+                          ? formatRelativeTime(
+                              session.last_connected_at,
+                              locale
+                            )
+                          : '-'
+                      }}
+                    </span>
                     <div class="action-buttons">
                       <button
                         class="icon-action-btn connect"
@@ -374,12 +348,19 @@
                       >
                         <Trash2 :size="14" />
                       </button>
+                      <button
+                        class="icon-action-btn more"
+                        :title="$t('common.more') || 'More'"
+                        @click.stop="handleSessionContextMenu($event, session)"
+                      >
+                        <MoreVertical :size="14" />
+                      </button>
                     </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
     </main>
@@ -421,20 +402,19 @@ import {
   Plus,
   Hash,
   Minus,
-  LayoutGrid,
-  List,
-  ChevronDown,
-  Server,
   Terminal,
   Pencil,
   Trash2,
   Check,
+  GripVertical,
+  MoreVertical,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
+import { formatRelativeTime } from '@/core/utils/time-utils';
 import { sessionApi } from '@/features/session';
 import type {
   SavedSession,
@@ -480,43 +460,36 @@ const isMounted = ref(false);
 const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
 const selectedGroupId = ref<string | null>(null);
 const selectedTagId = ref<string | null>(null);
-const viewMode = ref<'grid' | 'table'>('table');
+const selectedSessionIds = ref<Set<string>>(new Set());
 
 const favoriteCount = computed(
   () => sessions.value.filter(s => s.is_favorite).length
 );
 
-// View menu states
-const viewMenuVisible = ref(false);
-const viewMenuX = ref(0);
-const viewMenuY = ref(0);
-const viewMenuItems = computed(() => [
-  {
-    key: 'grid',
-    label: t('home.gridView'),
-    icon: LayoutGrid,
-    active: viewMode.value === 'grid',
-  },
-  {
-    key: 'table',
-    label: t('home.tableView'),
-    icon: List,
-    active: viewMode.value === 'table',
-  },
-]);
+// Group and Tag counts for sidebar
+const groupCounts = computed(() => {
+  const counts: Record<string, number> = {};
+  sessions.value.forEach(s => {
+    if (s.groups && s.groups.length > 0) {
+      s.groups.forEach(gName => {
+        counts[gName] = (counts[gName] || 0) + 1;
+      });
+    }
+  });
+  return counts;
+});
 
-const toggleViewMenu = (event: MouseEvent) => {
-  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-  viewMenuX.value = rect.left;
-  viewMenuY.value = rect.bottom + 8;
-  viewMenuVisible.value = !viewMenuVisible.value;
-};
-
-const handleViewModeSelect = (key: string) => {
-  if (key === 'grid' || key === 'table') {
-    viewMode.value = key;
-  }
-};
+const tagCounts = computed(() => {
+  const counts: Record<string, number> = {};
+  sessions.value.forEach(s => {
+    if (s.tags && s.tags.length > 0) {
+      s.tags.forEach(tName => {
+        counts[tName] = (counts[tName] || 0) + 1;
+      });
+    }
+  });
+  return counts;
+});
 
 // Input states for adding new groups/tags
 const showAddGroupInput = ref(false);
@@ -556,15 +529,19 @@ const filteredSessions = computed(() => {
   if (activeView.value === 'favorites') {
     result = result.filter(s => s.is_favorite);
   } else if (activeView.value === 'recent') {
-    // Sort by updated_at descending and take only the first 5
+    // Sort by last_connected_at descending and take only the first 10
     result = result
-      .filter(s => s.updated_at)
+      .filter(s => s.last_connected_at)
       .sort((a, b) => {
-        const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-        const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+        const dateA = a.last_connected_at
+          ? new Date(a.last_connected_at.replace(' ', 'T') + 'Z').getTime()
+          : 0;
+        const dateB = b.last_connected_at
+          ? new Date(b.last_connected_at.replace(' ', 'T') + 'Z').getTime()
+          : 0;
         return dateB - dateA;
       })
-      .slice(0, 5);
+      .slice(0, 10);
   } else if (activeView.value === 'group' && selectedGroupId.value) {
     const groupName = groups.value.find(
       g => g.id === selectedGroupId.value
@@ -581,40 +558,6 @@ const filteredSessions = computed(() => {
 
   return result;
 });
-
-// Calculate which group headers to display
-const groupDisplayItems = computed(() => {
-  if (activeView.value === 'group') {
-    const groupName = groups.value.find(
-      g => g.id === selectedGroupId.value
-    )?.name;
-    return groupName ? [groupName] : [];
-  }
-
-  const groupSet = new Set<string>();
-  filteredSessions.value.forEach(s => {
-    if (s.groups && s.groups.length > 0) {
-      s.groups.forEach(g => groupSet.add(g));
-    } else {
-      groupSet.add(t('home.defaultGroup'));
-    }
-  });
-
-  return Array.from(groupSet).sort((a, b) => {
-    if (a === t('home.defaultGroup')) return -1;
-    if (b === t('home.defaultGroup')) return 1;
-    return a.localeCompare(b);
-  });
-});
-
-const getSessionsInGroup = (groupName: string) => {
-  if (groupName === t('home.defaultGroup')) {
-    return filteredSessions.value.filter(
-      s => !s.groups || s.groups.length === 0
-    );
-  }
-  return filteredSessions.value.filter(s => s.groups?.includes(groupName));
-};
 
 // Selection handlers
 const getTagStyles = (tagName: string) => {
@@ -683,7 +626,7 @@ const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
 
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // Create wrapper functions for event handlers that can be properly removed
 const handleSessionSaved = async () => {
@@ -721,6 +664,27 @@ const handleTagsUpdated = async () => {
     await loadSessions();
   } catch (error) {
     console.error('Failed to refresh tags:', error);
+  }
+};
+
+const toggleSessionSelection = (sessionId: string) => {
+  if (selectedSessionIds.value.has(sessionId)) {
+    selectedSessionIds.value.delete(sessionId);
+  } else {
+    selectedSessionIds.value.add(sessionId);
+  }
+};
+
+const isSessionSelected = (sessionId: string) => {
+  return selectedSessionIds.value.has(sessionId);
+};
+
+const toggleSelectAllGlobal = (event: Event) => {
+  const checkbox = event.target as HTMLInputElement;
+  if (checkbox.checked) {
+    filteredSessions.value.forEach(s => selectedSessionIds.value.add(s.id));
+  } else {
+    filteredSessions.value.forEach(s => selectedSessionIds.value.delete(s.id));
   }
 };
 
@@ -962,21 +926,55 @@ const handleSessionContextMenu = (
   event: MouseEvent,
   session: SavedSessionDisplay
 ) => {
-  console.log(
-    'Context menu opened for session:',
-    session.id,
-    session.server_name
-  );
+  // If the menu is already open for THIS session at THIS position, ignore
+  if (
+    contextMenuVisible.value &&
+    selectedSession.value?.id === session.id &&
+    contextMenuX.value === event.clientX &&
+    contextMenuY.value === event.clientY
+  ) {
+    return;
+  }
+
+  // Set position and session first
   contextMenuX.value = event.clientX;
   contextMenuY.value = event.clientY;
   selectedSession.value = session;
+
   contextMenuItems.value = [
-    { key: 'edit', label: 'Edit' },
+    { key: 'edit', label: t('common.edit') || 'Edit', icon: Pencil },
     { key: 'divider', label: '', divider: true },
-    { key: 'delete', label: 'Delete', danger: true },
+    {
+      key: 'join-group',
+      label: t('home.groups') || 'Groups',
+      icon: Folder,
+      children: groups.value.map(g => ({
+        key: `group:${g.id}`,
+        label: g.name,
+        active: session.group_ids?.includes(g.id),
+      })),
+    },
+    {
+      key: 'join-tag',
+      label: t('home.tags') || 'Tags',
+      icon: Hash,
+      children: tags.value.map(tag => ({
+        key: `tag:${tag.id}`,
+        label: tag.name,
+        active: session.tag_ids?.includes(tag.id),
+      })),
+    },
+    { key: 'divider', label: '', divider: true },
+    {
+      key: 'delete',
+      label: t('common.delete') || 'Delete',
+      danger: true,
+      icon: Trash2,
+    },
   ];
+
+  // Open the menu
   contextMenuVisible.value = true;
-  console.log('Context menu visible, items:', contextMenuItems.value);
 };
 
 const handleContextMenuSelect = async (key: string) => {
@@ -995,6 +993,51 @@ const handleContextMenuSelect = async (key: string) => {
     return;
   }
 
+  // Handle group/tag linking
+  if (key.startsWith('group:')) {
+    const groupId = key.split(':')[1];
+    const session = selectedSession.value;
+    try {
+      if (session.group_ids?.includes(groupId)) {
+        await invoke('unlink_session_group', {
+          sessionId: session.id,
+          groupId,
+        });
+      } else {
+        await invoke('link_session_group', {
+          sessionId: session.id,
+          groupId,
+        });
+      }
+      await loadSessions();
+    } catch (e) {
+      console.error('Failed to update session group:', e);
+    }
+    return;
+  }
+
+  if (key.startsWith('tag:')) {
+    const tagId = key.split(':')[1];
+    const session = selectedSession.value;
+    try {
+      if (session.tag_ids?.includes(tagId)) {
+        await invoke('unlink_session_tag', {
+          sessionId: session.id,
+          tagId,
+        });
+      } else {
+        await invoke('link_session_tag', {
+          sessionId: session.id,
+          tagId,
+        });
+      }
+      await loadSessions();
+    } catch (e) {
+      console.error('Failed to update session tag:', e);
+    }
+    return;
+  }
+
   switch (key) {
     case 'edit':
       console.log('Handling edit for:', selectedSession.value.id);
@@ -1010,7 +1053,7 @@ const handleContextMenuSelect = async (key: string) => {
 };
 
 const handleEditSession = (session: SavedSessionDisplay) => {
-  console.log('Edit session:', session.id);
+  console.log('NexaShellHome: handleEditSession', session.id);
   // Emit event to trigger edit session in App.vue
   eventBus.emit(APP_EVENTS.EDIT_SESSION, session);
 };
@@ -1093,35 +1136,41 @@ const onCancelDelete = () => {
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
+  gap: 12px;
+  padding: 6px 12px 6px 16px;
+  border-radius: 0 20px 20px 0; /* Gmail style sidebar items */
   border: none;
   background: transparent;
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 14px;
-  transition: all 0.2s;
+  transition: all 0.1s;
   flex: 1;
   text-align: left;
+  margin-right: 8px;
 }
 
 .nav-item:hover {
   background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .nav-item.active {
-  background: var(--color-bg-tertiary);
+  background: var(--color-interactive-selected);
   color: var(--color-primary);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .nav-item .count {
   margin-left: auto;
-  font-size: 11px;
-  background: var(--color-bg-tertiary);
-  padding: 2px 6px;
-  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-text-tertiary);
+}
+
+.nav-item.active .count {
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .nav-item-wrapper:hover .item-actions,
@@ -1306,21 +1355,29 @@ const onCancelDelete = () => {
 }
 
 .tag-badge {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-text-secondary);
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  transition: all 0.2s;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
 }
 
 .tag-badge:hover {
-  color: var(--color-primary);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-primary);
 }
 
 .tag-badge.active {
   background: var(--color-primary);
-  color: white;
+  color: white !important;
+  border-color: var(--color-primary);
 }
 
 .tag-badge.active:hover {
@@ -1328,26 +1385,39 @@ const onCancelDelete = () => {
   opacity: 0.9;
 }
 
+.tag-count {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+  font-weight: 400;
+}
+
+.tag-badge.active .tag-count {
+  opacity: 1;
+}
+
 /* Main Content Area Styles */
 .home-main {
   flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  padding: 0; /* Remove padding to let table span full width */
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  background: var(--color-bg-primary);
 }
 
 .main-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 24px 24px 8px 24px;
 }
 
 .main-header h3 {
   font-size: 20px;
   margin: 0;
   color: var(--color-text-primary);
+  font-weight: 500;
 }
 
 .main-header .subtitle {
@@ -1362,15 +1432,11 @@ const onCancelDelete = () => {
   gap: 12px;
 }
 
-.view-toggle-wrapper {
-  position: relative;
-}
-
-.btn-secondary {
-  background: var(--color-bg-secondary);
-  color: var(--color-text-primary);
-  border: 1px solid var(--color-border-primary);
-  padding: 10px 14px;
+.btn-primary {
+  background: var(--color-primary);
+  color: white;
+  border: none;
+  padding: 8px 16px;
   border-radius: var(--radius-md);
   font-weight: 500;
   cursor: pointer;
@@ -1379,219 +1445,51 @@ const onCancelDelete = () => {
   gap: 8px;
   white-space: nowrap;
   transition: all 0.2s;
-}
-
-.btn-secondary:hover {
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-primary);
-}
-
-.btn-primary {
-  background: var(--color-primary);
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: var(--radius-md);
-  font-weight: 500;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
+  font-size: 13px;
 }
 
 .btn-primary:hover {
   filter: brightness(1.1);
+  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.3);
 }
 
 /* Groups and Grids */
+.session-manager {
+  padding: 0;
+}
+
 .group-container {
-  margin-bottom: 24px;
+  margin-bottom: 0;
 }
 
 .group-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  padding: 12px 24px 8px 24px;
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border-primary);
+  position: sticky;
+  top: 0;
+  z-index: 5;
 }
 
 .folder-icon {
-  font-size: 18px;
-  color: var(--color-primary);
+  font-size: 16px;
+  color: var(--color-text-tertiary);
 }
 .group-header .name {
   font-weight: 600;
-  font-size: 14px;
-  color: var(--color-text-primary);
-}
-
-.session-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-tertiary);
 }
 
 .empty-state-container {
-  grid-column: 1 / -1;
-  width: 100%;
-}
-
-.session-card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  padding: 12px;
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 40px;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  user-select: none;
-}
-
-.session-card:hover {
-  border-color: var(--color-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.avatar {
-  width: 32px;
-  height: 32px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-primary);
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
   justify-content: center;
-  font-weight: bold;
-  font-size: 14px;
-}
-
-.favorite-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--color-text-tertiary);
-  transition: all 0.2s;
-  padding: 4px;
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.favorite-btn:hover {
-  background: var(--color-bg-tertiary);
-  color: #facc15; /* Yellow/Gold */
-}
-
-.favorite-btn.active {
-  color: #facc15;
-}
-
-.icon-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  opacity: 0.3;
-  transition: 0.2s;
-  font-size: 16px;
-}
-
-.icon-btn:hover {
-  opacity: 1;
-}
-
-.session-name {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.session-meta {
-  font-size: 12px;
-  color: var(--color-text-tertiary);
-  margin-top: 4px;
-  font-family:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono',
-    'Courier New', monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: auto;
-  border-top: 1px solid var(--color-bg-tertiary);
-  padding-top: 8px;
-}
-
-.session-tags {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  max-height: 24px;
-  overflow: hidden;
-}
-
-.mini-tag {
-  font-size: 11px;
-  font-weight: 500;
-  background: var(--color-bg-tertiary);
-  padding: 3px 10px;
-  border-radius: 6px;
-  color: var(--color-text-secondary);
-  border: 1px solid var(--color-border-primary);
-  white-space: nowrap;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-}
-
-.mini-tag.compact {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 4px;
-}
-
-.mini-tag:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 4px 6px -1px rgba(0, 0, 0, 0.1),
-    0 2px 4px -1px rgba(0, 0, 0, 0.06);
-}
-
-.connect-hint {
-  font-size: 11px;
-  color: var(--color-primary);
-  font-weight: 500;
-  opacity: 0;
-  transition: 0.2s;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.session-card:hover .connect-hint {
-  opacity: 1;
 }
 
 .empty-card {
@@ -1602,107 +1500,155 @@ const onCancelDelete = () => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   color: var(--color-text-tertiary);
   cursor: pointer;
-  min-height: 110px;
-  padding: 12px;
-  transition: 0.2s;
+  width: 100%;
+  max-width: 400px;
+  min-height: 160px;
+  padding: 24px;
+  transition: all 0.2s;
 }
 
-.empty-card span {
-  font-size: 13px;
-  text-align: center;
-}
-
-.empty-card .plus {
-  font-size: 24px;
-}
-
-/* Modal styles for quick connect progress */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 9999;
-  backdrop-filter: blur(2px);
-  background: rgba(0, 0, 0, 0.3);
-}
-
-.modal-content {
-  position: relative;
-  border: none;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-  border-radius: var(--radius-lg);
-  overflow: hidden;
-  animation: modal-appear 0.2s ease-out forwards;
-}
-
-@keyframes modal-appear {
-  from {
-    opacity: 0;
-    transform: scale(0.95);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-/* Table View Styles */
-.session-table-wrapper {
+.empty-card:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
   background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
+}
+
+/* Table View Styles - Gmail inspired */
+.session-table-wrapper {
+  background: transparent;
 }
 
 .session-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 14px;
 }
 
-.session-table th {
+.session-table thead th {
   text-align: left;
-  padding: 8px 12px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-tertiary);
-  font-weight: 600;
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  color: var(--color-text-secondary);
   font-size: 11px;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  border-bottom: 1px solid var(--color-border-primary);
+  background: var(--color-bg-primary);
+}
+
+.session-table thead th.col-drag,
+.session-table thead th.col-checkbox,
+.session-table thead th.col-favorite {
+  padding: 12px 0;
 }
 
 .session-table td {
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--color-border-primary);
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border-subtle);
   color: var(--color-text-primary);
-  font-size: 13px;
+  font-size: 14px;
+  transition: background-color 0.1s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-row {
   cursor: pointer;
-  transition: background 0.15s;
+  background: var(--color-bg-primary);
+  height: 48px;
 }
 
 .session-row:hover {
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-secondary);
 }
 
-.session-row:last-child td {
-  border-bottom: none;
+.session-row:hover td:first-child {
+  border-left: 3px solid var(--color-primary);
+  padding-left: 9px; /* Compensate for the 3px border to keep alignment */
+}
+
+.session-row.selected {
+  background: var(--color-interactive-selected);
+}
+
+.col-drag {
+  width: 32px;
+  text-align: center;
+  color: var(--color-text-tertiary);
+  opacity: 0;
+  padding: 0 !important;
+}
+
+.session-row:hover .col-drag {
+  opacity: 1;
+}
+
+.drag-handle {
+  cursor: grab;
+  display: inline-block;
+}
+
+.col-checkbox {
+  width: 32px;
+  text-align: center;
+  padding: 0 4px !important;
 }
 
 .col-favorite {
   width: 32px;
   text-align: center;
+  padding: 0 4px !important;
+}
+
+.col-name {
+  width: 25%;
+}
+
+.col-host {
+  width: 30%;
+}
+
+.col-last-connect {
+  width: 120px;
+  text-align: right;
+}
+
+.session-checkbox {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s;
+  margin: 0;
+  display: block;
+}
+
+.session-checkbox:hover {
+  border-color: var(--color-text-tertiary);
+}
+
+.session-checkbox:checked {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.session-checkbox:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
 }
 
 .favorite-btn-small {
@@ -1710,104 +1656,149 @@ const onCancelDelete = () => {
   border: none;
   cursor: pointer;
   color: var(--color-text-tertiary);
-  padding: 2px;
+  padding: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: color 0.15s;
+  transition: all 0.15s;
+  border-radius: 50%;
 }
 
-.favorite-btn-small:hover,
+.favorite-btn-small:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
 .favorite-btn-small.active {
   color: #facc15;
 }
 
-.col-name {
+.name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
-  width: 25%;
 }
 
-.name-with-icon {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.host-text {
+  color: var(--color-text-tertiary);
+  font-size: 13px;
 }
 
-.row-icon {
-  color: var(--color-primary);
+.col-groups-list {
+  width: 150px;
 }
 
-.col-host {
-  width: 35%;
-  color: var(--color-text-secondary);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-.table-tags {
+.table-groups {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
 }
 
-.col-actions {
+.mini-group-tag {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 0.5px solid var(--color-border-primary);
+}
+
+.empty-text-dim {
+  color: var(--color-text-placeholder);
+  font-size: 12px;
+}
+
+.col-tags {
+  width: 180px;
   text-align: right;
-  width: 120px;
+}
+
+.table-tags {
+  display: flex;
+  gap: 4px;
+  justify-content: flex-end;
+}
+
+.col-last-connect {
+  width: 140px;
+  text-align: right;
+  padding-right: 16px !important;
+}
+
+.time-actions-wrapper {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
+  height: 32px;
+}
+
+.timestamp {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: opacity 0.1s ease;
+}
+
+.session-row:hover .timestamp {
+  opacity: 0;
 }
 
 .action-buttons {
+  position: absolute;
+  right: 0;
   display: flex;
-  justify-content: flex-end;
-  gap: 4px;
+  gap: 2px;
+  opacity: 0;
+  transform: translateX(10px);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+
+.session-row:hover .action-buttons {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
 }
 
 .icon-action-btn {
   background: transparent;
   border: none;
-  color: var(--color-text-tertiary);
-  width: 28px;
-  height: 28px;
-  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color 0.2s;
 }
 
 .icon-action-btn:hover {
-  background: var(--color-bg-elevated);
+  background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
 }
 
-.icon-action-btn.connect {
-  color: var(--color-primary);
-  background: var(--color-interactive-selected);
-}
-
 .icon-action-btn.connect:hover {
-  background: var(--color-primary);
-  color: white;
+  color: var(--color-primary);
+  background: rgba(var(--color-primary-rgb), 0.1);
 }
 
 .icon-action-btn.delete:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
 }
 
-.row-action-btn {
-  background: transparent;
-  border: 1px solid var(--color-primary);
-  color: var(--color-primary);
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 12px;
+.mini-tag {
+  font-size: 11px;
   font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.row-action-btn:hover {
-  background: var(--color-primary);
-  color: white;
+  background: var(--color-bg-tertiary);
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  white-space: nowrap;
 }
 </style>

@@ -226,13 +226,63 @@ export const useSessionStore = defineStore('session', () => {
   };
 
   /**
+   * Create a local terminal session and request the backend to spawn the shell.
+   *
+   * @param sessionId Unique session identifier
+   * @param tabId UI tab identifier
+   * @param cols Initial terminal columns
+   * @param rows Initial terminal rows
+   */
+  const createLocalSession = async (
+    sessionId: string,
+    tabId: string,
+    cols: number,
+    rows: number
+  ): Promise<void> => {
+    try {
+      const session: SessionState = {
+        id: sessionId,
+        tabId,
+        type: 'terminal',
+        status: 'connecting',
+        createdAt: new Date(),
+        connectionParams: {
+          serverName: 'Local Terminal',
+          ip: 'localhost',
+          port: 0,
+          username: 'local',
+        },
+      };
+
+      sessions.value.set(sessionId, session);
+      tabToSessionMap.value.set(tabId, sessionId);
+
+      await sessionApi.connectLocal(sessionId, cols, rows);
+
+      const sess = sessions.value.get(sessionId);
+      if (sess) {
+        sess.status = 'connected';
+      }
+
+      logger.info('Local terminal session connected', { sessionId });
+    } catch (error) {
+      logger.error('Failed to create local session', error);
+      const sess = sessions.value.get(sessionId);
+      if (sess) {
+        sess.status = 'error';
+        sess.errorMessage =
+          error instanceof Error ? error.message : String(error);
+      }
+      throw error;
+    }
+  };
+
+  /**
    * Disconnect a session by its session ID.
    * Behavior:
-   * - Calls `sessionApi.disconnectSSH` to instruct the backend to tear down resources
+   * - Calls the appropriate disconnect API based on session type
    * - Marks the session as 'disconnected'
    * - Removes session state mappings from the store
-   *
-   * Note: the backend call is attempted first but errors do not prevent local cleanup.
    */
   const disconnectSession = async (sessionId: string): Promise<void> => {
     try {
@@ -245,18 +295,20 @@ export const useSessionStore = defineStore('session', () => {
       logger.debug('disconnectSession: initiating disconnect', {
         sessionId,
         tabId: session.tabId,
+        type: session.type,
       });
-      // Call API to disconnect FIRST, before removing local state
-      // This prevents the backend from failing due to missing session data
+
       if (session.type === 'ssh') {
         try {
           await sessionApi.disconnectSSH(sessionId);
-          logger.debug('disconnectSession: backend disconnect returned', {
-            sessionId,
-          });
         } catch (error) {
           logger.error('Failed to disconnect SSH session on backend', error);
-          // Continue with local cleanup even if backend disconnect fails
+        }
+      } else if (session.type === 'terminal') {
+        try {
+          await sessionApi.disconnectLocal(sessionId);
+        } catch (error) {
+          logger.error('Failed to disconnect local session on backend', error);
         }
       }
 
@@ -270,8 +322,6 @@ export const useSessionStore = defineStore('session', () => {
       logger.info('disconnectSession: removed session state locally', {
         sessionId,
       });
-
-      logger.info('Session disconnected', { sessionId });
     } catch (error) {
       logger.error('Failed to disconnect session', error);
       throw error;
@@ -351,6 +401,7 @@ export const useSessionStore = defineStore('session', () => {
 
     // Actions
     createSSHSession,
+    createLocalSession,
     disconnectSession,
     disconnectByTabId,
     updateSessionStatus,

@@ -94,7 +94,9 @@ provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 
 // Settings panel management
 const showSettings = ref(false);
-const openSettings = () => {
+const settingsInitialSection = ref('appearance');
+const openSettings = (section?: string) => {
+  settingsInitialSection.value = section || 'appearance';
   showSettings.value = true;
 };
 const closeSettings = () => {
@@ -119,8 +121,8 @@ onMounted(() => {
   shortcutManager.register(PredefinedShortcuts.FOCUS_SEARCH);
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
 
-  eventBus.on(APP_EVENTS.OPEN_SETTINGS, () => {
-    openSettings();
+  eventBus.on(APP_EVENTS.OPEN_SETTINGS, (payload?: { section?: string }) => {
+    openSettings(payload?.section);
   });
 
   eventBus.on(APP_EVENTS.CLOSE_DIALOG, () => {
@@ -133,33 +135,57 @@ onMounted(() => {
   });
 
   eventBus.on(APP_EVENTS.EDIT_SESSION, async (session: any) => {
-    // Handle edit session event
-    const credentials = await invoke<[string, string | null, string | null]>(
-      'get_session_credentials',
-      { sessionId: session.id }
-    ).catch(() => [session.id, null, null]);
+    console.log('[APP] Handling EDIT_SESSION event', session?.id);
+    if (!session) {
+      console.error('[APP] EDIT_SESSION session is null');
+      return;
+    }
 
+    // 1. Initial form state with known info (no password/passphrase yet)
     sshFormMode.value = 'edit';
     editingSessionId.value = session.id;
 
-    // Use deep copy patterns to isolate form state from home page state
-    savedSSHFormData.value = {
-      server_name: session.server_name,
-      addr: session.addr,
-      port: session.port,
-      username: session.username,
-      password: credentials[1] || '',
+    const initialFormData: SSHConnectionFormData = {
+      server_name: session.server_name || '',
+      addr: session.addr || '',
+      port: session.port || 22,
+      username: session.username || '',
+      password: '',
       private_key_path: session.private_key_path || '',
-      key_passphrase: credentials[2] || '',
+      key_passphrase: '',
       save_session: true,
-      // Pass IDs to the form, as MultiSelect expects IDs
       groups: session.group_ids ? [...session.group_ids] : [],
       tags: session.tag_ids ? [...session.tag_ids] : [],
     };
 
+    savedSSHFormData.value = initialFormData;
     sshErrorMessage.value = null;
     isConnecting.value = false;
+
+    // 2. Open form immediately to respond to user click
+    console.log('[APP] Calling openSSHForm()');
     openSSHForm();
+
+    // 3. Fetch credentials in background
+    try {
+      console.log('[APP] Fetching credentials in background for', session.id);
+      const credentials = await invoke<[string, string | null, string | null]>(
+        'get_session_credentials',
+        { sessionId: session.id }
+      );
+
+      // 4. If form is still open and we're editing the same session, update sensitive fields
+      if (showSSHForm.value && editingSessionId.value === session.id) {
+        console.log('[APP] Updating sensitive fields in background');
+        savedSSHFormData.value = {
+          ...initialFormData,
+          password: credentials[1] || '',
+          key_passphrase: credentials[2] || '',
+        };
+      }
+    } catch (error) {
+      console.error('[APP] Failed to fetch credentials in background', error);
+    }
   });
 
   eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (session: SavedSession) => {
@@ -198,6 +224,9 @@ onMounted(() => {
       await invoke('update_session_timestamp', { id: session.id }).catch(err =>
         logger.error('Failed to update timestamp', err)
       );
+
+      // Refresh home list to show new timestamp
+      eventBus.emit(APP_EVENTS.SESSION_SAVED);
 
       // Trigger connection logic
       handleSSHConnect(connectData);
@@ -402,7 +431,9 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         const timestampId =
           sshFormMode.value === 'edit' ? editingSessionId.value : resultId;
         if (timestampId) {
-          await invoke('update_session_timestamp', { id: timestampId });
+          await invoke('update_session_timestamp', { id: timestampId }).catch(
+            e => logger.error('Failed to update timestamp', e)
+          );
         }
 
         logger.info('SSH session persistence completed', {
@@ -411,11 +442,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         });
 
         // Emit event to notify other components to refresh lists
-        eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-          name: data.server_name,
-          host: data.addr,
-          port: data.port || 22,
-        });
+        eventBus.emit(APP_EVENTS.SESSION_SAVED);
       } catch (saveError) {
         logger.error('Failed to persist session to database', saveError);
         // We don't throw error here to not fail the already established terminal session
@@ -644,6 +671,7 @@ const handleCreateTab = (tab: any) => {
       <SettingsPanel
         :visible="showSettings"
         :use-teleport="false"
+        :initial-section="settingsInitialSection"
         @update:visible="handleSettingsUpdate"
       />
 

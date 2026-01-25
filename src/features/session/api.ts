@@ -74,9 +74,33 @@ class SessionAPI {
   }
 
   /**
+   * Request the backend to establish a local terminal session.
+   * @param sessionId Unique session identifier
+   * @param cols Initial terminal columns
+   * @param rows Initial terminal rows
+   */
+  async connectLocal(
+    sessionId: string,
+    cols: number,
+    rows: number
+  ): Promise<void> {
+    try {
+      const params = {
+        sessionId,
+        cols,
+        rows,
+      };
+      await invoke<void>('connect_local', params as Record<string, unknown>);
+      logger.info('Local terminal connection initiated', { sessionId });
+    } catch (error) {
+      logger.error('Failed to connect local terminal', error);
+      throw error;
+    }
+  }
+
+  /**
    * Request backend to disconnect and tear down the SSH session.
    * @param sessionId Unique session identifier to disconnect
-   * @returns Promise that resolves when the invoke completes
    */
   async disconnectSSH(sessionId: string): Promise<void> {
     try {
@@ -84,13 +108,29 @@ class SessionAPI {
 
       console.debug('[DEBUG] sessionApi.disconnectSSH invoke', params);
 
-      // Tauri 2.0+ optimized: camelCase parameters
+      // Try local disconnect first if it might be a local session,
+      // but the store handles choosing the right API.
+      // Here we just keep the existing disconnectSSH which maps to 'disconnect_ssh'
       await invoke<void>('disconnect_ssh', params as Record<string, unknown>);
 
       console.debug('[DEBUG] sessionApi.disconnectSSH returned', { sessionId });
       logger.info('SSH disconnection initiated', { sessionId });
     } catch (error) {
       logger.error('Failed to disconnect SSH', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Request backend to disconnect a local terminal session.
+   * @param sessionId Unique session identifier to disconnect
+   */
+  async disconnectLocal(sessionId: string): Promise<void> {
+    try {
+      await invoke<void>('disconnect_local', { sessionId });
+      logger.info('Local terminal disconnection initiated', { sessionId });
+    } catch (error) {
+      logger.error('Failed to disconnect local terminal', error);
       throw error;
     }
   }

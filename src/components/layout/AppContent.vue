@@ -42,6 +42,12 @@ const currentComponent = computed(() => {
   }
 });
 
+const currentTabType = computed(() => {
+  if (!activeTabId.value) return 'home';
+  const activeTab = tabs.value.find(tab => tab.id === activeTabId.value);
+  return activeTab?.type || 'home';
+});
+
 // Handle createTab event from child components
 const handleCreateTab = (tab: any) => {
   emit('createTab', tab);
@@ -60,6 +66,7 @@ const handleConnect = (data: any) => {
         :is="currentComponent"
         :key="activeTabId"
         :session-id="activeTabId"
+        :tab-type="currentTabType"
         @create-tab="handleCreateTab"
         @connect="handleConnect"
       />

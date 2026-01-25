@@ -253,7 +253,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, onUnmounted } from 'vue';
+import { reactive, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
@@ -335,6 +335,36 @@ const formData = reactive<SSHConnectionFormData>({
 });
 
 const validationErrors = reactive<ValidationErrors>({});
+
+// Watch for initialData updates (useful for background credential loading or re-editing)
+watch(
+  () => props.initialData,
+  newData => {
+    if (newData) {
+      // Update basic fields if they are different
+      if (newData.server_name !== undefined)
+        formData.server_name = newData.server_name;
+      if (newData.addr !== undefined) formData.addr = newData.addr;
+      if (newData.port !== undefined) formData.port = newData.port;
+      if (newData.username !== undefined) formData.username = newData.username;
+      if (newData.private_key_path !== undefined)
+        formData.private_key_path = newData.private_key_path;
+      if (newData.save_session !== undefined)
+        formData.save_session = newData.save_session;
+      if (newData.groups !== undefined) formData.groups = [...newData.groups];
+      if (newData.tags !== undefined) formData.tags = [...newData.tags];
+
+      // Update sensitive fields if provided
+      if (newData.password) {
+        formData.password = newData.password;
+      }
+      if (newData.key_passphrase) {
+        formData.key_passphrase = newData.key_passphrase;
+      }
+    }
+  },
+  { deep: true, immediate: true }
+);
 
 const { t } = useI18n({ useScope: 'global' });
 

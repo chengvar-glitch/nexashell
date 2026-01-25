@@ -57,7 +57,8 @@ export class ShortcutManager {
    * Generate unique identifier for shortcut
    */
   private generateKey(config: Partial<ShortcutConfig>): string {
-    return `${config.key}_${!!config.ctrlKey}_${!!config.metaKey}_${!!config.shiftKey}_${!!config.altKey}`;
+    const key = config.key?.toLowerCase();
+    return `${key}_${!!config.ctrlKey}_${!!config.metaKey}_${!!config.shiftKey}_${!!config.altKey}`;
   }
 
   /**
@@ -88,7 +89,7 @@ export class ShortcutManager {
 
     // Global shortcuts that should trigger even in input fields
     const isGlobalShortcut =
-      ((event.key === 'k' || event.key === 'w') &&
+      (['k', 'w', 't', 'q', ','].includes(event.key.toLowerCase()) &&
         (event.metaKey || event.ctrlKey)) ||
       event.key === 'Escape';
 

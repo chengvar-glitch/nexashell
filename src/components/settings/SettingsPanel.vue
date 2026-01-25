@@ -428,6 +428,7 @@ import { useSettingsStore, type CursorStyle } from '@/features/settings';
 interface Props {
   visible?: boolean;
   useTeleport?: boolean; // Add prop to control teleport usage
+  initialSection?: string;
 }
 
 const { locale, t } = useI18n({ useScope: 'global' });
@@ -436,6 +437,7 @@ const settingsStore = useSettingsStore();
 const props = withDefaults(defineProps<Props>(), {
   visible: false,
   useTeleport: true, // Default to true for backward compatibility
+  initialSection: 'appearance',
 });
 
 const emit = defineEmits<{
@@ -559,15 +561,22 @@ watch(
   async visible => {
     if (visible) {
       isManualScrolling = true;
-      activeMenu.value = 'appearance';
+      activeMenu.value = props.initialSection || 'appearance';
       await nextTick();
-      // Reset scroll position to top when opening
-      const content = props.useTeleport
-        ? contentRef.value
-        : contentRefFallback.value;
-      if (content) {
-        content.scrollTop = 0;
+
+      const target = sectionRefs.value[activeMenu.value];
+      if (target) {
+        target.scrollIntoView({ behavior: 'auto', block: 'start' });
+      } else {
+        // Reset scroll position to top when opening if no target
+        const content = props.useTeleport
+          ? contentRef.value
+          : contentRefFallback.value;
+        if (content) {
+          content.scrollTop = 0;
+        }
       }
+
       initObserver();
       // Short delay to allow initial intersection events to pass
       setTimeout(() => {

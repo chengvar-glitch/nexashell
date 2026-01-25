@@ -200,7 +200,7 @@ const searchItems = computed(() => [
     title: t('search.newTerminal'),
     description: t('search.descTerminal'),
     icon: Terminal,
-    shortcut: 'Cmd+T',
+    shortcut: 'Cmd+Shift+T',
     category: 'terminal',
     action: () => window.dispatchEvent(new CustomEvent('app:new-local-tab')),
   },
@@ -209,7 +209,7 @@ const searchItems = computed(() => [
     title: t('search.newSSH'),
     description: t('search.descSSH'),
     icon: Server,
-    shortcut: 'Cmd+Shift+T',
+    shortcut: 'Cmd+T',
     category: 'terminal',
     action: () => window.dispatchEvent(new CustomEvent('app:open-ssh-form')),
   },
@@ -229,7 +229,7 @@ const searchItems = computed(() => [
     shortcut: 'Cmd+Shift+P',
     category: 'commands',
     action: () =>
-      window.dispatchEvent(new CustomEvent('app:open-command-palette')),
+      eventBus.emit(APP_EVENTS.OPEN_SETTINGS, { section: 'shortcuts' }),
   },
   {
     id: 'file-manager',

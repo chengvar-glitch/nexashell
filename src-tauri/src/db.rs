@@ -30,6 +30,7 @@ pub struct Session {
     pub auth_type: String,
     pub private_key_path: Option<String>,
     pub is_favorite: bool,
+    pub last_connected_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -98,6 +99,7 @@ pub fn init_db() -> Result<String, String> {
             auth_type TEXT NOT NULL,
             private_key_path TEXT,
             is_favorite INTEGER NOT NULL DEFAULT 0,
+            last_connected_at TEXT,
             encrypted_credentials TEXT,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
@@ -106,9 +108,13 @@ pub fn init_db() -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
 
-    // Migration for is_favorite and encrypted_credentials if they don't exist
+    // Migration for missing columns if they don't exist
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0", []);
     let _ = conn.execute("ALTER TABLE sessions ADD COLUMN encrypted_credentials TEXT", []);
+    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN last_connected_at TEXT", []);
+    
+    // Data migration: fill last_connected_at with updated_at for existing sessions that were never connected
+    let _ = conn.execute("UPDATE sessions SET last_connected_at = updated_at WHERE last_connected_at IS NULL", []);
 
     // Ensure groups/tags and junction tables exist.
     ensure_groups_and_tags(&conn)?;
@@ -387,7 +393,7 @@ pub fn update_session_timestamp(id: String) -> Result<(), String> {
     let db_path = db_path()?;
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     conn.execute(
-        "UPDATE sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
+        "UPDATE sessions SET last_connected_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
         params![id],
     ).map_err(|e| e.to_string())?;
     Ok(())
@@ -399,7 +405,7 @@ pub fn list_sessions() -> Result<Vec<Session>, String> {
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, created_at, updated_at FROM sessions",
+            "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at FROM sessions",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -413,8 +419,9 @@ pub fn list_sessions() -> Result<Vec<Session>, String> {
                 auth_type: row.get(5)?,
                 private_key_path: row.get(6)?,
                 is_favorite: row.get::<_, i64>(7)? != 0,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                last_connected_at: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -443,7 +450,7 @@ pub fn get_sessions(
     host_addr: Option<String>,
 ) -> Result<Vec<Session>, String> {
     let db_path = db_path()?;
-    let mut sql = String::from("SELECT DISTINCT s.id, s.addr, s.port, s.server_name, s.username, s.auth_type, s.private_key_path, s.is_favorite, s.created_at, s.updated_at FROM sessions s");
+    let mut sql = String::from("SELECT DISTINCT s.id, s.addr, s.port, s.server_name, s.username, s.auth_type, s.private_key_path, s.is_favorite, s.last_connected_at, s.created_at, s.updated_at FROM sessions s");
     if group_id.is_some() {
         sql.push_str(" JOIN session_groups sg ON s.id = sg.session_id");
     }
@@ -496,8 +503,9 @@ pub fn get_sessions(
                 auth_type: row.get(5)?,
                 private_key_path: row.get(6)?,
                 is_favorite: row.get::<_, i64>(7)? != 0,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                last_connected_at: row.get(8)?,
+                created_at: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -922,7 +930,7 @@ pub fn export_sessions(password: String) -> Result<String, String> {
     let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
 
     // 1. Get all sessions
-    let mut stmt = conn.prepare("SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at FROM sessions")
+    let mut stmt = conn.prepare("SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, last_connected_at, created_at, updated_at FROM sessions")
         .map_err(|e| e.to_string())?;
     
     let session_rows = stmt.query_map([], |row| {
@@ -936,8 +944,9 @@ pub fn export_sessions(password: String) -> Result<String, String> {
             auth_type: row.get(5)?,
             private_key_path: row.get(6)?,
             is_favorite: row.get::<_, i64>(7)? != 0,
-            created_at: row.get(9)?,
-            updated_at: row.get(10)?,
+            last_connected_at: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
         };
         let encrypted_creds: Option<String> = row.get(8)?;
         Ok((metadata, encrypted_creds))
