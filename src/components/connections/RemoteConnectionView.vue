@@ -10,6 +10,7 @@ import { sessionApi } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { useSettingsStore } from '@/features/settings';
+import ServerStatusView from './ServerStatusView.vue';
 
 const logger = createLogger('REMOTE_CONNECTION_VIEW');
 
@@ -534,6 +535,9 @@ onMounted(async () => {
 
 <template>
   <div class="remote-connection-view">
+    <ServerStatusView
+      :session-id="props.sessionId"
+    />
     <div ref="terminalRef" class="terminal-container" />
     <div v-if="showSearch" class="terminal-search-box">
       <input
