@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   Activity,
@@ -18,9 +18,11 @@ import {
  */
 interface Props {
   sessionId?: string;
+  status?: ServerStatus;
 }
 
 const props = defineProps<Props>();
+const emit = defineEmits(['toggle-dashboard']);
 
 interface ServerStatus {
   cpuUsage: number;
@@ -33,7 +35,7 @@ interface ServerStatus {
   latency: number;
 }
 
-const status = ref<ServerStatus>({
+const localStatus = ref<ServerStatus>({
   cpuUsage: 0,
   memUsage: 0,
   memTotal: 0,
@@ -43,6 +45,8 @@ const status = ref<ServerStatus>({
   netDown: 0,
   latency: 0,
 });
+
+const currentStatus = computed(() => props.status || localStatus.value);
 
 let unlisten: UnlistenFn | null = null;
 
@@ -76,12 +80,12 @@ const setupListener = async (sid: string) => {
   if (!sid) return;
 
   unlisten = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
-    status.value = event.payload;
+    localStatus.value = event.payload;
   });
 };
 
 onMounted(() => {
-  if (props.sessionId) {
+  if (props.sessionId && !props.status) {
     setupListener(props.sessionId);
   }
 });
@@ -93,10 +97,10 @@ onUnmounted(() => {
 watch(
   () => props.sessionId,
   newId => {
-    if (newId) {
+    if (newId && !props.status) {
       setupListener(newId);
     } else {
-      status.value = {
+      localStatus.value = {
         cpuUsage: 0,
         memUsage: 0,
         memTotal: 0,
@@ -116,43 +120,51 @@ watch(
 </script>
 
 <template>
-  <div v-if="sessionId" class="server-status-view">
+  <div
+    v-if="sessionId"
+    class="server-status-view"
+    title="Click to toggle detailed dashboard"
+    @click="emit('toggle-dashboard')"
+  >
     <div class="status-item metrics">
       <Network :size="12" class="icon small" />
       <div class="metric">
         <Activity :size="12" class="icon-metric" />
-        <span class="value">{{ status.latency }}ms</span>
+        <span class="value">{{ currentStatus.latency }}ms</span>
       </div>
       <div class="metric">
         <ArrowDown :size="12" class="icon-metric" />
-        <span class="value">{{ formatSpeed(status.netDown) }}</span>
+        <span class="value">{{ formatSpeed(currentStatus.netDown) }}</span>
       </div>
       <div class="metric">
         <ArrowUp :size="12" class="icon-metric" />
-        <span class="value">{{ formatSpeed(status.netUp) }}</span>
+        <span class="value">{{ formatSpeed(currentStatus.netUp) }}</span>
       </div>
     </div>
 
     <div class="divider"></div>
 
     <div class="status-item resources">
-      <div class="resource-pill" :title="`CPU: ${status.cpuUsage.toFixed(1)}%`">
+      <div
+        class="resource-pill"
+        :title="`CPU: ${currentStatus.cpuUsage.toFixed(1)}%`"
+      >
         <Cpu :size="12" class="icon small" />
         <span class="label">CPU</span>
         <div class="progress-bg">
           <div
             class="progress-bar"
             :style="{
-              width: `${status.cpuUsage}%`,
-              backgroundColor: getResourceColor(status.cpuUsage),
+              width: `${currentStatus.cpuUsage}%`,
+              backgroundColor: getResourceColor(currentStatus.cpuUsage),
             }"
           ></div>
         </div>
-        <span class="percent">{{ Math.round(status.cpuUsage) }}%</span>
+        <span class="percent">{{ Math.round(currentStatus.cpuUsage) }}%</span>
       </div>
       <div
         class="resource-pill"
-        :title="`MEM: ${formatSize(status.memUsed)} / ${formatSize(status.memTotal)}`"
+        :title="`MEM: ${formatSize(currentStatus.memUsed)} / ${formatSize(currentStatus.memTotal)}`"
       >
         <MemoryStick :size="12" class="icon small" />
         <span class="label">MEM</span>
@@ -160,26 +172,26 @@ watch(
           <div
             class="progress-bar"
             :style="{
-              width: `${status.memUsage}%`,
-              backgroundColor: getResourceColor(status.memUsage),
+              width: `${currentStatus.memUsage}%`,
+              backgroundColor: getResourceColor(currentStatus.memUsage),
             }"
           ></div>
         </div>
-        <span class="percent">{{ formatSize(status.memUsed) }}</span>
+        <span class="percent">{{ formatSize(currentStatus.memUsed) }}</span>
       </div>
-      <div class="resource-pill" :title="`DISK: ${status.diskUsage}%`">
+      <div class="resource-pill" :title="`DISK: ${currentStatus.diskUsage}%`">
         <HardDrive :size="12" class="icon small" />
         <span class="label">DISK</span>
         <div class="progress-bg">
           <div
             class="progress-bar"
             :style="{
-              width: `${status.diskUsage}%`,
-              backgroundColor: getResourceColor(status.diskUsage),
+              width: `${currentStatus.diskUsage}%`,
+              backgroundColor: getResourceColor(currentStatus.diskUsage),
             }"
           ></div>
         </div>
-        <span class="percent">{{ Math.round(status.diskUsage) }}%</span>
+        <span class="percent">{{ Math.round(currentStatus.diskUsage) }}%</span>
       </div>
     </div>
   </div>
@@ -208,6 +220,7 @@ watch(
   transition: all var(--transition-base);
   user-select: none;
   pointer-events: auto;
+  cursor: pointer;
   animation: slide-down 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
@@ -225,6 +238,8 @@ watch(
 .server-status-view:hover {
   background-color: rgba(40, 40, 40, 0.95);
   border-color: rgba(255, 255, 255, 0.2);
+  transform: translateX(-50%) translateY(2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
 .status-item {

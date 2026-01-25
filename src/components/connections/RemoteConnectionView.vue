@@ -11,11 +11,45 @@ import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { useSettingsStore } from '@/features/settings';
 import ServerStatusView from './ServerStatusView.vue';
+import ServerDashboard from './ServerDashboard.vue';
 
 const logger = createLogger('REMOTE_CONNECTION_VIEW');
 
 const sessionStore = useSessionStore();
 const settingsStore = useSettingsStore();
+
+const showDashboard = ref(false);
+
+interface ServerStatus {
+  cpuUsage: number;
+  memUsage: number;
+  memTotal: number;
+  memUsed: number;
+  diskUsage: number;
+  netUp: number;
+  netDown: number;
+  latency: number;
+}
+
+const statusHistory = ref<ServerStatus[]>([]);
+const MAX_HISTORY = 60;
+let statusUnlisten: UnlistenFn | null = null;
+
+const setupStatusListener = async () => {
+  if (statusUnlisten) statusUnlisten();
+  statusHistory.value = []; // Clear history for new session
+  if (!props.sessionId) return;
+
+  statusUnlisten = await listen<ServerStatus>(
+    `ssh-status-${props.sessionId}`,
+    event => {
+      statusHistory.value.push(event.payload);
+      if (statusHistory.value.length > MAX_HISTORY) {
+        statusHistory.value.shift();
+      }
+    }
+  );
+};
 
 // Terminal configuration constants - Now acting as defaults or base
 const TERMINAL_CONFIG = {
@@ -225,6 +259,7 @@ defineExpose({
  */
 onMounted(async () => {
   logger.info('Terminal component mounted', { sessionId: props.sessionId });
+  await setupStatusListener();
 
   if (!terminalRef.value) return;
 
@@ -544,6 +579,10 @@ onMounted(async () => {
   onUnmounted(async () => {
     window.removeEventListener('resize', handleResize);
     resizeObserver.disconnect();
+    if (statusUnlisten) {
+      statusUnlisten();
+      statusUnlisten = null;
+    }
     await cleanupResources();
   });
 });
@@ -551,7 +590,17 @@ onMounted(async () => {
 
 <template>
   <div class="remote-connection-view">
-    <ServerStatusView :session-id="props.sessionId" />
+    <ServerStatusView
+      :session-id="props.sessionId"
+      :status="statusHistory[statusHistory.length - 1]"
+      @toggle-dashboard="showDashboard = !showDashboard"
+    />
+    <ServerDashboard
+      v-if="showDashboard"
+      :session-id="props.sessionId"
+      :history="statusHistory"
+      @close="showDashboard = false"
+    />
     <div ref="terminalRef" class="terminal-container" />
     <div v-if="showSearch" class="terminal-search-box">
       <input
