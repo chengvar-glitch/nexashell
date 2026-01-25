@@ -1,13 +1,12 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock, Mutex};
-use std::io::{Read, Write};
-use std::time::Duration;
-use tauri::{Listener, Emitter};
-use std::sync::atomic::{AtomicU64, Ordering, AtomicBool};
-use serde::{Serialize, Deserialize};
-use tokio::sync::mpsc;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use tauri::{Emitter, Listener};
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 // ============================================================================
 // Error Types
@@ -18,10 +17,10 @@ use thiserror::Error;
 pub enum TerminalError {
     #[error("Failed to spawn shell: {0}")]
     SpawnFailed(String),
-    
+
     #[error("Session not found: {0}")]
     SessionNotFound(String),
-    
+
     #[error("State lock poisoned: {0}")]
     LockPoisoned(String),
 }
@@ -86,12 +85,14 @@ impl TerminalManager {
 
         // 1. Setup PTY
         let pty_system = native_pty_system();
-        let pair = pty_system.openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        }).map_err(|e| TerminalError::SpawnFailed(format!("Failed to open PTY: {}", e)))?;
+        let pair = pty_system
+            .openpty(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| TerminalError::SpawnFailed(format!("Failed to open PTY: {}", e)))?;
 
         // 2. Spawn shell
         #[cfg(target_os = "windows")]
@@ -100,7 +101,9 @@ impl TerminalManager {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "zsh".to_string());
 
         let cmd = CommandBuilder::new(shell);
-        let _child = pair.slave.spawn_command(cmd)
+        let _child = pair
+            .slave
+            .spawn_command(cmd)
             .map_err(|e| TerminalError::SpawnFailed(format!("Failed to spawn shell: {}", e)))?;
 
         // 3. Setup communication channels
@@ -108,16 +111,20 @@ impl TerminalManager {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let next_seq = Arc::new(AtomicU64::new(1));
 
-        let mut reader = pair.master.try_clone_reader()
+        let reader = pair
+            .master
+            .try_clone_reader()
             .map_err(|e| TerminalError::SpawnFailed(format!("Failed to clone reader: {}", e)))?;
-        let writer = pair.master.take_writer()
+        let writer = pair
+            .master
+            .take_writer()
             .map_err(|e| TerminalError::SpawnFailed(format!("Failed to take writer: {}", e)))?;
 
         // 4. Register event listeners for user input
         let master = Arc::new(Mutex::new(pair.master));
         if let Some(h) = &app_handle {
-            Self::register_input_listener(&h, &session_id, &input_sender);
-            Self::register_resize_listener(&h, &session_id, Arc::clone(&master));
+            Self::register_input_listener(h, &session_id, &input_sender);
+            Self::register_resize_listener(h, &session_id, Arc::clone(&master));
         }
 
         // 5. Spawn I/O tasks
@@ -168,13 +175,17 @@ impl TerminalManager {
 
         // 6. Save channel info
         {
-            let mut channels = channels_arc.write()
+            let mut channels = channels_arc
+                .write()
                 .map_err(|e| TerminalError::LockPoisoned(e.to_string()))?;
-            channels.insert(session_id, TerminalInfo {
-                handle: Some(output_handle),
-                input_sender,
-                stop_flag,
-            });
+            channels.insert(
+                session_id,
+                TerminalInfo {
+                    handle: Some(output_handle),
+                    input_sender,
+                    stop_flag,
+                },
+            );
         }
 
         Ok(())
@@ -187,7 +198,7 @@ impl TerminalManager {
     ) {
         let event_name = format!("ssh-input-{}", session_id.0);
         let input_tx = input_sender.clone();
-        
+
         app_handle.listen(&event_name, move |event: tauri::Event| {
             #[derive(Deserialize)]
             struct InputPayload {
@@ -205,7 +216,7 @@ impl TerminalManager {
         master: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
     ) {
         let resize_event_name = format!("ssh-resize-{}", session_id.0);
-        
+
         app_handle.listen(&resize_event_name, move |event: tauri::Event| {
             #[derive(Deserialize)]
             struct ResizePayload {
@@ -246,7 +257,9 @@ pub async fn connect_local(
     cols: u16,
     rows: u16,
 ) -> Result<(), TerminalError> {
-    state.connect_local(Some(app_handle), SessionId::from(sessionId), cols, rows).await
+    state
+        .connect_local(Some(app_handle), SessionId::from(sessionId), cols, rows)
+        .await
 }
 
 #[tauri::command]

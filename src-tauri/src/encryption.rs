@@ -2,11 +2,11 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
-use pbkdf2::pbkdf2_hmac;
-use sha2::Sha256;
-use rand::{RngCore, thread_rng};
 use base64::{engine::general_purpose, Engine as _};
+use pbkdf2::pbkdf2_hmac;
+use rand::{thread_rng, RngCore};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 /// Sensitive SSH credentials
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -42,19 +42,14 @@ impl EncryptionManager {
     /// Encrypt sensitive data with a custom key (useful for export).
     pub fn encrypt_with_key(data: &SensitiveData, key_str: &str) -> Result<String, String> {
         let json = serde_json::to_string(data).map_err(|e| e.to_string())?;
-        
+
         // 1. Generate random Salt
         let mut salt = [0u8; 16];
         thread_rng().fill_bytes(&mut salt);
-        
+
         // 2. Derive key using PBKDF2
         let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(
-            key_str.as_bytes(),
-            &salt,
-            Self::ITERATIONS,
-            &mut key
-        );
+        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), &salt, Self::ITERATIONS, &mut key);
 
         // 3. Generate random IV (Nonce)
         let mut iv = [0u8; 12];
@@ -76,11 +71,14 @@ impl EncryptionManager {
     }
 
     /// Decrypt sensitive data with a custom key (useful for import).
-    pub fn decrypt_with_key(encrypted_base64: &str, key_str: &str) -> Result<SensitiveData, String> {
+    pub fn decrypt_with_key(
+        encrypted_base64: &str,
+        key_str: &str,
+    ) -> Result<SensitiveData, String> {
         let combined = general_purpose::STANDARD
             .decode(encrypted_base64)
             .map_err(|e| format!("Invalid base64: {}", e))?;
-        
+
         if combined.len() < 16 + 12 {
             return Err("Invalid encrypted data format".to_string());
         }
@@ -92,12 +90,7 @@ impl EncryptionManager {
 
         // 2. Derive key
         let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(
-            key_str.as_bytes(),
-            salt,
-            Self::ITERATIONS,
-            &mut key
-        );
+        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), salt, Self::ITERATIONS, &mut key);
 
         // 3. Decrypt
         let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
@@ -106,7 +99,7 @@ impl EncryptionManager {
         let plaintext = cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| format!("Decryption failed (possibly wrong key): {}", e))?;
-        
+
         let data: SensitiveData = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
         Ok(data)
     }

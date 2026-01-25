@@ -1,14 +1,14 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-use ssh2::Session;
-use std::net::TcpStream;
-use std::io::{Read, Write};
-use std::time::Duration;
-use tauri::{Listener, Emitter};
-use std::sync::atomic::{AtomicU64, Ordering, AtomicBool};
 use serde::Serialize;
-use tokio::sync::mpsc;
+use ssh2::Session;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+use tauri::{Emitter, Listener};
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 // ============================================================================
 // Error Types
@@ -19,23 +19,27 @@ use thiserror::Error;
 #[serde(rename_all = "camelCase")]
 pub enum SshError {
     #[error("Failed to connect to {host}:{port} - {reason}")]
-    ConnectionFailed { host: String, port: u16, reason: String },
-    
+    ConnectionFailed {
+        host: String,
+        port: u16,
+        reason: String,
+    },
+
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
-    
+
     #[error("SSH operation failed: {0}")]
     OperationFailed(String),
-    
+
     #[error("Channel error: {0}")]
     ChannelError(String),
-    
+
     #[error("Session not found: {0}")]
     SessionNotFound(String),
-    
+
     #[error("State lock poisoned: {0}")]
     LockPoisoned(String),
-    
+
     #[error("Task join error: {0}")]
     TaskError(String),
 }
@@ -50,11 +54,11 @@ const SSH_BUFFER_SIZE: usize = 4096;
 /// Initial batch threshold (welcome banner, login prompts)
 /// Increased initial time to ensure welcome banner is fully received
 const INITIAL_BATCH_SIZE_THRESHOLD: usize = 200;
-const INITIAL_BATCH_TIME_MS: u64 = 100;  // Increased from 5ms to 100ms
+const INITIAL_BATCH_TIME_MS: u64 = 100; // Increased from 5ms to 100ms
 
 /// Timeout for initial buffering phase (after connection established)
 /// After this time, stop buffering initial output
-const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000;  // 2 seconds to capture all initial output
+const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000; // 2 seconds to capture all initial output
 
 /// Normal operation batch threshold
 const NORMAL_BATCH_SIZE_THRESHOLD: usize = 1024;
@@ -92,7 +96,7 @@ pub struct SshSession {
 }
 
 /// Represents a chunk of output data from an SSH session
-/// 
+///
 /// Each chunk has a monotonically increasing sequence number
 /// to enable reliable client-side buffering and deduplication.
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +104,20 @@ pub struct OutputChunk {
     pub seq: u64,
     pub output: String,
     pub ts: u128,
+}
+
+/// Server performance metrics
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    pub cpu_usage: f64,
+    pub mem_usage: f64,
+    pub mem_total: u64,
+    pub mem_used: u64,
+    pub disk_usage: f64,
+    pub net_up: f64,
+    pub net_down: f64,
+    pub latency: u32,
 }
 
 impl OutputChunk {
@@ -117,26 +135,32 @@ impl OutputChunk {
 pub struct SshChannelInfo {
     /// Asynchronous receiver for SSH output chunks
     pub receiver: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<OutputChunk>>>,
-    
+
     /// Handle to the background tokio task processing the SSH data
     pub handle: Option<tokio::task::JoinHandle<()>>,
-    
+
+    /// Handle to the background monitoring task
+    pub status_handle: Option<tokio::task::JoinHandle<()>>,
+
     /// Sender to transmit user input to the SSH channel
     pub input_sender: mpsc::UnboundedSender<String>,
-    
+
     /// Atomic flag to signal the background task to terminate
     pub stop_flag: Arc<AtomicBool>,
-    
+
     /// Monotonically increasing sequence number for output chunks
     #[allow(dead_code)]
     pub next_seq: Arc<AtomicU64>,
-    
+
     /// Cached initial output (welcome banner) for late-joining clients
     pub initial_outputs: Arc<tokio::sync::Mutex<Vec<OutputChunk>>>,
+
+    /// Session handle for opening new channels
+    pub sess_arc: Arc<tokio::sync::Mutex<Session>>,
 }
 
 /// Global manager for coordinating SSH sessions and channels
-/// 
+///
 /// This manager coordinates all active SSH connections and provides
 /// the primary interface for SSH operations. Uses RwLock for better
 /// performance when reads outnumber writes (typical in SSH usage).
@@ -154,7 +178,7 @@ impl SshManager {
     }
 
     /// Establishes a new SSH connection and spawns the I/O handler task
-    /// 
+    ///
     /// # Arguments
     /// * `app_handle` - Tauri app handle for event emission
     /// * `session_id` - Unique identifier for this session
@@ -164,7 +188,7 @@ impl SshManager {
     /// * `password` - SSH password
     /// * `cols` - Terminal columns
     /// * `rows` - Terminal rows
-    /// 
+    ///
     /// # Returns
     /// `Ok(())` on success, `Err(SshError)` with detailed error context on failure
     #[allow(clippy::too_many_arguments)]
@@ -189,7 +213,8 @@ impl SshManager {
         // 1. Establish connection and authenticate (blocking part in separate thread)
         let connection_res = tokio::task::spawn_blocking(move || {
             use std::net::ToSocketAddrs;
-            let socket_addr = addr.to_socket_addrs()
+            let socket_addr = addr
+                .to_socket_addrs()
                 .map_err(|e| SshError::ConnectionFailed {
                     host: addr.clone(),
                     port,
@@ -202,41 +227,49 @@ impl SshManager {
                     reason: "No addresses found".to_string(),
                 })?;
 
-            let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(|e| {
-                SshError::ConnectionFailed {
-                    host: addr.clone(),
-                    port,
-                    reason: e.to_string(),
-                }
+            let tcp =
+                TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(|e| {
+                    SshError::ConnectionFailed {
+                        host: addr.clone(),
+                        port,
+                        reason: e.to_string(),
+                    }
+                })?;
+
+            let mut sess = Session::new().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to create session: {}", e))
             })?;
-            
-            let mut sess = Session::new()
-                .map_err(|e| SshError::OperationFailed(format!("Failed to create session: {}", e)))?;
             sess.set_tcp_stream(tcp);
             sess.handshake()
                 .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
-            
+
             sess.userauth_password(&username_for_spawn, &password_for_spawn)
                 .map_err(|_| SshError::AuthenticationFailed("Invalid credentials".to_string()))?;
-            
+
             if !sess.authenticated() {
-                return Err(SshError::AuthenticationFailed("Authentication failed".to_string()));
+                return Err(SshError::AuthenticationFailed(
+                    "Authentication failed".to_string(),
+                ));
             }
 
-            let mut channel = sess.channel_session()
+            let mut channel = sess
+                .channel_session()
                 .map_err(|e| SshError::ChannelError(format!("Create channel failed: {}", e)))?;
-            
-            channel.request_pty("xterm-256color", None, Some((cols, rows, 0, 0)))
+
+            channel
+                .request_pty("xterm-256color", None, Some((cols, rows, 0, 0)))
                 .map_err(|e| SshError::ChannelError(format!("Failed to request PTY: {}", e)))?;
-            
-            channel.shell()
+
+            channel
+                .shell()
                 .map_err(|e| SshError::ChannelError(format!("Failed to start shell: {}", e)))?;
-            
+
             // Set non-blocking mode for async I/O
             sess.set_blocking(false);
-            
+
             Ok((sess, channel))
-        }).await;
+        })
+        .await;
 
         let (sess, channel) = match connection_res {
             Ok(Ok(val)) => val,
@@ -256,39 +289,54 @@ impl SshManager {
 
         // 3. Register event listeners for user input and resize
         if let Some(h) = &app_handle {
-            Self::register_input_listener(&h, &session_id, &input_sender, &stop_flag);
-            Self::register_resize_listener(&h, &session_id, &channel_arc, &stop_flag);
+            Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
+            Self::register_resize_listener(h, &session_id, &channel_arc, &stop_flag);
         }
 
         // 4. Spawn I/O task
         let handle = Self::spawn_io_task(
             channel_arc,
-            sess_arc,
+            sess_arc.clone(),
             stop_flag.clone(),
             next_seq.clone(),
             initial_outputs.clone(),
             input_receiver,
             output_sender,
-            app_handle,
+            app_handle.clone(),
             session_id.clone(),
         );
 
-        // 5. Save session state
+        // 5. Spawn monitoring task
+        let status_handle = Self::spawn_monitoring_task(
+            app_handle,
+            session_id.clone(),
+            sess_arc.clone(),
+            stop_flag.clone(),
+        );
+
+        // 6. Save session state
         {
-            let mut sessions = sessions_arc.write()
+            let mut sessions = sessions_arc
+                .write()
                 .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
             sessions.insert(session_id.clone(), SshSession { ip, port, username });
-            
-            let mut channels = channels_arc.write()
+
+            let mut channels = channels_arc
+                .write()
                 .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
-            channels.insert(session_id, SshChannelInfo {
-                receiver: Arc::new(tokio::sync::Mutex::new(output_receiver)),
-                handle: Some(handle),
-                input_sender,
-                stop_flag,
-                next_seq,
-                initial_outputs,
-            });
+            channels.insert(
+                session_id,
+                SshChannelInfo {
+                    receiver: Arc::new(tokio::sync::Mutex::new(output_receiver)),
+                    handle: Some(handle),
+                    status_handle: Some(status_handle),
+                    input_sender,
+                    stop_flag,
+                    next_seq,
+                    initial_outputs,
+                    sess_arc,
+                },
+            );
         }
 
         Ok(())
@@ -304,17 +352,17 @@ impl SshManager {
         let event_name = format!("ssh-input-{}", session_id.0);
         let input_tx = input_sender.clone();
         let task_stop = stop_flag.clone();
-        
+
         app_handle.listen(&event_name, move |event: tauri::Event| {
             if task_stop.load(Ordering::SeqCst) {
                 return;
             }
-            
+
             #[derive(serde::Deserialize)]
             struct InputPayload {
                 input: String,
             }
-            
+
             if let Ok(payload) = serde_json::from_str::<InputPayload>(event.payload()) {
                 let _ = input_tx.send(payload.input);
             }
@@ -331,18 +379,18 @@ impl SshManager {
         let resize_event_name = format!("ssh-resize-{}", session_id.0);
         let task_channel = channel_arc.clone();
         let task_stop = stop_flag.clone();
-        
+
         app_handle.listen(&resize_event_name, move |event: tauri::Event| {
             if task_stop.load(Ordering::SeqCst) {
                 return;
             }
-            
+
             #[derive(serde::Deserialize)]
             struct ResizePayload {
                 cols: u32,
                 rows: u32,
             }
-            
+
             if let Ok(payload) = serde_json::from_str::<ResizePayload>(event.payload()) {
                 let task_channel_clone = task_channel.clone();
                 let _ = tokio::spawn(async move {
@@ -366,7 +414,6 @@ impl SshManager {
         session_id: SessionId,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let _keep_alive = sess_arc;
             let mut buffer = [0u8; SSH_BUFFER_SIZE];
             let mut pending_output = String::new();
             let mut last_emit = std::time::Instant::now();
@@ -380,7 +427,9 @@ impl SshManager {
                 }
 
                 // Attempt non-blocking read from SSH channel
+                // We lock the session to ensure thread safety with monitoring task
                 let read_result = {
+                    let _sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
                     match ch.read(&mut buffer) {
                         Ok(0) => Some(Err("Connection closed")),
@@ -405,7 +454,10 @@ impl SshManager {
                 }
 
                 // Check if initial buffering phase has ended
-                if in_initial_buffering && initial_buffering_start.elapsed() > Duration::from_millis(INITIAL_BUFFERING_TIMEOUT_MS) {
+                if in_initial_buffering
+                    && initial_buffering_start.elapsed()
+                        > Duration::from_millis(INITIAL_BUFFERING_TIMEOUT_MS)
+                {
                     in_initial_buffering = false;
                     // Flush any remaining pending output
                     if !pending_output.is_empty() {
@@ -422,11 +474,12 @@ impl SshManager {
                 }
 
                 // Batch and emit output
-                let (size_threshold, time_threshold_ms) = if in_initial_buffering && !seen_first_output {
-                    (INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
-                } else {
-                    (NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
-                };
+                let (size_threshold, time_threshold_ms) =
+                    if in_initial_buffering && !seen_first_output {
+                        (INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
+                    } else {
+                        (NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
+                    };
 
                 if !pending_output.is_empty()
                     && (pending_output.len() > size_threshold
@@ -445,7 +498,7 @@ impl SshManager {
                     if let Some(h) = &app_handle {
                         let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
                     }
-                    
+
                     let _ = output_sender.send(chunk);
                     pending_output.clear();
                     last_emit = std::time::Instant::now();
@@ -454,6 +507,7 @@ impl SshManager {
 
                 // Process queued user input
                 while let Ok(input) = input_receiver.try_recv() {
+                    let _sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
                     let _ = ch.write_all(input.as_bytes()).and_then(|_| ch.flush());
                 }
@@ -461,13 +515,209 @@ impl SshManager {
         })
     }
 
+    /// Spawns the background monitoring task for server metrics
+    fn spawn_monitoring_task(
+        app_handle: Option<tauri::AppHandle>,
+        session_id: SessionId,
+        sess_arc: Arc<tokio::sync::Mutex<Session>>,
+        stop_flag: Arc<AtomicBool>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(async move {
+            // Initial readings for delta calculation (rx, tx, time)
+            let mut last_net_read: Option<(f64, f64, std::time::Instant)> = None;
+            let mut last_cpu_read: Option<(u64, u64)> = None; // (total, idle)
+
+            loop {
+                if stop_flag.load(Ordering::SeqCst) {
+                    break;
+                }
+
+                let start_time = std::time::Instant::now();
+                let status_res = {
+                    let sess = sess_arc.lock().await;
+                    Self::fetch_server_status(&sess, last_cpu_read).await
+                };
+                let latency = start_time.elapsed().as_millis() as u32;
+
+                if let Ok((mut status, current_cpu_raw)) = status_res {
+                    let now = std::time::Instant::now();
+                    status.latency = latency;
+                    last_cpu_read = Some(current_cpu_raw);
+
+                    // Calculate network speed
+                    let current_rx = status.net_down;
+                    let current_tx = status.net_up;
+
+                    if let Some((prev_rx, prev_tx, prev_time)) = last_net_read {
+                        let duration = now.duration_since(prev_time).as_secs_f64();
+                        if duration > 0.0 {
+                            let rx_diff = if current_rx >= prev_rx {
+                                current_rx - prev_rx
+                            } else {
+                                0.0
+                            };
+                            let tx_diff = if current_tx >= prev_tx {
+                                current_tx - prev_tx
+                            } else {
+                                0.0
+                            };
+
+                            status.net_down = rx_diff / duration;
+                            status.net_up = tx_diff / duration;
+                        }
+                    } else {
+                        status.net_down = 0.0;
+                        status.net_up = 0.0;
+                    }
+
+                    last_net_read = Some((current_rx, current_tx, now));
+
+                    if let Some(h) = &app_handle {
+                        let _ = h.emit(&format!("ssh-status-{}", session_id.0), &status);
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_millis(1500)).await;
+            }
+        })
+    }
+
+    /// Fetches server performance metrics via a short-lived SSH channel
+    async fn fetch_server_status(
+        sess: &Session,
+        last_cpu: Option<(u64, u64)>,
+    ) -> Result<(ServerStatus, (u64, u64)), SshError> {
+        let mut channel = sess
+            .channel_session()
+            .map_err(|e| SshError::ChannelError(e.to_string()))?;
+
+        // Use more robust commands that work on various Linux environments
+        // 1. CPU: /proc/stat
+        // 2. Mem: free (with fallback)
+        // 3. Disk: df (without -b flag which is not standard)
+        // 4. Net: /proc/net/dev (with fallback)
+        let cmd = "LC_ALL=C awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8, $5}' /proc/stat 2>/dev/null || echo '0 0'; \
+                   LC_ALL=C free -b 2>/dev/null | awk 'NR==2{print $2,$3}' || echo '0 0'; \
+                   LC_ALL=C df / 2>/dev/null | awk 'NR==2{print $2,$3,$5}' || echo '0 0 0%'; \
+                   LC_ALL=C cat /proc/net/dev 2>/dev/null | awk 'NR>2{rx+=$2; tx+=$10} END{print rx+0,tx+0}' || echo '0 0'";
+
+        loop {
+            match channel.exec(cmd) {
+                Ok(_) => break,
+                Err(ref e) if e.code() == ssh2::ErrorCode::Session(-37) => {
+                    tokio::task::yield_now().await;
+                }
+                Err(e) => return Err(SshError::ChannelError(e.to_string())),
+            }
+        }
+
+        let mut output = String::new();
+        loop {
+            let mut buf = [0u8; 1024];
+            match channel.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => output.push_str(&String::from_utf8_lossy(&buf[..n])),
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    tokio::task::yield_now().await;
+                }
+                Err(e) => return Err(SshError::OperationFailed(e.to_string())),
+            }
+        }
+
+        let lines: Vec<&str> = output
+            .lines()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if lines.len() < 4 {
+            return Err(SshError::OperationFailed(format!(
+                "Invalid status output format (lines: {})",
+                lines.len()
+            )));
+        }
+
+        // Parse CPU
+        let cpu_parts: Vec<u64> = lines[0]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let (current_cpu_total, current_cpu_idle) = if cpu_parts.len() == 2 {
+            (cpu_parts[0], cpu_parts[1])
+        } else {
+            (0, 0)
+        };
+
+        let cpu_usage = if let Some((prev_total, prev_idle)) = last_cpu {
+            let diff_total = current_cpu_total.saturating_sub(prev_total);
+            let diff_idle = current_cpu_idle.saturating_sub(prev_idle);
+            if diff_total > 0 {
+                (100.0 * (1.0 - (diff_idle as f64 / diff_total as f64))).clamp(0.0, 100.0)
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        };
+
+        // Parse Memory
+        let mem_parts: Vec<u64> = lines[1]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let (mem_total, mem_used) = if mem_parts.len() == 2 && mem_parts[0] > 0 {
+            (mem_parts[0], mem_parts[1])
+        } else {
+            (1, 0)
+        };
+        let mem_usage = ((mem_used as f64 / mem_total as f64) * 100.0).clamp(0.0, 100.0);
+
+        // Parse Disk
+        let disk_parts: Vec<&str> = lines[2].split_whitespace().collect();
+        let disk_usage = if disk_parts.len() >= 3 {
+            disk_parts[2]
+                .replace('%', "")
+                .parse::<f64>()
+                .unwrap_or(0.0)
+                .clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+
+        // Parse Network Raw
+        let net_parts: Vec<f64> = lines[3]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let (net_down_raw, net_up_raw) = if net_parts.len() == 2 {
+            (net_parts[0], net_parts[1])
+        } else {
+            (0.0, 0.0)
+        };
+
+        Ok((
+            ServerStatus {
+                cpu_usage,
+                mem_usage,
+                mem_total,
+                mem_used,
+                disk_usage,
+                net_down: net_down_raw,
+                net_up: net_up_raw,
+                latency: 0,
+            },
+            (current_cpu_total, current_cpu_idle),
+        ))
+    }
+
     /// Retrieves all pending output chunks from a session
-    /// 
+    ///
     /// This drains the output receiver, so each chunk is returned only once.
     pub fn get_session_output(&self, session_id: &SessionId) -> Result<Vec<OutputChunk>, SshError> {
-        let channels = self.channels.read()
+        let channels = self
+            .channels
+            .read()
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
-        
+
         if let Some(channel_info) = channels.get(session_id) {
             let mut outputs = Vec::new();
             let mut receiver = channel_info.receiver.blocking_lock();
@@ -482,11 +732,15 @@ impl SshManager {
 
     /// Sends user input to a specific SSH session
     pub fn send_ssh_input(&self, session_id: &SessionId, input: String) -> Result<(), SshError> {
-        let channels = self.channels.read()
+        let channels = self
+            .channels
+            .read()
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
-        
+
         if let Some(channel_info) = channels.get(session_id) {
-            channel_info.input_sender.send(input)
+            channel_info
+                .input_sender
+                .send(input)
                 .map_err(|_| SshError::ChannelError("Failed to send input".to_string()))
         } else {
             Err(SshError::SessionNotFound(session_id.0.clone()))
@@ -494,12 +748,17 @@ impl SshManager {
     }
 
     /// Retrieves cached initial output (welcome banner, login prompts) for a session
-    /// 
+    ///
     /// Useful for clients that connect after the session has started.
-    pub fn get_buffered_ssh_output(&self, session_id: &SessionId) -> Result<Vec<OutputChunk>, SshError> {
-        let channels = self.channels.read()
+    pub fn get_buffered_ssh_output(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<OutputChunk>, SshError> {
+        let channels = self
+            .channels
+            .read()
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
-        
+
         if let Some(channel_info) = channels.get(session_id) {
             let outputs = channel_info.initial_outputs.blocking_lock().clone();
             Ok(outputs)
@@ -517,9 +776,12 @@ impl SshManager {
                 if let Some(handle) = info.handle.take() {
                     handle.abort();
                 }
+                if let Some(status_handle) = info.status_handle.take() {
+                    status_handle.abort();
+                }
             }
         }
-        
+
         // Remove from sessions
         if let Ok(mut sessions) = self.sessions.write() {
             sessions.remove(session_id);
@@ -536,12 +798,11 @@ impl SshManager {
         } else {
             Vec::new()
         };
-        
+
         for session_id in session_ids {
             let _ = self.disconnect_ssh(&session_id);
             println!("Disconnected SSH session: {}", session_id.0);
         }
-
     }
 
     /// Checks if a session exists
@@ -560,7 +821,7 @@ impl SshManager {
 // ============================================================================
 
 /// Establishes a new SSH connection
-/// 
+///
 /// # Tauri Command: `connect_ssh`
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -590,7 +851,7 @@ pub async fn connect_ssh(
 }
 
 /// Retrieves cached initial output from a session
-/// 
+///
 /// # Tauri Command: `get_buffered_ssh_output`
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -602,7 +863,7 @@ pub fn get_buffered_ssh_output(
 }
 
 /// Disconnects an SSH session and releases resources
-/// 
+///
 /// # Tauri Command: `disconnect_ssh`
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -614,7 +875,7 @@ pub fn disconnect_ssh(
 }
 
 /// Retrieves all pending output chunks from a session
-/// 
+///
 /// # Tauri Command: `get_ssh_output`
 #[tauri::command]
 #[allow(non_snake_case)]
@@ -626,7 +887,7 @@ pub fn get_ssh_output(
 }
 
 /// Sends user input to an SSH session
-/// 
+///
 /// # Tauri Command: `send_ssh_input`
 #[tauri::command]
 #[allow(non_snake_case)]

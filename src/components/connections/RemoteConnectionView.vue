@@ -286,6 +286,27 @@ onMounted(async () => {
 
   terminal.open(terminalRef.value);
 
+  // Handle right-click for direct paste or copy-on-selection
+  terminalRef.value?.addEventListener('contextmenu', async (e: MouseEvent) => {
+    e.preventDefault();
+    if (terminal?.hasSelection()) {
+      const selection = terminal.getSelection();
+      if (selection) {
+        await navigator.clipboard.writeText(selection);
+        terminal.clearSelection();
+      }
+    } else {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text && terminal) {
+          terminal.paste(text);
+        }
+      } catch (err) {
+        logger.error('Right-click paste failed', err);
+      }
+    }
+  });
+
   // Handle keyboard shortcuts and allow global app shortcuts to bubble up
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
     if (event.type !== 'keydown') return true;
@@ -304,24 +325,19 @@ onMounted(async () => {
     }
 
     // 2. Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
-    if (isControlKey && event.code === 'KeyC') {
-      if (terminal?.hasSelection()) {
+    // We let KeyC and KeyV bubble to the browser so it can handle native Copy/Paste
+    // xterm.js manages a hidden textarea that receives these events correctly.
+    // This avoids the "Permission required" popup from navigator.clipboard.readText().
+    if (isControlKey && (event.code === 'KeyC' || event.code === 'KeyV')) {
+      // For Ctrl+C on Windows/Linux, if there is a selection, we copy and don't send to terminal.
+      if (!isMac && event.code === 'KeyC' && terminal?.hasSelection()) {
         const selection = terminal.getSelection();
         if (selection) {
           navigator.clipboard.writeText(selection);
         }
         return false;
       }
-      return isMac ? false : true;
-    }
-
-    if (isControlKey && event.code === 'KeyV') {
-      navigator.clipboard.readText().then(text => {
-        if (text && props.sessionId) {
-          emit(`ssh-input-${props.sessionId}`, { input: text });
-        }
-      });
-      return false;
+      return true; // Let browser/xterm handle it natively
     }
 
     // 3. Other internal shortcuts
@@ -535,9 +551,7 @@ onMounted(async () => {
 
 <template>
   <div class="remote-connection-view">
-    <ServerStatusView
-      :session-id="props.sessionId"
-    />
+    <ServerStatusView :session-id="props.sessionId" />
     <div ref="terminalRef" class="terminal-container" />
     <div v-if="showSearch" class="terminal-search-box">
       <input

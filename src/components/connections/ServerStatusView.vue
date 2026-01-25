@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { 
-  Activity, 
-  ArrowDown, 
-  ArrowUp, 
-  Cpu, 
-  MemoryStick, 
-  HardDrive, 
-  Network 
+import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import {
+  Activity,
+  ArrowDown,
+  ArrowUp,
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  Network,
 } from 'lucide-vue-next';
 
 /**
@@ -18,50 +20,166 @@ interface Props {
   sessionId?: string;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
+
+interface ServerStatus {
+  cpuUsage: number;
+  memUsage: number;
+  memTotal: number;
+  memUsed: number;
+  diskUsage: number;
+  netUp: number;
+  netDown: number;
+  latency: number;
+}
+
+const status = ref<ServerStatus>({
+  cpuUsage: 0,
+  memUsage: 0,
+  memTotal: 0,
+  memUsed: 0,
+  diskUsage: 0,
+  netUp: 0,
+  netDown: 0,
+  latency: 0,
+});
+
+let unlisten: UnlistenFn | null = null;
+
+const formatSpeed = (bytesPerSec: number) => {
+  if (!bytesPerSec || bytesPerSec < 0.1) return '0 B/s';
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (bytesPerSec < 1024 * 1024)
+    return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+};
+
+const formatSize = (bytes: number) => {
+  if (!bytes) return '0 MB';
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1024) return `${mb.toFixed(0)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+};
+
+const getResourceColor = (percentage: number) => {
+  if (percentage >= 90) return '#ef4444'; // Red
+  if (percentage >= 70) return '#f97316'; // Orange
+  return '#facc15'; // Default Yellow/Primary
+};
+
+const setupListener = async (sid: string) => {
+  if (unlisten) {
+    unlisten();
+    unlisten = null;
+  }
+
+  if (!sid) return;
+
+  unlisten = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
+    status.value = event.payload;
+  });
+};
+
+onMounted(() => {
+  if (props.sessionId) {
+    setupListener(props.sessionId);
+  }
+});
+
+onUnmounted(() => {
+  if (unlisten) unlisten();
+});
+
+watch(
+  () => props.sessionId,
+  newId => {
+    if (newId) {
+      setupListener(newId);
+    } else {
+      status.value = {
+        cpuUsage: 0,
+        memUsage: 0,
+        memTotal: 0,
+        memUsed: 0,
+        diskUsage: 0,
+        netUp: 0,
+        netDown: 0,
+        latency: 0,
+      };
+      if (unlisten) {
+        unlisten();
+        unlisten = null;
+      }
+    }
+  }
+);
 </script>
 
 <template>
-  <div class="server-status-view">
+  <div v-if="sessionId" class="server-status-view">
     <div class="status-item metrics">
       <Network :size="12" class="icon small" />
       <div class="metric">
         <Activity :size="12" class="icon-metric" />
-        <span class="value">24ms</span>
+        <span class="value">{{ status.latency }}ms</span>
       </div>
       <div class="metric">
         <ArrowDown :size="12" class="icon-metric" />
-        <span class="value">1.2 KB/s</span>
+        <span class="value">{{ formatSpeed(status.netDown) }}</span>
       </div>
       <div class="metric">
         <ArrowUp :size="12" class="icon-metric" />
-        <span class="value">0.5 KB/s</span>
+        <span class="value">{{ formatSpeed(status.netUp) }}</span>
       </div>
     </div>
 
     <div class="divider"></div>
 
     <div class="status-item resources">
-      <div class="resource-pill">
+      <div class="resource-pill" :title="`CPU: ${status.cpuUsage.toFixed(1)}%`">
         <Cpu :size="12" class="icon small" />
         <span class="label">CPU</span>
         <div class="progress-bg">
-          <div class="progress-bar" style="width: 15%"></div>
+          <div
+            class="progress-bar"
+            :style="{
+              width: `${status.cpuUsage}%`,
+              backgroundColor: getResourceColor(status.cpuUsage),
+            }"
+          ></div>
         </div>
+        <span class="percent">{{ Math.round(status.cpuUsage) }}%</span>
       </div>
-      <div class="resource-pill">
+      <div
+        class="resource-pill"
+        :title="`MEM: ${formatSize(status.memUsed)} / ${formatSize(status.memTotal)}`"
+      >
         <MemoryStick :size="12" class="icon small" />
         <span class="label">MEM</span>
         <div class="progress-bg">
-          <div class="progress-bar" style="width: 42%"></div>
+          <div
+            class="progress-bar"
+            :style="{
+              width: `${status.memUsage}%`,
+              backgroundColor: getResourceColor(status.memUsage),
+            }"
+          ></div>
         </div>
+        <span class="percent">{{ formatSize(status.memUsed) }}</span>
       </div>
-      <div class="resource-pill">
+      <div class="resource-pill" :title="`DISK: ${status.diskUsage}%`">
         <HardDrive :size="12" class="icon small" />
         <span class="label">DISK</span>
         <div class="progress-bg">
-          <div class="progress-bar" style="width: 28%"></div>
+          <div
+            class="progress-bar"
+            :style="{
+              width: `${status.diskUsage}%`,
+              backgroundColor: getResourceColor(status.diskUsage),
+            }"
+          ></div>
         </div>
+        <span class="percent">{{ Math.round(status.diskUsage) }}%</span>
       </div>
     </div>
   </div>
@@ -144,7 +262,7 @@ defineProps<Props>();
 }
 
 .metric .value {
-  color: #BBB;
+  color: #bbb;
 }
 
 .resources {
@@ -163,6 +281,15 @@ defineProps<Props>();
   font-size: 9px;
 }
 
+.percent {
+  font-size: 9px;
+  opacity: 0.7;
+  min-width: 35px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .progress-bg {
   width: 30px;
   height: 4px;
@@ -175,5 +302,6 @@ defineProps<Props>();
   height: 100%;
   background-color: #facc15;
   border-radius: 2px;
+  transition: width 0.3s ease;
 }
 </style>

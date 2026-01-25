@@ -1,11 +1,11 @@
-mod system;
-mod ssh;
-mod terminal;
 mod db;
 mod encryption;
+mod ssh;
+mod system;
+mod terminal;
 
-use tauri::Manager;
 use ssh::SshManager;
+use tauri::Manager;
 use terminal::TerminalManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -30,21 +30,23 @@ pub fn run() {
             {
                 use cocoa::appkit::NSWindow;
                 use cocoa::base::{id, NO, YES};
-                
+
                 if let Some(window) = app.get_webview_window("main") {
                     // Ensure the webview itself is transparent
                     let _ = window.set_shadow(true);
-                    
+
                     if let Ok(ns_window) = window.ns_window() {
                         let ns_window = ns_window as id;
-                        
+
                         // Configure transparent window for macOS (non-movable)
                         unsafe {
                             ns_window.setOpaque_(NO);
-                            ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(cocoa::base::nil));
+                            ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(
+                                cocoa::base::nil,
+                            ));
                             ns_window.setTitlebarAppearsTransparent_(YES);
                             ns_window.setMovableByWindowBackground_(NO);
-                            
+
                             // Force refresh shadow to prevent square black corners
                             ns_window.setHasShadow_(NO);
                             ns_window.setHasShadow_(YES);
@@ -52,7 +54,7 @@ pub fn run() {
                     }
                 }
             }
-            
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,33 +74,33 @@ pub fn run() {
             ssh::get_buffered_ssh_output,
             terminal::connect_local,
             terminal::disconnect_local,
-                db::init_db,
-                db::add_session,
-                db::save_session,
-                db::save_session_with_credentials,
-                db::update_session_timestamp,
-                db::list_sessions,
-                db::get_session_credentials,
-                db::add_group,
-                db::list_groups,
-                db::add_tag,
-                db::list_tags,
-                db::link_session_group,
-                db::unlink_session_group,
-                db::list_groups_for_session,
-                db::link_session_tag,
-                db::unlink_session_tag,
-                db::list_tags_for_session,
-                db::get_sessions,
-                db::edit_group,
-                db::delete_group,
-                db::edit_tag,
-                db::delete_tag,
-                db::edit_session,
-                db::delete_session,
-                db::toggle_favorite,
-                db::export_sessions,
-                db::import_sessions,
+            db::init_db,
+            db::add_session,
+            db::save_session,
+            db::save_session_with_credentials,
+            db::update_session_timestamp,
+            db::list_sessions,
+            db::get_session_credentials,
+            db::add_group,
+            db::list_groups,
+            db::add_tag,
+            db::list_tags,
+            db::link_session_group,
+            db::unlink_session_group,
+            db::list_groups_for_session,
+            db::link_session_tag,
+            db::unlink_session_tag,
+            db::list_tags_for_session,
+            db::get_sessions,
+            db::edit_group,
+            db::delete_group,
+            db::edit_tag,
+            db::delete_tag,
+            db::edit_session,
+            db::delete_session,
+            db::toggle_favorite,
+            db::export_sessions,
+            db::import_sessions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -109,5 +111,3 @@ pub fn run() {
             }
         });
 }
-
-
