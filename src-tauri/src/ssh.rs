@@ -814,6 +814,117 @@ impl SshManager {
             false
         }
     }
+
+    /// Uploads a file via SFTP to the specified remote path
+    pub async fn upload_file_sftp(
+        &self,
+        session_id: &SessionId,
+        local_path: String,
+        remote_path: String,
+    ) -> Result<(), SshError> {
+        let sess_arc = {
+            let channels = self
+                .channels
+                .read()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            let info = channels
+                .get(session_id)
+                .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+            info.sess_arc.clone()
+        };
+
+        let sess_mutex = sess_arc.clone();
+        let sess = sess_mutex.lock().await;
+
+        // SFTP operations are blocking in ssh2-rs, so we use spawn_blocking
+        // but session is pinned to this thread now. Wait, ssh2 session doesn't like being moved
+        // if it's already used. However, Arc<Mutex<Session>> should be fine if we lock it.
+        // But sess is a MutexGuard, which isn't Send.
+        // We must perform the whole operation inside spawn_blocking and lock the mutex there.
+        drop(sess); // Release the lock so spawn_blocking can acquire it
+
+        tokio::task::spawn_blocking(move || {
+            let sess = sess_arc.blocking_lock();
+
+            // Set to blocking for SFTP operations
+            sess.set_blocking(true);
+
+            let result = (|| {
+                let sftp = sess.sftp().map_err(|e| {
+                    SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+                })?;
+
+                let mut remote_file = sftp.create(std::path::Path::new(&remote_path)).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to create remote file {}: {}",
+                        remote_path, e
+                    ))
+                })?;
+
+                let mut local_file = std::fs::File::open(&local_path).map_err(|e| {
+                    SshError::OperationFailed(format!("Failed to open local file {}: {}", local_path, e))
+                })?;
+
+                println!("[SFTP] Streaming upload: {} -> {}", local_path, remote_path);
+
+                std::io::copy(&mut local_file, &mut remote_file).map_err(|e| {
+                    SshError::OperationFailed(format!("Failed to upload file to {}: {}", remote_path, e))
+                })?;
+
+                Ok(())
+            })();
+
+            // Restore non-blocking mode for the I/O task
+            sess.set_blocking(false);
+
+            result
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Probes the remote user's home or current directory without affecting the shell
+    pub async fn probe_remote_path(&self, session_id: &SessionId) -> Result<String, SshError> {
+        let sess_arc = {
+            let channels = self
+                .channels
+                .read()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            let info = channels
+                .get(session_id)
+                .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+            info.sess_arc.clone()
+        };
+
+        let sess_mutex = sess_arc.clone();
+        tokio::task::spawn_blocking(move || {
+            let sess = sess_mutex.blocking_lock();
+            sess.set_blocking(true);
+
+            let result = (|| {
+                let mut channel = sess.channel_session().map_err(|e| {
+                    SshError::ChannelError(format!("Failed to create probe channel: {}", e))
+                })?;
+
+                channel
+                    .exec("pwd")
+                    .map_err(|e| SshError::OperationFailed(e.to_string()))?;
+
+                let mut output = String::new();
+                channel
+                    .read_to_string(&mut output)
+                    .map_err(|e| SshError::OperationFailed(e.to_string()))?;
+                let _ = channel.wait_close();
+
+                Ok(output.trim().to_string())
+            })();
+
+            sess.set_blocking(false);
+            result
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
 }
 
 // ============================================================================
@@ -897,4 +1008,30 @@ pub fn send_ssh_input(
     input: String,
 ) -> Result<(), SshError> {
     state.send_ssh_input(&SessionId::from(sessionId), input)
+}
+
+/// Uploads a file to a remote server using SFTP
+///
+/// # Tauri Command: `upload_file_sftp`
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn upload_file_sftp(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    localPath: String,
+    remotePath: String,
+) -> Result<(), SshError> {
+    state
+        .upload_file_sftp(&SessionId::from(sessionId), localPath, remotePath)
+        .await
+}
+
+/// Probes the current remote working directory
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn probe_remote_path(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+) -> Result<String, SshError> {
+    state.probe_remote_path(&SessionId::from(sessionId)).await
 }

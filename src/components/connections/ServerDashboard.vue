@@ -238,7 +238,12 @@ watch(
             <!-- Data Area -->
             <path :d="cpuAreaPath" fill="url(#cpuGradient)" />
             <!-- Data Line -->
-            <path :d="cpuPath" stroke="#3b82f6" stroke-width="1.5" fill="none" />
+            <path
+              :d="cpuPath"
+              stroke="#3b82f6"
+              stroke-width="1.5"
+              fill="none"
+            />
 
             <defs>
               <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
@@ -288,7 +293,12 @@ watch(
             />
 
             <path :d="memAreaPath" fill="url(#memGradient)" />
-            <path :d="memPath" stroke="#10b981" stroke-width="1.5" fill="none" />
+            <path
+              :d="memPath"
+              stroke="#10b981"
+              stroke-width="1.5"
+              fill="none"
+            />
 
             <defs>
               <linearGradient id="memGradient" x1="0" y1="0" x2="0" y2="1">

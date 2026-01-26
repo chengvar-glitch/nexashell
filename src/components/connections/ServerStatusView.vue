@@ -52,8 +52,7 @@ let unlisten: UnlistenFn | null = null;
 const formatSpeed = (bytesPerSec: number) => {
   if (!bytesPerSec || bytesPerSec < 0.1) return '0B/s';
   if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)}B/s`;
-  if (bytesPerSec < 1024 * 1024)
-    return `${(bytesPerSec / 1024).toFixed(1)}K/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)}K/s`;
   return `${(bytesPerSec / (1024 * 1024)).toFixed(1)}M/s`;
 };
 
@@ -132,11 +131,15 @@ watch(
       </div>
       <div class="metric" title="Download Speed">
         <ArrowDown :size="10" class="icon-metric" />
-        <span class="value width-45">{{ formatSpeed(currentStatus.netDown) }}</span>
+        <span class="value width-45">{{
+          formatSpeed(currentStatus.netDown)
+        }}</span>
       </div>
       <div class="metric" title="Upload Speed">
         <ArrowUp :size="10" class="icon-metric" />
-        <span class="value width-45">{{ formatSpeed(currentStatus.netUp) }}</span>
+        <span class="value width-45">{{
+          formatSpeed(currentStatus.netUp)
+        }}</span>
       </div>
     </div>
 
@@ -148,7 +151,10 @@ watch(
         :title="`CPU Usage: ${currentStatus.cpuUsage.toFixed(1)}%`"
       >
         <Cpu :size="10" class="icon-metric" />
-        <span class="value width-30" :style="{ color: getResourceColor(currentStatus.cpuUsage) }">
+        <span
+          class="value width-30"
+          :style="{ color: getResourceColor(currentStatus.cpuUsage) }"
+        >
           {{ Math.round(currentStatus.cpuUsage) }}%
         </span>
       </div>
@@ -157,13 +163,19 @@ watch(
         :title="`Memory Usage: ${formatSize(currentStatus.memUsed)} / ${formatSize(currentStatus.memTotal)}`"
       >
         <MemoryStick :size="10" class="icon-metric" />
-        <span class="value width-35" :style="{ color: getResourceColor(currentStatus.memUsage) }">
+        <span
+          class="value width-35"
+          :style="{ color: getResourceColor(currentStatus.memUsage) }"
+        >
           {{ Math.round(currentStatus.memUsage) }}%
         </span>
       </div>
       <div class="metric" :title="`Disk Usage: ${currentStatus.diskUsage}%`">
         <HardDrive :size="10" class="icon-metric" />
-        <span class="value width-30" :style="{ color: getResourceColor(currentStatus.diskUsage) }">
+        <span
+          class="value width-30"
+          :style="{ color: getResourceColor(currentStatus.diskUsage) }"
+        >
           {{ Math.round(currentStatus.diskUsage) }}%
         </span>
       </div>
@@ -248,9 +260,15 @@ watch(
 }
 
 /* Fixed widths to prevent layout jitter */
-.width-30 { width: 30px; }
-.width-35 { width: 35px; }
-.width-45 { width: 50px; }
+.width-30 {
+  width: 30px;
+}
+.width-35 {
+  width: 35px;
+}
+.width-45 {
+  width: 50px;
+}
 
 .resources {
   gap: 8px;

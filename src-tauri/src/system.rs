@@ -51,3 +51,15 @@ pub async fn close_window(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+#[command]
+pub async fn read_file_preview(path: String) -> Result<String, String> {
+    use std::fs::File;
+    use std::io::Read;
+
+    let mut file = File::open(&path).map_err(|e| e.to_string())?;
+    let mut buffer = [0u8; 1024]; // 读取前 1KB 演示
+    let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
+
+    Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
+}

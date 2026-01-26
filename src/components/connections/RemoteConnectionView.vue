@@ -9,6 +9,7 @@ import { useSessionStore } from '@/features/session';
 import { sessionApi } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
+import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import ServerStatusView from './ServerStatusView.vue';
 import ServerDashboard from './ServerDashboard.vue';
@@ -91,9 +92,128 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const terminalRef = ref<HTMLElement>();
+const isDragging = ref(false);
+const currentRemotePath = ref('.');
+const remoteHomeDir = ref('');
+const lastPathDetectionSource = ref<string>('none'); // Track how we detected the path
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
+
+// Drag and drop listeners
+let unlistenDrag: UnlistenFn | null = null;
+let unlistenDragEnter: UnlistenFn | null = null;
+let unlistenDragLeave: UnlistenFn | null = null;
+
+/**
+ * Handle file drop
+ */
+const handleFileDrop = async (paths: string[]) => {
+  logger.info('Files dropped', {
+    paths,
+    targetPath: currentRemotePath.value,
+    home: remoteHomeDir.value,
+  });
+
+  for (const path of paths) {
+    try {
+      const fileName = path.split('/').pop() || path;
+      let targetDir = currentRemotePath.value || '';
+      let pathSource = 'unknown'; // Track path source for logging
+
+      // 1. Handle home expansion (e.g. ~, ~/)
+      if (remoteHomeDir.value) {
+        if (targetDir === '~') {
+          targetDir = remoteHomeDir.value;
+          pathSource = 'home-expansion';
+        } else if (targetDir.startsWith('~/')) {
+          targetDir = targetDir.replace('~', remoteHomeDir.value);
+          pathSource = 'home-expansion';
+        }
+      }
+
+      // 2. Robust path normalization
+      let remoteFilePath = '';
+      
+      if (!targetDir || targetDir === '.' || targetDir === '') {
+        // Fallback: if no path detected, try to probe the remote path
+        logger.warn('No target directory detected, attempting to probe remote path');
+        try {
+          const probedPath = await invoke<string>('probe_remote_path', {
+            sessionId: props.sessionId,
+          });
+          if (probedPath && probedPath.startsWith('/')) {
+            targetDir = probedPath;
+            pathSource = 'probed';
+          } else {
+            // Ultimate fallback: use home directory or current directory
+            targetDir = remoteHomeDir.value || '.';
+            pathSource = 'fallback-home';
+          }
+        } catch (probeErr) {
+          logger.debug('Probe failed, using home or dot', probeErr);
+          targetDir = remoteHomeDir.value || '.';
+          pathSource = 'fallback-home';
+        }
+      } else {
+        // Determine if path came from OSC 7, buffer scan, or prompt hint
+        if (targetDir.startsWith('/')) {
+          pathSource = 'absolute-path';
+        } else {
+          pathSource = 'relative-path';
+        }
+      }
+
+      // 3. Build final SFTP path
+      if (targetDir === '.') {
+        // Use just the filename; SFTP will interpret it relative to the home directory
+        remoteFilePath = fileName;
+      } else {
+        // Ensure proper path concatenation
+        remoteFilePath = targetDir.endsWith('/')
+          ? `${targetDir}${fileName}`
+          : `${targetDir}/${fileName}`;
+      }
+
+      terminal?.write(
+        `\r\n\x1b[36m[PATH] Detected as: ${lastPathDetectionSource.value} → ${currentRemotePath.value}\x1b[0m\r\n`
+      );
+      logger.info('Path resolution', {
+        originalPath: currentRemotePath.value,
+        resolvedPath: remoteFilePath,
+        source: pathSource,
+        detectionMethod: lastPathDetectionSource.value,
+        fileName,
+      });
+
+      terminal?.write(
+        `\r\n\x1b[33m[SFTP] Uploading ${fileName} to ${remoteFilePath} (${pathSource})...\x1b[0m\r\n`
+      );
+
+      // Call Rust backend to upload file via SFTP
+      await invoke('upload_file_sftp', {
+        sessionId: props.sessionId,
+        localPath: path,
+        remotePath: remoteFilePath,
+      });
+
+      terminal?.write(
+        `\x1b[32m[SFTP] ✓ Successfully uploaded ${fileName}\x1b[0m\r\n`
+      );
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'string'
+            ? err
+            : JSON.stringify(err);
+      logger.error('Failed to upload file', err);
+      terminal?.write(
+        `\r\n\x1b[31m[SFTP Error] Failed to upload: ${errorMessage}\x1b[0m\r\n`
+      );
+    }
+  }
+};
 
 // Search state
 const showSearch = ref(false);
@@ -203,6 +323,32 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
           terminal.write(chunk.output);
           lastSeq = Math.max(lastSeq, chunk.seq);
         }
+
+        // Scan initial output for home directory (usually shown in first prompt)
+        if (!remoteHomeDir.value) {
+          const initialBuffer = bufferedOutput
+            .map(c => c.output)
+            .join('')
+            .split('\n');
+          
+          for (const line of initialBuffer) {
+            // eslint-disable-next-line no-control-regex
+            const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+            
+            // Look for paths in initial prompts
+            const centosMatch = cleanLine.match(/\[.*@.*\s+(.*)\][#$]/);
+            const ubuntuMatch = cleanLine.match(/.*@.*:(.*)[#$]/);
+            
+            const initialPath = centosMatch?.[1] || ubuntuMatch?.[1];
+            if (initialPath && initialPath.startsWith('/')) {
+              remoteHomeDir.value = initialPath;
+              logger.info('Cached initial remote home directory', {
+                home: remoteHomeDir.value,
+              });
+              break;
+            }
+          }
+        }
       } else {
         logger.debug('No buffered SSH output available');
       }
@@ -245,6 +391,10 @@ const cleanupResources = async (): Promise<void> => {
       logger.error('Event unlisten failed', e);
     }
   }
+
+  if (unlistenDrag) await unlistenDrag();
+  if (unlistenDragEnter) await unlistenDragEnter();
+  if (unlistenDragLeave) await unlistenDragLeave();
 };
 
 /**
@@ -260,6 +410,342 @@ defineExpose({
 onMounted(async () => {
   logger.info('Terminal component mounted', { sessionId: props.sessionId });
   await setupStatusListener();
+
+  // Listen for Tauri's native drag-drop event to get absolute paths
+  unlistenDrag = await listen<{ paths: string[] }>(
+    'tauri://drag-drop',
+    event => {
+      // Only handle if drag-drop occurs within the terminal area or window
+      handleFileDrop(event.payload.paths);
+      isDragging.value = false;
+    }
+  );
+
+  unlistenDragEnter = await listen('tauri://drag-enter', async () => {
+    isDragging.value = true;
+    
+    // Reset path for fresh detection on each drag
+    let detectedPath = '';
+    let detectionSource = 'none';
+    let hasRecentRelativeCd = false;  // Track if user did cd .., cd -, etc
+    let promptGuess = '';
+    let cdGuess = '';
+    let pwdOutputGuess = '';
+
+    // Try to guess path from terminal buffer (most accurate for interactive shell)
+    if (terminal) {
+      const buffer = terminal.buffer.active;
+      if (!buffer) {
+        logger.warn('Terminal buffer not available');
+      } else {
+        logger.debug('Terminal buffer available', {
+          bufferLength: buffer.length,
+          cursorX: buffer.cursorX,
+          cursorY: buffer.cursorY,
+          baseY: buffer.baseY,
+        });
+
+        // 1. Scan back from current cursor position for prompts, cd commands, and pwd output
+        const maxScanLines = 500; // Increased: Scan deeper to catch recent history (up to 500 lines)
+        const startLine = buffer.baseY + buffer.cursorY;
+        const endLine = Math.max(0, startLine - maxScanLines);
+
+        // Build a map of lines to avoid scanning too many empty lines
+        const lines: Array<{ index: number; text: string }> = [];
+        for (let i = startLine; i >= endLine; i--) {
+          const line = buffer.getLine(i)?.translateToString(true).trim();
+          if (line) {
+            lines.push({ index: i, text: line });
+          }
+        }
+        
+        logger.debug('Buffer scan started', {
+          cursorY: buffer.cursorY,
+          baseY: buffer.baseY,
+          startLine,
+          endLine,
+          totalLines: buffer.length,
+          nonEmptyLines: lines.length,
+        });
+
+        // Process lines in reverse chronological order (most recent first)
+        for (const { index, text } of lines) {
+          const line = text;
+          // eslint-disable-next-line no-control-regex
+          const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+
+        // Check for relative cd commands (these invalidate old absolute paths)
+        // Also track cd history for intelligent directory inference
+        if (line.includes('cd ')) {
+          const relativeCdMatch = line.match(/cd\s+(\.\.|[-]|\.)/);
+          const absoluteCdMatch = line.match(/cd\s+(['"]?)([^\s'"]+)\1/);
+          
+          if (relativeCdMatch) {
+            if (!hasRecentRelativeCd) {
+              hasRecentRelativeCd = true;
+              logger.debug('Detected relative cd command', { command: relativeCdMatch[0], lineIndex: index });
+            }
+          } else if (absoluteCdMatch && absoluteCdMatch[2]) {
+            let path = absoluteCdMatch[2];
+            if (path.endsWith('/') && path !== '/') {
+              path = path.slice(0, -1);
+            }
+            if (path.startsWith('/')) {
+              logger.debug('Recorded cd history', { path, index });
+            }
+          }
+        }
+
+        // Pattern A: Match pwd output - absolute path on a line by itself
+        if (!pwdOutputGuess && line.startsWith('/')) {
+          // pwd output should:
+          // 1. Start with /
+          // 2. Contain at least one more /
+          // 3. NOT contain spaces (commands can have output with spaces)
+          // 4. NOT contain [ or (
+          // 5. NOT contain @
+          if (
+            cleanLine.startsWith('/') &&
+            cleanLine.includes('/') &&
+            !cleanLine.includes(' ') &&
+            !cleanLine.includes('[') &&
+            !cleanLine.includes('(') &&
+            !cleanLine.includes('@')
+          ) {
+            pwdOutputGuess = cleanLine;
+            logger.debug('Found pwd output', { line: cleanLine, lineIndex: index });
+          }
+        }
+
+        // Pattern B: Match Prompt to get terminal "hint"
+        // Most recent prompt is most important
+        if (!promptGuess) {
+          // CentOS style: [root@host /current/path]#
+          const centosMatch = line.match(/\[.*@.*\s+(.*)\][#$]/);
+          // Ubuntu style: user@host:/path$
+          const ubuntuMatch = line.match(/.*@.*:(.*)[#$]/);
+          // Zsh style: user@host path %
+          const zshMatch = line.match(/.*@.*\s+([^ ]+)\s+%/);
+
+          const hint = centosMatch?.[1] || ubuntuMatch?.[1] || zshMatch?.[1];
+          if (line.includes('@') && (line.includes('#') || line.includes('$'))) {
+            logger.debug('Prompt candidates found', {
+              line: cleanLine,
+              centosMatch: centosMatch?.[1],
+              ubuntuMatch: ubuntuMatch?.[1],
+              zshMatch: zshMatch?.[1],
+              hint,
+            });
+          }
+          // Accept paths: /, /path, or relative names
+          // Reject: ~ or . (as they are generic)
+          if (hint && hint !== '~' && hint !== '.') {
+            promptGuess = hint.trim();
+            logger.debug('Found prompt hint', { hint: promptGuess, lineIndex: index });
+          }
+        }
+
+        // Pattern C: Match recent cd commands (including paths with trailing slashes)
+        if (!cdGuess && line.includes('cd ')) {
+          // Match: cd /path, cd "/path", cd '/path', etc (with optional trailing /)
+          const cdMatch = line.match(/cd\s+(['"]?)([^\s'"]+)\1/);
+          logger.debug('cd command scan', {
+            line: cleanLine,
+            hascdMatch: !!cdMatch,
+            cdMatch: cdMatch ? [cdMatch[1], cdMatch[2]] : null,
+          });
+          if (cdMatch && cdMatch[2]) {
+            let path = cdMatch[2].trim();
+            // Remove trailing slash for consistency
+            if (path.endsWith('/') && path !== '/') {
+              path = path.slice(0, -1);
+            }
+            if (path.startsWith('/')) {
+              cdGuess = path;
+              logger.debug('Found cd command', { path: cdGuess, lineIndex: index });
+            }
+          }
+        }
+
+        // Early exit if we found everything
+        if (pwdOutputGuess && promptGuess && cdGuess) break;
+      }
+
+      // 2. Intelligent path resolution with strict priority
+      // KEY INSIGHT: The most recent prompt is ALWAYS more reliable than historical pwd output
+      // because it reflects the current state of the shell
+      logger.debug('Path candidates', { pwdOutputGuess, promptGuess, cdGuess });
+
+      // Intelligent priority logic:
+      // 1. Absolute paths are always preferred over relative
+      // 2. Most recent data (prompt) is preferred over historical (pwd output)
+      // 3. Never use relative paths from Prompt alone - they're unreliable after cd .. or cd -
+      
+      if (promptGuess && promptGuess.startsWith('/')) {
+        // Highest priority: Prompt shows absolute path directly
+        detectedPath = promptGuess;
+        detectionSource = 'prompt-absolute';
+      } else if (pwdOutputGuess && pwdOutputGuess.startsWith('/')) {
+        // Second: pwd output (most reliable source of truth)
+        detectedPath = pwdOutputGuess;
+        detectionSource = 'pwd-output';
+      } else if (cdGuess && cdGuess.startsWith('/')) {
+        // Third: cd command with absolute path
+        // But verify it matches the current prompt
+        const cdLastComponent = cdGuess.split('/').pop();
+        if (promptGuess && cdLastComponent === promptGuess) {
+          // ✅ MATCH: Prompt confirms this is the right path (e.g., cd /a/b + prompt "b")
+          detectedPath = cdGuess;
+          detectionSource = 'cd-command-verified';
+          logger.debug('✅ cd-command-verified: cd path matches prompt', {
+            cdPath: cdGuess,
+            cdLastComponent,
+            currentPrompt: promptGuess,
+          });
+        } else if (promptGuess && !promptGuess.startsWith('/')) {
+          // ⚠️ CHECK: Prompt is relative but might still match cd
+          // Example: cd /usr/local/sankuai executed, now prompt shows "sankuai"
+          // This is VALID - prompt shows dir name that matches cd's last component
+          if (cdLastComponent === promptGuess) {
+            // They DO match! Use the cd path
+            detectedPath = cdGuess;
+            detectionSource = 'cd-command-verified-from-relative-prompt';
+            logger.debug('✅ cd path matches relative prompt', {
+              cdPath: cdGuess,
+              cdLastComponent,
+              currentPrompt: promptGuess,
+            });
+          } else {
+            // ❌ MISMATCH: cd last component != prompt
+            // This means user likely did cd .. or some relative operation
+            // Example: cd /usr/local/sankuai was executed, but now prompt shows "local"
+            // This means cd .. happened - we MUST handle this case specially
+            hasRecentRelativeCd = true;
+            logger.debug('❌ Mismatch detected: cd != prompt', {
+              cdPath: cdGuess,
+              cdLastComponent,
+              currentPrompt: promptGuess,
+              reason: 'Likely relative cd operation (cd .., cd -, etc)',
+            });
+            // Don't try to reconstruct path here - let the later inference logic handle it
+            // It has better context to determine if this is cd .., cd -, etc.
+          }
+        } else {
+          // Use cd path as-is if there's no conflicting prompt
+          detectedPath = cdGuess;
+          detectionSource = 'cd-command';
+        }
+      }
+      // NOTE: We do NOT use promptGuess as a fallback if it's not absolute
+      // Relative prompts (e.g., "local" or "sankuai") after cd .. are unreliable
+      // Better to use probed path or home directory as fallback
+      }
+    }
+
+    logger.info('Buffer scan complete', {
+      detectedPath,
+      detectionSource,
+      hasRecentRelativeCd,
+      allCandidates: {
+        promptGuess,
+        pwdOutputGuess,
+        cdGuess,
+      },
+    });
+
+    // CRITICAL IMPROVEMENT: If we have a relative cd but detectedPath is empty,
+    // try to use cd command history to infer the current directory
+    // This handles: cd /usr/local/sankuai -> cd .. -> prompt shows "local"
+    if (hasRecentRelativeCd && !detectedPath && cdGuess && promptGuess) {
+      logger.info('Using cd history to infer path after relative cd', {
+        lastAbsoluteCd: cdGuess,
+        currentPrompt: promptGuess,
+      });
+      
+      // If the last absolute cd's parent directory name matches prompt,
+      // then we're in that parent directory
+      const parentPath = cdGuess.substring(0, cdGuess.lastIndexOf('/'));
+      const parentDirName = parentPath.split('/').pop() || parentPath;
+      
+      if (parentDirName === promptGuess) {
+        // Match! We're in the parent directory of the last cd
+        detectedPath = parentPath || '/';
+        detectionSource = 'inferred-parent-from-cd-and-prompt';
+        hasRecentRelativeCd = false;  // Mark as resolved
+        logger.debug('✅ Inferred parent directory', {
+          lastCd: cdGuess,
+          parentPath,
+          parentDirName,
+          currentPrompt: promptGuess,
+          inferred: detectedPath,
+        });
+      } else if (cdGuess === `/${promptGuess}` || cdGuess.endsWith(`/${promptGuess}`)) {
+        // The prompt matches the last component of the cd command (cd /a/b -> cd .. -> prompt "a")
+        // This shouldn't happen if we have cd .., but handle it anyway
+        const parts = cdGuess.split('/').filter(p => p);
+        if (parts.length > 1) {
+          const reconstructed = '/' + parts.slice(0, -1).join('/');
+          detectedPath = reconstructed;
+          detectionSource = 'inferred-sibling-from-cd-and-prompt';
+          hasRecentRelativeCd = false;
+          logger.debug('✅ Inferred sibling directory', { inferred: detectedPath });
+        }
+      }
+    }
+    
+    // If still no path and we have just a prompt name, use it as a fallback
+    if (hasRecentRelativeCd && !detectedPath && promptGuess && !promptGuess.startsWith('/')) {
+      logger.warn('Using prompt as fallback directory name', { promptGuess });
+      detectedPath = promptGuess;
+      detectionSource = 'fallback-prompt-name';
+      hasRecentRelativeCd = false;
+    }
+
+    // If relative cd was detected, probe for actual pwd
+    // Relative cd commands (cd .., cd -, cd .) change the directory in ways we can't predict
+    // IMPORTANT: Only probe for relative cd, NOT for missing detectedPath
+    // Missing detectedPath usually means Buffer scan failed, not that we're in wrong directory
+    if (hasRecentRelativeCd && props.sessionId && props.tabType === 'ssh') {
+      logger.info('Probing remote path (relative cd detected)', {
+        detectionSource,
+        detectedPath,
+      });
+      try {
+        const probedPath = await invoke<string>('probe_remote_path', {
+          sessionId: props.sessionId,
+        });
+        if (probedPath && probedPath.startsWith('/')) {
+          // Store home directory for expansion
+          if (!remoteHomeDir.value) {
+            remoteHomeDir.value = probedPath;
+          }
+          detectedPath = probedPath;
+          detectionSource = 'probed-after-relative-cd';
+        }
+      } catch (e) {
+        logger.debug('Probe failed', e);
+      }
+    }
+
+
+    // Final fallback
+    if (!detectedPath) {
+      detectedPath = remoteHomeDir.value || '.';
+      detectionSource = 'fallback-home';
+    }
+
+    // Update the UI with the detected path
+    currentRemotePath.value = detectedPath;
+    lastPathDetectionSource.value = detectionSource;
+    logger.info('Path detection complete', {
+      finalPath: currentRemotePath.value,
+      source: detectionSource,
+    });
+  });
+
+  unlistenDragLeave = await listen('tauri://drag-leave', () => {
+    isDragging.value = false;
+  });
 
   if (!terminalRef.value) return;
 
@@ -320,6 +806,70 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value);
+
+  // Register OSC 7 handler for current working directory detection
+  // OSC 7 ; file://hostname/path ST
+  terminal.parser.registerOscHandler(7, data => {
+    try {
+      if (data.includes('://')) {
+        const urlStr = data.includes('://') ? data : `file://${data}`;
+        const url = new window.URL(urlStr);
+        currentRemotePath.value = decodeURIComponent(url.pathname);
+      } else {
+        currentRemotePath.value = data;
+      }
+      logger.debug('Detected remote CWD (OSC 7)', {
+        path: currentRemotePath.value,
+      });
+    } catch {
+      currentRemotePath.value = data;
+    }
+    return true;
+  });
+
+  // Register OSC 9;9 handler (another CWD sequence)
+  terminal.parser.registerOscHandler(9, data => {
+    if (data.startsWith('9;')) {
+      const path = data.substring(2);
+      if (path) {
+        currentRemotePath.value = path;
+        logger.debug('Detected remote CWD (OSC 9;9)', { path });
+      }
+      return true;
+    }
+    return false;
+  });
+
+  // Also monitor terminal title as some shells put CWD there
+  terminal.onTitleChange(title => {
+    if (!title) return;
+
+    // Pattern 1: user@host: /path
+    if (title.includes(': ')) {
+      const parts = title.split(': ');
+      const potentialPath = parts[parts.length - 1].trim();
+      if (potentialPath.startsWith('/') || potentialPath.startsWith('~/')) {
+        if (
+          currentRemotePath.value === '.' ||
+          currentRemotePath.value === '~'
+        ) {
+          currentRemotePath.value = potentialPath;
+        }
+      }
+    }
+    // Pattern 2: [user@host path]
+    else if (title.includes('[') && title.includes(']')) {
+      const match = title.match(/\[.*@.*\s+(.*)\]/);
+      if (match && match[1]) {
+        if (
+          currentRemotePath.value === '.' ||
+          currentRemotePath.value === '~'
+        ) {
+          currentRemotePath.value = match[1].trim();
+        }
+      }
+    }
+  });
 
   // Handle right-click for direct paste or copy-on-selection
   terminalRef.value?.addEventListener('contextmenu', async (e: MouseEvent) => {
@@ -602,6 +1152,37 @@ onMounted(async () => {
       @close="showDashboard = false"
     />
     <div ref="terminalRef" class="terminal-container" />
+
+    <!-- Drag and Drop Overlay -->
+    <div v-if="isDragging" class="drag-drop-overlay">
+      <div class="overlay-content">
+        <span class="icon">📂</span>
+        <p>Drop files here to upload</p>
+        <div class="target-path-display">
+          <div class="path-label">Target Directory:</div>
+          <input
+            v-model="currentRemotePath"
+            class="bg-black/40 border border-white/20 rounded px-3 py-1 text-yellow-400 font-mono text-sm focus:border-yellow-400 outline-none w-72 text-center pointer-events-auto"
+            placeholder="(auto-detected path)"
+            @click.stop
+            @mousedown.stop
+          />
+          <div v-if="!currentRemotePath" class="path-status warning">
+            ⚠️ No path detected - will use home directory
+          </div>
+          <div v-else-if="currentRemotePath.startsWith('/')" class="path-status success">
+            ✓ Absolute path
+          </div>
+          <div v-else class="path-status info">
+            ℹ️ Relative path - will upload to home + path
+          </div>
+        </div>
+        <div class="overlay-tip">
+          💡 Edit path above if needed before dropping files
+        </div>
+      </div>
+    </div>
+
     <div v-if="showSearch" class="terminal-search-box">
       <input
         ref="searchInputRef"
@@ -662,6 +1243,82 @@ onMounted(async () => {
   width: 200px;
 }
 
+.drag-drop-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(30, 30, 30, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  pointer-events: none; /* 让事件穿透到 Tauri 的系统监听 */
+  border: 2px dashed #facc15;
+  box-sizing: border-box;
+}
+
+.overlay-content {
+  text-align: center;
+  color: #facc15;
+}
+
+.overlay-content .icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 10px;
+}
+
+.overlay-content p {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.target-path-display {
+  background: rgba(0, 0, 0, 0.4);
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(250, 204, 21, 0.2);
+}
+
+.path-label {
+  font-size: 12px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.path-status {
+  font-size: 12px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  font-family: monospace;
+}
+
+.path-status.success {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.1);
+}
+
+.path-status.warning {
+  color: #facc15;
+  background: rgba(250, 204, 21, 0.1);
+}
+
+.path-status.info {
+  color: #60a5fa;
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.overlay-tip {
+  font-size: 12px;
+  color: #888;
+}
 .search-actions {
   display: flex;
   gap: 4px;
