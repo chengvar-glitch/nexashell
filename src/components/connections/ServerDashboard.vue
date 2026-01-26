@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import * as echarts from 'echarts';
 import {
   X,
   Cpu,
@@ -34,6 +33,8 @@ interface ServerStatus {
 
 const localHistory = ref<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
+const CHART_WIDTH = 212;
+const CHART_HEIGHT = 80;
 
 const historyData = computed(() => props.history || localHistory.value);
 
@@ -63,135 +64,93 @@ const getStatusColor = (percentage: number) => {
   return '#10b981'; // Green
 };
 
-const cpuChartRef = ref<HTMLElement | null>(null);
-const memChartRef = ref<HTMLElement | null>(null);
-const netChartRef = ref<HTMLElement | null>(null);
-
-let cpuChart: echarts.ECharts | null = null;
-let memChart: echarts.ECharts | null = null;
-let netChart: echarts.ECharts | null = null;
-
-let unlisten: UnlistenFn | null = null;
-
-const initCharts = () => {
-  if (cpuChartRef.value) {
-    cpuChart = echarts.init(cpuChartRef.value, 'dark');
-    cpuChart.setOption(getChartOption('#3b82f6', '%'));
-  }
-  if (memChartRef.value) {
-    memChart = echarts.init(memChartRef.value, 'dark');
-    memChart.setOption(getChartOption('#10b981', '%'));
-  }
-  if (netChartRef.value) {
-    netChart = echarts.init(netChartRef.value, 'dark');
-    netChart.setOption({
-      ...getChartOption('#3b82f6', ' KB/s'),
-      series: [
-        {
-          name: 'Down',
-          type: 'line',
-          smooth: true,
-          showSymbol: false,
-          areaStyle: { opacity: 0.1 },
-          lineStyle: { width: 1.5, color: '#3b82f6' },
-          data: [],
-        },
-        {
-          name: 'Up',
-          type: 'line',
-          smooth: true,
-          showSymbol: false,
-          areaStyle: { opacity: 0.1 },
-          lineStyle: { width: 1.5, color: '#f59e0b' },
-          data: [],
-        },
-      ],
-    });
-  }
-};
-
-const getChartOption = (color: string, unit: string) => ({
-  backgroundColor: 'transparent',
-  tooltip: {
-    trigger: 'axis',
-    backgroundColor: 'rgba(20, 20, 20, 0.9)',
-    borderSize: 0,
-    borderWidth: 0,
-    textStyle: { color: '#fff', fontSize: 10 },
-    padding: [4, 8],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    formatter: (params: any) => {
-      const p = params[0];
-      return `${p.value.toFixed(1)}${unit}`;
-    },
-  },
-  grid: { left: 4, right: 4, bottom: 4, top: 10, containLabel: false },
-  xAxis: {
-    type: 'category',
-    boundaryGap: false,
-    data: Array(MAX_HISTORY).fill(''),
-    axisLine: { show: false },
-    axisTick: { show: false },
-    axisLabel: { show: false },
-  },
-  yAxis: {
-    type: 'value',
-    min: 0,
-    max: unit === '%' ? 100 : undefined,
-    splitLine: {
-      show: true,
-      lineStyle: { color: 'rgba(255,255,255,0.05)', type: 'dashed' },
-    },
-    axisLine: { show: false },
-    axisTick: { show: false },
-    axisLabel: { show: false },
-  },
-  series: [
-    {
-      type: 'line',
-      smooth: true,
-      showSymbol: false,
-      areaStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-          { offset: 0, color: color + '44' },
-          { offset: 1, color: color + '00' },
-        ]),
-        opacity: 0.3,
-      },
-      lineStyle: { width: 2, color: color },
-      data: [],
-    },
-  ],
-});
-
-const updateCharts = () => {
-  if (!cpuChart || !memChart || !netChart) return;
-
-  const padData = (data: number[]) => {
-    const padded = new Array(MAX_HISTORY).fill(null);
-    const startIdx = Math.max(0, MAX_HISTORY - data.length);
-    for (let i = 0; i < data.length; i++) {
-      if (startIdx + i < MAX_HISTORY) {
-        padded[startIdx + i] = data[i];
-      }
-    }
-    return padded;
-  };
-
-  const cpuData = padData(historyData.value.map(h => h.cpuUsage));
-  const memData = padData(historyData.value.map(h => h.memUsage));
-  const netDownData = padData(historyData.value.map(h => h.netDown / 1024)); // KB/s
-  const netUpData = padData(historyData.value.map(h => h.netUp / 1024)); // KB/s
-
-  cpuChart.setOption({ series: [{ data: cpuData }] });
-  memChart.setOption({ series: [{ data: memData }] });
-  netChart.setOption({
-    series: [
-      { name: 'Down', data: netDownData, itemStyle: { color: '#3b82f6' } },
-      { name: 'Up', data: netUpData, itemStyle: { color: '#f59e0b' } },
-    ],
+// SVG Path Generation
+const getPoints = (data: number[], max: number) => {
+  const step = CHART_WIDTH / (MAX_HISTORY - 1);
+  return data.map((val, i) => {
+    const x = CHART_WIDTH - (data.length - 1 - i) * step;
+    const v = Math.min(max, Math.max(0, val));
+    const y = CHART_HEIGHT - (v / (max || 1)) * CHART_HEIGHT;
+    return { x, y };
   });
 };
+
+const generatePath = (data: number[], max: number = 100) => {
+  const points = getPoints(data, max);
+  if (points.length === 0) return '';
+  return `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
+};
+
+const generateAreaPath = (data: number[], max: number = 100) => {
+  const points = getPoints(data, max);
+  if (points.length === 0) return '';
+  const path = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
+  const first = points[0];
+  const last = points[points.length - 1];
+  return `${path} L ${last.x},CHART_HEIGHT L ${first.x},CHART_HEIGHT Z`.replace(
+    /CHART_HEIGHT/g,
+    CHART_HEIGHT.toString()
+  );
+};
+
+const cpuPath = computed(() =>
+  generatePath(
+    historyData.value.map(h => h.cpuUsage),
+    100
+  )
+);
+const cpuAreaPath = computed(() =>
+  generateAreaPath(
+    historyData.value.map(h => h.cpuUsage),
+    100
+  )
+);
+
+const memPath = computed(() =>
+  generatePath(
+    historyData.value.map(h => h.memUsage),
+    100
+  )
+);
+const memAreaPath = computed(() =>
+  generateAreaPath(
+    historyData.value.map(h => h.memUsage),
+    100
+  )
+);
+
+const maxNet = computed(() => {
+  const values = historyData.value.flatMap(h => [h.netDown, h.netUp]);
+  return Math.max(1024 * 100, ...values); // Max scale min 100KB/s
+});
+
+const netDownPath = computed(() =>
+  generatePath(
+    historyData.value.map(h => h.netDown),
+    maxNet.value
+  )
+);
+const netDownAreaPath = computed(() =>
+  generateAreaPath(
+    historyData.value.map(h => h.netDown),
+    maxNet.value
+  )
+);
+
+const netUpPath = computed(() =>
+  generatePath(
+    historyData.value.map(h => h.netUp),
+    maxNet.value
+  )
+);
+const netUpAreaPath = computed(() =>
+  generateAreaPath(
+    historyData.value.map(h => h.netUp),
+    maxNet.value
+  )
+);
+
+let unlisten: UnlistenFn | null = null;
 
 const setupListener = async (sid: string) => {
   if (unlisten) {
@@ -199,46 +158,24 @@ const setupListener = async (sid: string) => {
     unlisten = null;
   }
 
-  if (props.history) return; // Use prop instead
+  if (props.history) return;
 
   unlisten = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
     localHistory.value.push(event.payload);
     if (localHistory.value.length > MAX_HISTORY) {
       localHistory.value.shift();
     }
-    updateCharts();
   });
 };
 
 onMounted(async () => {
   await nextTick();
-  initCharts();
   setupListener(props.sessionId);
-  updateCharts();
-
-  const handleResize = () => {
-    cpuChart?.resize();
-    memChart?.resize();
-    netChart?.resize();
-  };
-  window.addEventListener('resize', handleResize);
-  onUnmounted(() => window.removeEventListener('resize', handleResize));
 });
 
 onUnmounted(() => {
   if (unlisten) unlisten();
-  cpuChart?.dispose();
-  memChart?.dispose();
-  netChart?.dispose();
 });
-
-watch(
-  () => historyData.value,
-  () => {
-    updateCharts();
-  },
-  { deep: true }
-);
 
 watch(
   () => props.sessionId,
@@ -279,7 +216,38 @@ watch(
             {{ latestStatus.cpuUsage.toFixed(1) }}%
           </span>
         </div>
-        <div ref="cpuChartRef" class="chart"></div>
+        <div class="chart-container-svg">
+          <svg
+            class="svg-chart"
+            :viewBox="`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`"
+            preserveAspectRatio="none"
+          >
+            <!-- Grid Lines -->
+            <line x1="0" y1="0" :x2="CHART_WIDTH" y2="0" class="grid-line" />
+            <line x1="0" y1="20" :x2="CHART_WIDTH" y2="20" class="grid-line" />
+            <line x1="0" y1="40" :x2="CHART_WIDTH" y2="40" class="grid-line" />
+            <line x1="0" y1="60" :x2="CHART_WIDTH" y2="60" class="grid-line" />
+            <line
+              x1="0"
+              :y1="CHART_HEIGHT"
+              :x2="CHART_WIDTH"
+              :y2="CHART_HEIGHT"
+              class="grid-line"
+            />
+
+            <!-- Data Area -->
+            <path :d="cpuAreaPath" fill="url(#cpuGradient)" />
+            <!-- Data Line -->
+            <path :d="cpuPath" stroke="#3b82f6" stroke-width="1.5" fill="none" />
+
+            <defs>
+              <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
       </div>
 
       <!-- Memory Section -->
@@ -301,7 +269,35 @@ watch(
           {{ formatSize(latestStatus.memUsed) }} /
           {{ formatSize(latestStatus.memTotal) }}
         </div>
-        <div ref="memChartRef" class="chart"></div>
+        <div class="chart-container-svg">
+          <svg
+            class="svg-chart"
+            :viewBox="`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`"
+            preserveAspectRatio="none"
+          >
+            <line x1="0" y1="0" :x2="CHART_WIDTH" y2="0" class="grid-line" />
+            <line x1="0" y1="20" :x2="CHART_WIDTH" y2="20" class="grid-line" />
+            <line x1="0" y1="40" :x2="CHART_WIDTH" y2="40" class="grid-line" />
+            <line x1="0" y1="60" :x2="CHART_WIDTH" y2="60" class="grid-line" />
+            <line
+              x1="0"
+              :y1="CHART_HEIGHT"
+              :x2="CHART_WIDTH"
+              :y2="CHART_HEIGHT"
+              class="grid-line"
+            />
+
+            <path :d="memAreaPath" fill="url(#memGradient)" />
+            <path :d="memPath" stroke="#10b981" stroke-width="1.5" fill="none" />
+
+            <defs>
+              <linearGradient id="memGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#10b981" stop-opacity="0.3" />
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
       </div>
 
       <!-- Network Section -->
@@ -322,7 +318,54 @@ watch(
             <span>{{ formatSpeed(latestStatus.netUp) }}</span>
           </div>
         </div>
-        <div ref="netChartRef" class="chart"></div>
+        <div class="chart-container-svg">
+          <svg
+            class="svg-chart"
+            :viewBox="`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`"
+            preserveAspectRatio="none"
+          >
+            <line x1="0" y1="0" :x2="CHART_WIDTH" y2="0" class="grid-line" />
+            <line x1="0" y1="20" :x2="CHART_WIDTH" y2="20" class="grid-line" />
+            <line x1="0" y1="40" :x2="CHART_WIDTH" y2="40" class="grid-line" />
+            <line x1="0" y1="60" :x2="CHART_WIDTH" y2="60" class="grid-line" />
+            <line
+              x1="0"
+              :y1="CHART_HEIGHT"
+              :x2="CHART_WIDTH"
+              :y2="CHART_HEIGHT"
+              class="grid-line"
+            />
+
+            <!-- Down Traffic -->
+            <path :d="netDownAreaPath" fill="url(#netDownGradient)" />
+            <path
+              :d="netDownPath"
+              stroke="#3b82f6"
+              stroke-width="1.5"
+              fill="none"
+            />
+
+            <!-- Up Traffic -->
+            <path :d="netUpAreaPath" fill="url(#netUpGradient)" />
+            <path
+              :d="netUpPath"
+              stroke="#f59e0b"
+              stroke-width="1.5"
+              fill="none"
+            />
+
+            <defs>
+              <linearGradient id="netDownGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.15" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+              </linearGradient>
+              <linearGradient id="netUpGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.15" />
+                <stop offset="100%" stop-color="#f59e0b" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
       </div>
     </div>
 
@@ -477,10 +520,22 @@ watch(
   color: #f59e0b;
 }
 
-.chart {
+.chart-container-svg {
   width: 100%;
   height: 80px;
   margin-top: 4px;
+}
+
+.svg-chart {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.grid-line {
+  stroke: rgba(255, 255, 255, 0.05);
+  stroke-width: 1;
+  stroke-dasharray: 2, 2;
 }
 
 .dashboard-footer {

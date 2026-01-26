@@ -615,6 +615,9 @@ const contextMenuItems = ref<
     label: string;
     danger?: boolean;
     divider?: boolean;
+    icon?: any;
+    children?: any[];
+    active?: boolean;
   }>
 >([]);
 const selectedSession = ref<SavedSessionDisplay | null>(null);

@@ -121,7 +121,8 @@ onMounted(() => {
   shortcutManager.register(PredefinedShortcuts.FOCUS_SEARCH);
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
 
-  eventBus.on(APP_EVENTS.OPEN_SETTINGS, (payload?: { section?: string }) => {
+  eventBus.on(APP_EVENTS.OPEN_SETTINGS, (args: unknown) => {
+    const payload = args as { section?: string } | undefined;
     openSettings(payload?.section);
   });
 

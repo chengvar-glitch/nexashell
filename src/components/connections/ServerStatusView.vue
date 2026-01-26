@@ -8,7 +8,6 @@ import {
   Cpu,
   MemoryStick,
   HardDrive,
-  Network,
 } from 'lucide-vue-next';
 
 /**
@@ -51,18 +50,18 @@ const currentStatus = computed(() => props.status || localStatus.value);
 let unlisten: UnlistenFn | null = null;
 
 const formatSpeed = (bytesPerSec: number) => {
-  if (!bytesPerSec || bytesPerSec < 0.1) return '0 B/s';
-  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
+  if (!bytesPerSec || bytesPerSec < 0.1) return '0B/s';
+  if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)}B/s`;
   if (bytesPerSec < 1024 * 1024)
-    return `${(bytesPerSec / 1024).toFixed(1)} KB/s`;
-  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)} MB/s`;
+    return `${(bytesPerSec / 1024).toFixed(1)}K/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(1)}M/s`;
 };
 
 const formatSize = (bytes: number) => {
-  if (!bytes) return '0 MB';
+  if (!bytes) return '0M';
   const mb = bytes / (1024 * 1024);
-  if (mb < 1024) return `${mb.toFixed(0)} MB`;
-  return `${(mb / 1024).toFixed(1)} GB`;
+  if (mb < 1024) return `${mb.toFixed(0)}M`;
+  return `${(mb / 1024).toFixed(1)}G`;
 };
 
 const getResourceColor = (percentage: number) => {
@@ -127,18 +126,17 @@ watch(
     @click="emit('toggle-dashboard')"
   >
     <div class="status-item metrics">
-      <Network :size="12" class="icon small" />
-      <div class="metric">
-        <Activity :size="12" class="icon-metric" />
-        <span class="value">{{ currentStatus.latency }}ms</span>
+      <div class="metric" title="Latency">
+        <Activity :size="10" class="icon-metric" />
+        <span class="value width-30">{{ currentStatus.latency }}ms</span>
       </div>
-      <div class="metric">
-        <ArrowDown :size="12" class="icon-metric" />
-        <span class="value">{{ formatSpeed(currentStatus.netDown) }}</span>
+      <div class="metric" title="Download Speed">
+        <ArrowDown :size="10" class="icon-metric" />
+        <span class="value width-45">{{ formatSpeed(currentStatus.netDown) }}</span>
       </div>
-      <div class="metric">
-        <ArrowUp :size="12" class="icon-metric" />
-        <span class="value">{{ formatSpeed(currentStatus.netUp) }}</span>
+      <div class="metric" title="Upload Speed">
+        <ArrowUp :size="10" class="icon-metric" />
+        <span class="value width-45">{{ formatSpeed(currentStatus.netUp) }}</span>
       </div>
     </div>
 
@@ -146,52 +144,28 @@ watch(
 
     <div class="status-item resources">
       <div
-        class="resource-pill"
-        :title="`CPU: ${currentStatus.cpuUsage.toFixed(1)}%`"
+        class="metric"
+        :title="`CPU Usage: ${currentStatus.cpuUsage.toFixed(1)}%`"
       >
-        <Cpu :size="12" class="icon small" />
-        <span class="label">CPU</span>
-        <div class="progress-bg">
-          <div
-            class="progress-bar"
-            :style="{
-              width: `${currentStatus.cpuUsage}%`,
-              backgroundColor: getResourceColor(currentStatus.cpuUsage),
-            }"
-          ></div>
-        </div>
-        <span class="percent">{{ Math.round(currentStatus.cpuUsage) }}%</span>
+        <Cpu :size="10" class="icon-metric" />
+        <span class="value width-30" :style="{ color: getResourceColor(currentStatus.cpuUsage) }">
+          {{ Math.round(currentStatus.cpuUsage) }}%
+        </span>
       </div>
       <div
-        class="resource-pill"
-        :title="`MEM: ${formatSize(currentStatus.memUsed)} / ${formatSize(currentStatus.memTotal)}`"
+        class="metric"
+        :title="`Memory Usage: ${formatSize(currentStatus.memUsed)} / ${formatSize(currentStatus.memTotal)}`"
       >
-        <MemoryStick :size="12" class="icon small" />
-        <span class="label">MEM</span>
-        <div class="progress-bg">
-          <div
-            class="progress-bar"
-            :style="{
-              width: `${currentStatus.memUsage}%`,
-              backgroundColor: getResourceColor(currentStatus.memUsage),
-            }"
-          ></div>
-        </div>
-        <span class="percent">{{ formatSize(currentStatus.memUsed) }}</span>
+        <MemoryStick :size="10" class="icon-metric" />
+        <span class="value width-35" :style="{ color: getResourceColor(currentStatus.memUsage) }">
+          {{ Math.round(currentStatus.memUsage) }}%
+        </span>
       </div>
-      <div class="resource-pill" :title="`DISK: ${currentStatus.diskUsage}%`">
-        <HardDrive :size="12" class="icon small" />
-        <span class="label">DISK</span>
-        <div class="progress-bg">
-          <div
-            class="progress-bar"
-            :style="{
-              width: `${currentStatus.diskUsage}%`,
-              backgroundColor: getResourceColor(currentStatus.diskUsage),
-            }"
-          ></div>
-        </div>
-        <span class="percent">{{ Math.round(currentStatus.diskUsage) }}%</span>
+      <div class="metric" :title="`Disk Usage: ${currentStatus.diskUsage}%`">
+        <HardDrive :size="10" class="icon-metric" />
+        <span class="value width-30" :style="{ color: getResourceColor(currentStatus.diskUsage) }">
+          {{ Math.round(currentStatus.diskUsage) }}%
+        </span>
       </div>
     </div>
   </div>
@@ -206,18 +180,18 @@ watch(
   z-index: 90;
   display: flex;
   align-items: center;
-  gap: 12px;
-  background-color: rgba(30, 30, 30, 0.85);
-  backdrop-filter: blur(8px);
-  padding: 4px 16px;
-  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  gap: 6px;
+  background-color: rgba(20, 20, 20, 0.65);
+  backdrop-filter: blur(12px);
+  padding: 2px 8px;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-top: none;
-  box-shadow: var(--shadow-md);
-  color: #d4d4d4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  color: #888;
   font-family: inherit;
-  font-size: 11px;
-  transition: all var(--transition-base);
+  font-size: 10px;
+  transition: all 0.2s ease;
   user-select: none;
   pointer-events: auto;
   cursor: pointer;
@@ -236,39 +210,29 @@ watch(
 }
 
 .server-status-view:hover {
-  background-color: rgba(40, 40, 40, 0.95);
-  border-color: rgba(255, 255, 255, 0.2);
-  transform: translateX(-50%) translateY(2px);
+  background-color: rgba(30, 30, 30, 0.95);
+  border-color: rgba(255, 255, 255, 0.15);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  color: #ccc;
 }
 
 .status-item {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.icon {
-  color: #facc15;
+  gap: 8px;
 }
 
 .icon-metric {
-  color: #888;
-  margin-right: 4px;
-}
-
-.small {
-  color: #888;
+  color: #666;
+  margin-right: 3px;
+  flex-shrink: 0;
 }
 
 .divider {
   width: 1px;
-  height: 14px;
-  background-color: rgba(255, 255, 255, 0.15);
-}
-
-.metrics {
-  gap: 12px;
+  height: 8px;
+  background-color: rgba(255, 255, 255, 0.1);
+  margin: 0 1px;
 }
 
 .metric {
@@ -278,45 +242,17 @@ watch(
 
 .metric .value {
   color: #bbb;
-}
-
-.resources {
-  gap: 8px;
-}
-
-.resource-pill {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.resource-pill .label {
-  color: #666;
-  font-weight: 600;
-  font-size: 9px;
-}
-
-.percent {
-  font-size: 9px;
-  opacity: 0.7;
-  min-width: 35px;
-  text-align: right;
   font-variant-numeric: tabular-nums;
+  display: inline-block;
   white-space: nowrap;
 }
 
-.progress-bg {
-  width: 30px;
-  height: 4px;
-  background-color: rgba(255, 255, 255, 0.1);
-  border-radius: 2px;
-  overflow: hidden;
-}
+/* Fixed widths to prevent layout jitter */
+.width-30 { width: 30px; }
+.width-35 { width: 35px; }
+.width-45 { width: 50px; }
 
-.progress-bar {
-  height: 100%;
-  background-color: #facc15;
-  border-radius: 2px;
-  transition: width 0.3s ease;
+.resources {
+  gap: 8px;
 }
 </style>
