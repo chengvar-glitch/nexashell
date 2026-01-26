@@ -63,3 +63,11 @@ pub async fn read_file_preview(path: String) -> Result<String, String> {
 
     Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
 }
+
+#[command]
+pub async fn get_file_size(path: String) -> Result<serde_json::Value, String> {
+    use std::fs;
+
+    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "size": metadata.len() }))
+}

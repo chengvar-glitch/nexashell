@@ -1,7 +1,7 @@
 use serde::Serialize;
-use ssh2::Session;
+use ssh2::{Session, OpenFlags, OpenType};
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{Read, Write, Seek, SeekFrom};
 use std::net::TcpStream;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -104,6 +104,21 @@ pub struct OutputChunk {
     pub seq: u64,
     pub output: String,
     pub ts: u128,
+}
+
+/// Represents the progress of an SFTP file upload
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadProgress {
+    pub task_id: String,
+    pub session_id: String,
+    pub progress: f64,
+    pub uploaded_bytes: u64,
+    pub total_bytes: u64,
+    pub status: String,
+    pub message: String,
+    pub speed: f64,
+    pub error: Option<String>,
 }
 
 /// Server performance metrics
@@ -815,10 +830,15 @@ impl SshManager {
         }
     }
 
-    /// Uploads a file via SFTP to the specified remote path
-    pub async fn upload_file_sftp(
+    /// Uploads a file via SFTP to the specified remote path.
+    /// This implementation runs in the background and emits progress events.
+    /// It uses chunked uploading and releases the session lock between chunks
+    /// to ensure the terminal remains responsive.
+    pub fn upload_file_sftp(
         &self,
-        session_id: &SessionId,
+        app_handle: tauri::AppHandle,
+        session_id: SessionId,
+        task_id: String,
         local_path: String,
         remote_path: String,
     ) -> Result<(), SshError> {
@@ -828,59 +848,152 @@ impl SshManager {
                 .read()
                 .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
             let info = channels
-                .get(session_id)
+                .get(&session_id)
                 .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
             info.sess_arc.clone()
         };
 
-        let sess_mutex = sess_arc.clone();
-        let sess = sess_mutex.lock().await;
-
-        // SFTP operations are blocking in ssh2-rs, so we use spawn_blocking
-        // but session is pinned to this thread now. Wait, ssh2 session doesn't like being moved
-        // if it's already used. However, Arc<Mutex<Session>> should be fine if we lock it.
-        // But sess is a MutexGuard, which isn't Send.
-        // We must perform the whole operation inside spawn_blocking and lock the mutex there.
-        drop(sess); // Release the lock so spawn_blocking can acquire it
-
-        tokio::task::spawn_blocking(move || {
-            let sess = sess_arc.blocking_lock();
-
-            // Set to blocking for SFTP operations
-            sess.set_blocking(true);
-
-            let result = (|| {
-                let sftp = sess.sftp().map_err(|e| {
-                    SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
-                })?;
-
-                let mut remote_file = sftp.create(std::path::Path::new(&remote_path)).map_err(|e| {
-                    SshError::OperationFailed(format!(
-                        "Failed to create remote file {}: {}",
-                        remote_path, e
-                    ))
-                })?;
-
+        // Perform the upload in background thread to avoid blocking the main thread
+        // We do NOT await this spawn to ensure true async behavior
+        std::thread::spawn(move || {
+            let sid = session_id.as_ref().to_string();
+            let upload_start = std::time::Instant::now();
+            
+            let result: Result<u64, SshError> = (|| {
                 let mut local_file = std::fs::File::open(&local_path).map_err(|e| {
                     SshError::OperationFailed(format!("Failed to open local file {}: {}", local_path, e))
                 })?;
 
-                println!("[SFTP] Streaming upload: {} -> {}", local_path, remote_path);
+                let total_bytes = local_file.metadata().map(|m| m.len()).unwrap_or(0);
+                
+                // 512KB chunks provide a good balance between throughput and terminal responsiveness
+                let mut buffer = [0u8; 1024 * 512];
+                let mut total_written: u64 = 0;
+                let mut is_first_chunk = true;
 
-                std::io::copy(&mut local_file, &mut remote_file).map_err(|e| {
-                    SshError::OperationFailed(format!("Failed to upload file to {}: {}", remote_path, e))
-                })?;
+                loop {
+                    // 1. Read a chunk from the local file
+                    let n = local_file.read(&mut buffer).map_err(|e| {
+                        SshError::OperationFailed(format!("Read local file failed: {}", e))
+                    })?;
+                    
+                    if n == 0 {
+                        break;
+                    }
 
-                Ok(())
+                    // 2. Acquire the session lock for this chunk
+                    let sess = sess_arc.blocking_lock();
+                    
+                    // Temporarily set to blocking for synchronous SFTP operations
+                    sess.set_blocking(true);
+
+                    let chunk_res = (|| {
+                        let sftp = sess.sftp().map_err(|e| {
+                            SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+                        })?;
+
+                        let flags = if is_first_chunk {
+                            OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE
+                        } else {
+                            OpenFlags::WRITE
+                        };
+
+                        let mut remote_file = sftp.open_mode(
+                            std::path::Path::new(&remote_path),
+                            flags,
+                            0o644,
+                            OpenType::File
+                        ).map_err(|e| {
+                            SshError::OperationFailed(format!("Failed to open remote file {}: {}", remote_path, e))
+                        })?;
+
+                        if !is_first_chunk {
+                            remote_file.seek(SeekFrom::Start(total_written)).map_err(|e| {
+                                SshError::OperationFailed(format!("Failed to seek remote file: {}", e))
+                            })?;
+                        }
+
+                        remote_file.write_all(&buffer[..n]).map_err(|e| {
+                            SshError::OperationFailed(format!("Failed to write to remote file: {}", e))
+                        })?;
+
+                        remote_file.flush().map_err(|e| {
+                            SshError::OperationFailed(format!("Failed to flush remote file: {}", e))
+                        })?;
+
+                        Ok(())
+                    })();
+
+                    // 3. CRITICAL: Restore non-blocking mode and release the lock
+                    sess.set_blocking(false);
+                    drop(sess);
+
+                    // Check for errors after releasing the lock
+                    chunk_res?;
+                    
+                    total_written += n as u64;
+                    is_first_chunk = false;
+
+                    // Calculate progress and speed
+                    let elapsed = upload_start.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 { total_written as f64 / elapsed } else { 0.0 };
+                    let progress = if total_bytes > 0 { (total_written as f64 / total_bytes as f64) * 100.0 } else { 0.0 };
+
+                    // Emit progress event
+                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                        task_id: task_id.clone(),
+                        session_id: sid.clone(),
+                        progress,
+                        uploaded_bytes: total_written,
+                        total_bytes,
+                        status: "uploading".to_string(),
+                        message: format!("Uploading... ({:.1} MB/s)", speed / 1024.0 / 1024.0),
+                        speed,
+                        error: None,
+                    });
+
+                    // 4. Brief pause to give other tasks a chance to use the session
+                    // if they are waiting for the lock.
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+
+                Ok(total_bytes)
             })();
 
-            // Restore non-blocking mode for the I/O task
-            sess.set_blocking(false);
+            // Emit final status
+            match result {
+                Ok(total_bytes) => {
+                    let elapsed = upload_start.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
+                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                        task_id: task_id.clone(),
+                        session_id: sid,
+                        progress: 100.0,
+                        uploaded_bytes: total_bytes,
+                        total_bytes,
+                        status: "success".to_string(),
+                        message: "Upload completed successfully".to_string(),
+                        speed,
+                        error: None,
+                    });
+                }
+                Err(e) => {
+                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                        task_id: task_id.clone(),
+                        session_id: sid,
+                        progress: 0.0,
+                        uploaded_bytes: 0,
+                        total_bytes: 0,
+                        status: "error".to_string(),
+                        message: format!("Upload failed: {}", e),
+                        speed: 0.0,
+                        error: Some(e.to_string()),
+                    });
+                }
+            }
+        });
 
-            result
-        })
-        .await
-        .map_err(|e| SshError::TaskError(e.to_string()))?
+        Ok(())
     }
 
     /// Probes the remote user's home or current directory without affecting the shell
@@ -1016,14 +1129,20 @@ pub fn send_ssh_input(
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn upload_file_sftp(
+    app_handle: tauri::AppHandle,
     state: tauri::State<'_, SshManager>,
     sessionId: String,
+    taskId: String,
     localPath: String,
     remotePath: String,
 ) -> Result<(), SshError> {
-    state
-        .upload_file_sftp(&SessionId::from(sessionId), localPath, remotePath)
-        .await
+    state.upload_file_sftp(
+        app_handle,
+        SessionId::from(sessionId),
+        taskId,
+        localPath,
+        remotePath,
+    )
 }
 
 /// Probes the current remote working directory

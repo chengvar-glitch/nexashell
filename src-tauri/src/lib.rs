@@ -68,6 +68,7 @@ pub fn run() {
             system::minimize_window,
             system::close_window,
             system::read_file_preview,
+            system::get_file_size,
             ssh::connect_ssh,
             ssh::disconnect_ssh,
             ssh::send_ssh_input,

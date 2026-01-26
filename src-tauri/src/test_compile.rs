@@ -1,7 +1,11 @@
-use ssh2::Channel;
+use ssh2::{Sftp, OpenFlags, OpenType};
 
 fn main() {
-    // This is just to check if the method exists
-    let mut channel: Channel = unsafe { std::mem::zeroed() };
-    channel.request_window_change(80, 24, 0, 0);
+    let sftp: Sftp = unsafe { std::mem::zeroed() };
+    let _ = sftp.open_mode(
+        std::path::Path::new("test"),
+        OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
+        0o644,
+        OpenType::File
+    );
 }
