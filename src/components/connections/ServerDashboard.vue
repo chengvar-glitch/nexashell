@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+
+const { t } = useI18n();
+
 import {
   Cpu,
   MemoryStick,
@@ -16,6 +20,8 @@ import {
   ChevronLeft,
   CheckCircle2,
   AlertCircle,
+  FileUp,
+  LayoutDashboard,
 } from 'lucide-vue-next';
 
 interface UploadTask {
@@ -55,10 +61,19 @@ interface ServerStatus {
   memUsage: number;
   memTotal: number;
   memUsed: number;
+  memAvail: number;
+  swapUsage: number;
+  swapTotal: number;
+  swapUsed: number;
   diskUsage: number;
+  diskTotal: number;
+  diskUsed: number;
+  diskAvail: number;
   netUp: number;
   netDown: number;
   latency: number;
+  loadAvg: [number, number, number];
+  uptime: string;
 }
 
 const localHistory = ref<ServerStatus[]>([]);
@@ -105,16 +120,22 @@ const formatSpeed = (bytesPerSec: number) => {
 };
 
 const formatSize = (bytes: number) => {
-  if (!bytes) return '0 MB';
+  if (!bytes) return '0 MiB';
   const mb = bytes / (1024 * 1024);
-  if (mb < 1024) return `${mb.toFixed(0)} MB`;
-  return `${(mb / 1024).toFixed(1)} GB`;
+  if (mb < 1024) return `${mb.toFixed(1)} MiB`;
+  return `${(mb / 1024).toFixed(1)} GiB`;
 };
 
 const getStatusColor = (percentage: number) => {
   if (percentage >= 90) return '#ef4444'; // Red
   if (percentage >= 70) return '#f97316'; // Orange
   return '#10b981'; // Green
+};
+
+const getLatencyColor = (ms: number) => {
+  if (ms >= 150) return '#ef4444';
+  if (ms >= 60) return '#f97316';
+  return '#10b981';
 };
 
 const getTaskStatusColor = (status: UploadTask['status']) => {
@@ -155,9 +176,9 @@ const formatTaskTime = (timestamp: number) => {
   const minutes = Math.floor(seconds / 60);
   const hours = Math.floor(minutes / 60);
 
-  if (seconds < 60) return `${seconds}s ago`;
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
+  if (seconds < 60) return `${seconds}s ${t('dashboard.ago')}`;
+  if (minutes < 60) return `${minutes}m ${t('dashboard.ago')}`;
+  if (hours < 24) return `${hours}h ${t('dashboard.ago')}`;
   return date.toLocaleDateString();
 };
 
@@ -306,32 +327,44 @@ watch(
     <button
       class="toggle-handle"
       :class="{ 'has-active': hasActiveUploads && !show }"
-      :title="show ? 'Hide Sidebar' : 'Show Sidebar'"
+      :title="show ? t('dashboard.hideSidebar') : t('dashboard.showSidebar')"
       @click="emit('toggle')"
     >
-      <ChevronRight v-if="show" :size="10" />
-      <ChevronLeft v-else :size="10" />
+      <ChevronRight v-if="show" class="handle-icon" />
+      <ChevronLeft v-else class="handle-icon" />
     </button>
 
     <div class="dashboard-header">
       <div class="title-group">
-        <Activity :size="14" class="header-icon" />
-        <span class="title">Dashboard</span>
+        <div class="header-icon-wrapper">
+          <LayoutDashboard :size="16" class="header-icon" />
+          <div class="icon-glow"></div>
+        </div>
+        <div class="title-meta">
+          <span class="title">{{ t('dashboard.statusCenter') }}</span>
+          <span v-if="latestStatus" class="uptime-text">{{
+            latestStatus.uptime
+          }}</span>
+        </div>
       </div>
     </div>
 
     <div class="accordion-container">
       <!-- System Section -->
-      <div class="accordion-item">
+      <div
+        class="accordion-item"
+        :class="{ 'is-active': activeTab === 'system' }"
+      >
         <button class="accordion-header" @click="toggleTab('system')">
-          <ChevronRight
-            v-if="activeTab !== 'system'"
-            :size="16"
-            class="chevron"
-          />
-          <ChevronDown v-else :size="16" class="chevron" />
+          <ChevronDown :size="14" class="chevron" />
           <Activity :size="14" class="section-icon" />
-          <span class="section-title">System Performance</span>
+          <span class="section-title">{{ t('dashboard.performance') }}</span>
+          <span
+            v-if="latestStatus && activeTab !== 'system'"
+            class="header-badge"
+          >
+            {{ Math.round(latestStatus.cpuUsage) }}%
+          </span>
         </button>
 
         <div v-if="activeTab === 'system'" class="accordion-content">
@@ -351,7 +384,7 @@ watch(
               </button>
               <div class="metric-label">
                 <Cpu :size="14" class="metric-icon" />
-                <span>Processor (CPU)</span>
+                <span>{{ t('dashboard.processor') }}</span>
               </div>
               <span
                 v-if="latestStatus"
@@ -361,61 +394,85 @@ watch(
                 {{ latestStatus.cpuUsage.toFixed(1) }}%
               </span>
             </div>
-            <div v-if="expandedMetrics.cpu" class="chart-container-svg">
-              <svg
-                class="svg-chart"
-                :viewBox="`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`"
-                preserveAspectRatio="none"
-              >
-                <line
-                  x1="0"
-                  y1="0"
-                  :x2="CHART_WIDTH"
-                  y2="0"
-                  class="grid-line"
-                />
-                <line
-                  x1="0"
-                  y1="20"
-                  :x2="CHART_WIDTH"
-                  y2="20"
-                  class="grid-line"
-                />
-                <line
-                  x1="0"
-                  y1="40"
-                  :x2="CHART_WIDTH"
-                  y2="40"
-                  class="grid-line"
-                />
-                <line
-                  x1="0"
-                  y1="60"
-                  :x2="CHART_WIDTH"
-                  y2="60"
-                  class="grid-line"
-                />
-                <line
-                  x1="0"
-                  :y1="CHART_HEIGHT"
-                  :x2="CHART_WIDTH"
-                  :y2="CHART_HEIGHT"
-                  class="grid-line"
-                />
-                <path :d="cpuAreaPath" fill="url(#cpuGradient)" />
-                <path
-                  :d="cpuPath"
-                  stroke="#3b82f6"
-                  stroke-width="1.5"
-                  fill="none"
-                />
-                <defs>
-                  <linearGradient id="cpuGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.3" />
-                    <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div v-if="expandedMetrics.cpu" class="metric-details-rows">
+              <div v-if="latestStatus" class="load-avg-row">
+                <span class="sub-label">{{ t('dashboard.loadAvg') }}:</span>
+                <span class="load-values">
+                  {{ latestStatus.loadAvg[0].toFixed(2) }}
+                  {{ latestStatus.loadAvg[1].toFixed(2) }}
+                  {{ latestStatus.loadAvg[2].toFixed(2) }}
+                </span>
+              </div>
+              <div class="chart-container-svg">
+                <svg
+                  class="svg-chart"
+                  :viewBox="`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`"
+                  preserveAspectRatio="none"
+                >
+                  <line
+                    x1="0"
+                    y1="0"
+                    :x2="CHART_WIDTH"
+                    y2="0"
+                    class="grid-line"
+                  />
+                  <line
+                    x1="0"
+                    y1="20"
+                    :x2="CHART_WIDTH"
+                    y2="20"
+                    class="grid-line"
+                  />
+                  <line
+                    x1="0"
+                    y1="40"
+                    :x2="CHART_WIDTH"
+                    y2="40"
+                    class="grid-line"
+                  />
+                  <line
+                    x1="0"
+                    y1="60"
+                    :x2="CHART_WIDTH"
+                    y2="60"
+                    class="grid-line"
+                  />
+                  <line
+                    x1="0"
+                    :y1="CHART_HEIGHT"
+                    :x2="CHART_WIDTH"
+                    :y2="CHART_HEIGHT"
+                    class="grid-line"
+                  />
+                  <path :d="cpuAreaPath" fill="url(#cpuGradient)" />
+                  <path
+                    :d="cpuPath"
+                    stroke="#3b82f6"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                  <defs>
+                    <linearGradient
+                      id="cpuGradient"
+                      x1="0"
+                      y1="0"
+                      x2="0"
+                      y2="1"
+                    >
+                      <stop
+                        offset="0%"
+                        stop-color="#3b82f6"
+                        stop-opacity="0.3"
+                      />
+                      <stop
+                        offset="100%"
+                        stop-color="#3b82f6"
+                        stop-opacity="0"
+                      />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
             </div>
           </div>
 
@@ -435,7 +492,7 @@ watch(
               </button>
               <div class="metric-label">
                 <MemoryStick :size="14" class="metric-icon" />
-                <span>Memory (RAM)</span>
+                <span>{{ t('dashboard.memory') }}</span>
               </div>
               <span
                 v-if="latestStatus"
@@ -447,8 +504,24 @@ watch(
             </div>
             <div v-if="expandedMetrics.memory">
               <div v-if="latestStatus" class="mem-details">
-                {{ formatSize(latestStatus.memUsed) }} /
-                {{ formatSize(latestStatus.memTotal) }}
+                <div class="mem-row">
+                  <span class="sub-label"
+                    >{{ t('dashboard.actualUsed') }}:</span
+                  >
+                  <span
+                    >{{
+                      formatSize(latestStatus.memTotal - latestStatus.memAvail)
+                    }}
+                    / {{ formatSize(latestStatus.memTotal) }}</span
+                  >
+                </div>
+                <div v-if="latestStatus.swapTotal > 0" class="mem-row swap">
+                  <span class="sub-label">{{ t('dashboard.swap') }}:</span>
+                  <span
+                    >{{ formatSize(latestStatus.swapUsed) }} /
+                    {{ formatSize(latestStatus.swapTotal) }}</span
+                  >
+                </div>
               </div>
               <div class="chart-container-svg">
                 <svg
@@ -539,7 +612,7 @@ watch(
               </button>
               <div class="metric-label">
                 <Globe :size="14" class="metric-icon" />
-                <span>Network Traffic</span>
+                <span>{{ t('dashboard.network') }}</span>
               </div>
             </div>
             <div v-if="expandedMetrics.network">
@@ -551,6 +624,16 @@ watch(
                 <div class="net-item up">
                   <ArrowUp :size="12" />
                   <span>{{ formatSpeed(latestStatus.netUp) }}</span>
+                </div>
+                <div class="net-latency">
+                  <Activity
+                    :size="12"
+                    :style="{ color: getLatencyColor(latestStatus.latency) }"
+                  />
+                  <span
+                    :style="{ color: getLatencyColor(latestStatus.latency) }"
+                    >{{ latestStatus.latency }}ms</span
+                  >
                 </div>
               </div>
               <div class="chart-container-svg">
@@ -667,7 +750,7 @@ watch(
               </button>
               <div class="metric-label">
                 <HardDrive :size="14" class="metric-icon" />
-                <span>Disk & Latency</span>
+                <span>{{ t('dashboard.disk') }}</span>
               </div>
               <span
                 v-if="latestStatus"
@@ -699,18 +782,19 @@ watch(
                 </svg>
               </div>
               <div class="disk-info-list">
-                <div class="footer-item">
-                  <Activity :size="12" class="footer-icon" />
-                  <span>Latency: {{ latestStatus.latency }}ms</span>
-                </div>
-                <div class="footer-item">
-                  <div
-                    class="status-dot"
-                    :style="{
-                      background: getStatusColor(latestStatus.diskUsage),
-                    }"
-                  ></div>
-                  <span>Used Space</span>
+                <div class="footer-item usage-details">
+                  <div class="capacity-info">
+                    <span class="sub-label">{{ t('dashboard.used') }}:</span>
+                    {{ formatSize(latestStatus.diskUsed) }}
+                  </div>
+                  <div class="capacity-info">
+                    <span class="sub-label">{{ t('dashboard.total') }}:</span>
+                    {{ formatSize(latestStatus.diskTotal) }}
+                  </div>
+                  <div class="available-text">
+                    {{ formatSize(latestStatus.diskAvail) }}
+                    {{ t('dashboard.available') }}
+                  </div>
                 </div>
               </div>
             </div>
@@ -719,18 +803,20 @@ watch(
       </div>
 
       <!-- Uploads Section -->
-      <div class="accordion-item">
+      <div
+        class="accordion-item"
+        :class="{ 'is-active': activeTab === 'uploads' }"
+      >
         <button class="accordion-header" @click="toggleTab('uploads')">
-          <ChevronRight
-            v-if="activeTab !== 'uploads'"
-            :size="16"
-            class="chevron"
-          />
-          <ChevronDown v-else :size="16" class="chevron" />
-          <ArrowUp :size="14" class="section-icon" />
-          <span class="section-title"
-            >Upload Tasks ({{ uploadTasksData.length }})</span
+          <ChevronDown :size="14" class="chevron" />
+          <FileUp :size="14" class="section-icon" />
+          <span class="section-title">{{ t('dashboard.uploads') }}</span>
+          <span
+            v-if="uploadTasksData.length > 0 && activeTab !== 'uploads'"
+            class="header-badge uploads"
           >
+            {{ uploadTasksData.length }}
+          </span>
         </button>
 
         <div
@@ -739,7 +825,7 @@ watch(
         >
           <div v-if="uploadTasksData.length === 0" class="empty-state">
             <Activity :size="24" />
-            <p>No upload tasks</p>
+            <p>{{ t('dashboard.noUploadTasks') }}</p>
           </div>
           <div v-else class="tasks-list">
             <div
@@ -770,7 +856,7 @@ watch(
                       class="task-path"
                       :title="task.remotePath"
                     >
-                      to: {{ task.remotePath }}
+                      {{ t('dashboard.to') }}: {{ task.remotePath }}
                     </span>
                   </div>
                 </div>
@@ -827,7 +913,7 @@ watch(
               @click="emit('clear-tasks')"
             >
               <Trash2 :size="14" />
-              <span>Clear All</span>
+              <span>{{ t('dashboard.clearAll') }}</span>
             </button>
           </div>
         </div>

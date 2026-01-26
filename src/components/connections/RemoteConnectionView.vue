@@ -26,10 +26,19 @@ interface ServerStatus {
   memUsage: number;
   memTotal: number;
   memUsed: number;
+  memAvail: number;
+  swapUsage: number;
+  swapTotal: number;
+  swapUsed: number;
   diskUsage: number;
+  diskTotal: number;
+  diskUsed: number;
+  diskAvail: number;
   netUp: number;
   netDown: number;
   latency: number;
+  loadAvg: [number, number, number];
+  uptime: string;
 }
 
 const statusHistory = ref<ServerStatus[]>([]);
@@ -1296,6 +1305,28 @@ onMounted(async () => {
       terminal?.write(data);
     }
   });
+
+  /**
+   * Adaptive monitoring refresh rate
+   * 700ms when dashboard is open and Performance tab is active, 3s otherwise.
+   */
+  watch(
+    [showDashboard, activeDashboardTab, () => props.sessionId],
+    async ([show, tab, sid]) => {
+      if (!sid) return;
+      const interval = show && tab === 'system' ? 700 : 3000;
+      try {
+        await invoke('set_ssh_status_refresh_rate', {
+          sessionId: sid,
+          intervalMs: interval,
+        });
+        logger.debug('Refreshed rate updated', { sid, interval });
+      } catch (error) {
+        logger.warn('Failed to update refresh rate', error);
+      }
+    },
+    { immediate: true }
+  );
 
   /**
    * Cleanup on unmount

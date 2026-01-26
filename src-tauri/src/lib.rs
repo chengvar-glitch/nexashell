@@ -76,6 +76,7 @@ pub fn run() {
             ssh::get_buffered_ssh_output,
             ssh::upload_file_sftp,
             ssh::probe_remote_path,
+            ssh::set_ssh_status_refresh_rate,
             terminal::connect_local,
             terminal::disconnect_local,
             db::init_db,

@@ -129,10 +129,19 @@ pub struct ServerStatus {
     pub mem_usage: f64,
     pub mem_total: u64,
     pub mem_used: u64,
+    pub mem_avail: u64,
+    pub swap_usage: f64,
+    pub swap_total: u64,
+    pub swap_used: u64,
     pub disk_usage: f64,
+    pub disk_total: u64,
+    pub disk_used: u64,
+    pub disk_avail: u64,
     pub net_up: f64,
     pub net_down: f64,
     pub latency: u32,
+    pub load_avg: [f64; 3],
+    pub uptime: String,
 }
 
 impl OutputChunk {
@@ -169,6 +178,9 @@ pub struct SshChannelInfo {
 
     /// Cached initial output (welcome banner) for late-joining clients
     pub initial_outputs: Arc<tokio::sync::Mutex<Vec<OutputChunk>>>,
+
+    /// Refresh interval for monitoring task (in milliseconds)
+    pub refresh_interval: Arc<AtomicU64>,
 
     /// Session handle for opening new channels
     pub sess_arc: Arc<tokio::sync::Mutex<Session>>,
@@ -298,6 +310,7 @@ impl SshManager {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let next_seq = Arc::new(AtomicU64::new(1));
         let initial_outputs = Arc::new(tokio::sync::Mutex::new(Vec::new()));
+        let refresh_interval = Arc::new(AtomicU64::new(3000)); // Default to idle: 3s
 
         let channel_arc = Arc::new(tokio::sync::Mutex::new(channel));
         let sess_arc = Arc::new(tokio::sync::Mutex::new(sess));
@@ -327,6 +340,7 @@ impl SshManager {
             session_id.clone(),
             sess_arc.clone(),
             stop_flag.clone(),
+            refresh_interval.clone(),
         );
 
         // 6. Save session state
@@ -349,6 +363,7 @@ impl SshManager {
                     stop_flag,
                     next_seq,
                     initial_outputs,
+                    refresh_interval,
                     sess_arc,
                 },
             );
@@ -536,6 +551,7 @@ impl SshManager {
         session_id: SessionId,
         sess_arc: Arc<tokio::sync::Mutex<Session>>,
         stop_flag: Arc<AtomicBool>,
+        refresh_interval: Arc<AtomicU64>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             // Initial readings for delta calculation (rx, tx, time)
@@ -592,7 +608,8 @@ impl SshManager {
                     }
                 }
 
-                tokio::time::sleep(Duration::from_millis(1500)).await;
+                let interval = refresh_interval.load(Ordering::SeqCst);
+                tokio::time::sleep(Duration::from_millis(interval)).await;
             }
         })
     }
@@ -608,13 +625,17 @@ impl SshManager {
 
         // Use more robust commands that work on various Linux environments
         // 1. CPU: /proc/stat
-        // 2. Mem: free (with fallback)
-        // 3. Disk: df (without -b flag which is not standard)
-        // 4. Net: /proc/net/dev (with fallback)
+        // 2. Mem & Swap: free
+        // 3. Disk: df (total, used, percentage)
+        // 4. Net: /proc/net/dev
+        // 5. LoadAvg: /proc/loadavg
+        // 6. Uptime: uptime -p or /proc/uptime
         let cmd = "LC_ALL=C awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8, $5}' /proc/stat 2>/dev/null || echo '0 0'; \
-                   LC_ALL=C free -b 2>/dev/null | awk 'NR==2{print $2,$3}' || echo '0 0'; \
-                   LC_ALL=C df / 2>/dev/null | awk 'NR==2{print $2,$3,$5}' || echo '0 0 0%'; \
-                   LC_ALL=C cat /proc/net/dev 2>/dev/null | awk 'NR>2{rx+=$2; tx+=$10} END{print rx+0,tx+0}' || echo '0 0'";
+                   LC_ALL=C free -b 2>/dev/null | awk '/Mem:/{print $2,$3,$7} /Swap:/{print $2,$3}' || echo '0 0 0\n0 0'; \
+                   LC_ALL=C df -PB1 -x tmpfs -x devtmpfs -x overlay 2>/dev/null | awk 'NR>1 && !seen[$1]++ {t+=$2;u+=$3;a+=$4} END{print t,u,a}' || echo '0 0 0'; \
+                   LC_ALL=C cat /proc/net/dev 2>/dev/null | awk 'NR>2 && $1!=\"lo:\"{rx+=$2; tx+=$10} END{print rx+0,tx+0}' || echo '0 0'; \
+                   LC_ALL=C cat /proc/loadavg 2>/dev/null | awk '{print $1,$2,$3}' || echo '0 0 0'; \
+                   LC_ALL=C uptime -p 2>/dev/null || echo 'up unknown'";
 
         loop {
             match channel.exec(cmd) {
@@ -644,7 +665,7 @@ impl SshManager {
             .map(|s| s.trim())
             .filter(|s| !s.is_empty())
             .collect();
-        if lines.len() < 4 {
+        if lines.len() < 6 {
             return Err(SshError::OperationFailed(format!(
                 "Invalid status output format (lines: {})",
                 lines.len()
@@ -674,32 +695,63 @@ impl SshManager {
             0.0
         };
 
-        // Parse Memory
+        // Parse Memory & Swap
         let mem_parts: Vec<u64> = lines[1]
             .split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
-        let (mem_total, mem_used) = if mem_parts.len() == 2 && mem_parts[0] > 0 {
-            (mem_parts[0], mem_parts[1])
+        let (mem_total, mem_used, mem_avail) = if mem_parts.len() >= 2 {
+            let total = mem_parts[0];
+            let used = mem_parts[1];
+            let avail = if mem_parts.len() >= 3 && mem_parts[2] > 0 {
+                mem_parts[2]
+            } else {
+                total.saturating_sub(used)
+            };
+            (total, used, avail)
         } else {
-            (1, 0)
+            (1, 0, 1)
         };
-        let mem_usage = ((mem_used as f64 / mem_total as f64) * 100.0).clamp(0.0, 100.0);
+        // Use available memory for more accurate usage percentage if possible
+        let mem_usage = (100.0 * (1.0 - (mem_avail as f64 / mem_total as f64))).clamp(0.0, 100.0);
 
-        // Parse Disk
-        let disk_parts: Vec<&str> = lines[2].split_whitespace().collect();
-        let disk_usage = if disk_parts.len() >= 3 {
-            disk_parts[2]
-                .replace('%', "")
-                .parse::<f64>()
-                .unwrap_or(0.0)
-                .clamp(0.0, 100.0)
+        let swap_parts: Vec<u64> = lines[2]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let (swap_total, swap_used) = if swap_parts.len() == 2 {
+            (swap_parts[0], swap_parts[1])
+        } else {
+            (0, 0)
+        };
+        let swap_usage = if swap_total > 0 {
+            ((swap_used as f64 / swap_total as f64) * 100.0).clamp(0.0, 100.0)
         } else {
             0.0
         };
 
+        // Parse Disk
+        let disk_parts: Vec<u64> = lines[3]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let (disk_total, disk_used, disk_avail, disk_usage) = if disk_parts.len() >= 3 {
+            let total = disk_parts[0];
+            let used = disk_parts[1];
+            let avail = disk_parts[2];
+            // Match Linux 'df' usage calculation: Used / (Used + Available)
+            let usage = if (used + avail) > 0 {
+                (used as f64 / (used + avail) as f64) * 100.0
+            } else {
+                0.0
+            };
+            (total, used, avail, usage.clamp(0.0, 100.0))
+        } else {
+            (0, 0, 0, 0.0)
+        };
+
         // Parse Network Raw
-        let net_parts: Vec<f64> = lines[3]
+        let net_parts: Vec<f64> = lines[4]
             .split_whitespace()
             .filter_map(|s| s.parse().ok())
             .collect();
@@ -709,16 +761,39 @@ impl SshManager {
             (0.0, 0.0)
         };
 
+        // Parse Load Avg
+        let load_parts: Vec<f64> = lines[5]
+            .split_whitespace()
+            .filter_map(|s| s.parse().ok())
+            .collect();
+        let load_avg = if load_parts.len() == 3 {
+            [load_parts[0], load_parts[1], load_parts[2]]
+        } else {
+            [0.0, 0.0, 0.0]
+        };
+
+        // Parse Uptime
+        let uptime = lines.get(6).map(|s| s.to_string()).unwrap_or_default();
+
         Ok((
             ServerStatus {
                 cpu_usage,
                 mem_usage,
                 mem_total,
                 mem_used,
+                mem_avail,
+                swap_usage,
+                swap_total,
+                swap_used,
                 disk_usage,
+                disk_total,
+                disk_used,
+                disk_avail,
                 net_down: net_down_raw,
                 net_up: net_up_raw,
                 latency: 0,
+                load_avg,
+                uptime,
             },
             (current_cpu_total, current_cpu_idle),
         ))
@@ -1038,6 +1113,19 @@ impl SshManager {
         .await
         .map_err(|e| SshError::TaskError(e.to_string()))?
     }
+
+    /// Updates the monitoring refresh rate for a session
+    pub fn set_refresh_rate(&self, session_id: &SessionId, interval_ms: u64) -> Result<(), SshError> {
+        let channels = self
+            .channels
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        let info = channels
+            .get(session_id)
+            .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+        info.refresh_interval.store(interval_ms, Ordering::SeqCst);
+        Ok(())
+    }
 }
 
 // ============================================================================
@@ -1121,6 +1209,17 @@ pub fn send_ssh_input(
     input: String,
 ) -> Result<(), SshError> {
     state.send_ssh_input(&SessionId::from(sessionId), input)
+}
+
+/// Updates the SSH status refresh rate
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn set_ssh_status_refresh_rate(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    intervalMs: u64,
+) -> Result<(), SshError> {
+    state.set_refresh_rate(&SessionId::from(sessionId), intervalMs)
 }
 
 /// Uploads a file to a remote server using SFTP
