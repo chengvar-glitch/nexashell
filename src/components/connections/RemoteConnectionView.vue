@@ -977,6 +977,7 @@ onMounted(async () => {
     cursorBlink: settingsStore.terminal.cursorBlink,
     cursorStyle: settingsStore.terminal.cursorStyle,
     theme: TERMINAL_CONFIG.THEME,
+    convertEol: true,
   });
 
   // Watch for cursor style changes
@@ -1342,20 +1343,34 @@ onMounted(async () => {
       props.sessionId && sessionStore.hasSession(props.sessionId);
 
     if (hasSession) {
-      inputBuffer += data;
+      // For control characters (like Backspace \x7f, Enter \r, Ctrl+C \x03),
+      // we flush immediately to ensure responsiveness and correct handling.
+      const isControlChar =
+        data.length === 1 && (data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127);
 
-      if (inputBuffer.length > INPUT_BUFFER_CONFIG.FLUSH_THRESHOLD) {
-        clearTimeout(inputFlushTimeout!);
-        await flushInput();
+      if (isControlChar) {
+        // Flush existing buffer first, then send the control character immediately
+        if (inputBuffer.length > 0) {
+          clearTimeout(inputFlushTimeout!);
+          await flushInput();
+        }
+        await emit(`ssh-input-${props.sessionId}`, { input: data });
       } else {
-        clearTimeout(inputFlushTimeout!);
-        inputFlushTimeout = setTimeout(
-          flushInput,
-          INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS
-        );
+        inputBuffer += data;
+
+        if (inputBuffer.length > INPUT_BUFFER_CONFIG.FLUSH_THRESHOLD) {
+          clearTimeout(inputFlushTimeout!);
+          await flushInput();
+        } else {
+          clearTimeout(inputFlushTimeout!);
+          inputFlushTimeout = setTimeout(
+            flushInput,
+            INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS
+          );
+        }
       }
-    } else if (data.length === 1 && data >= ' ') {
-      // No active session: echo printable characters locally
+    } else if (data.length === 1 && data >= ' ' && data !== '\x7f') {
+      // No active session: echo printable characters locally (excluding Backspace)
       terminal?.write(data);
     }
   });

@@ -100,7 +100,10 @@ impl TerminalManager {
         #[cfg(not(target_os = "windows"))]
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "zsh".to_string());
 
-        let cmd = CommandBuilder::new(shell);
+        let mut cmd = CommandBuilder::new(shell);
+        cmd.env("TERM", "xterm-256color");
+        cmd.env("COLORTERM", "truecolor");
+
         let _child = pair
             .slave
             .spawn_command(cmd)
