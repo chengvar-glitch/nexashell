@@ -28,30 +28,39 @@ pub fn run() {
             }
             #[cfg(target_os = "macos")]
             {
-                use cocoa::appkit::NSWindow;
+                use cocoa::appkit::{NSWindow, NSWindowTitleVisibility};
                 use cocoa::base::{id, NO, YES};
 
                 if let Some(window) = app.get_webview_window("main") {
-                    // Ensure the webview itself is transparent
                     let _ = window.set_shadow(true);
 
                     if let Ok(ns_window) = window.ns_window() {
                         let ns_window = ns_window as id;
 
-                        // Configure transparent window for macOS (non-movable)
                         unsafe {
+                            // Already handled by tauri.conf.json "Overlay"
+                            // but ensuring proper visibility here
+                            ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
+                            
                             ns_window.setOpaque_(NO);
                             ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(
                                 cocoa::base::nil,
                             ));
-                            ns_window.setTitlebarAppearsTransparent_(YES);
                             ns_window.setMovableByWindowBackground_(NO);
 
-                            // Force refresh shadow to prevent square black corners
+                            // Force refresh shadow
                             ns_window.setHasShadow_(NO);
                             ns_window.setHasShadow_(YES);
                         }
                     }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                if let Some(window) = app.get_webview_window("main") {
+                    // Windows/Linux use custom title bar, so hide native decorations
+                    let _ = window.set_decorations(false);
                 }
             }
 

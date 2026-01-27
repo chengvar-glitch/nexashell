@@ -541,8 +541,7 @@ const detectRemotePath = async () => {
 
   // Final fallback
   if (!detectedPath) {
-    detectedPath =
-      lastKnownAbsolutePath.value || remoteHomeDir.value || '.';
+    detectedPath = lastKnownAbsolutePath.value || remoteHomeDir.value || '.';
     detectionSource = lastKnownAbsolutePath.value
       ? 'fallback-last-known'
       : 'fallback-home';
@@ -552,9 +551,7 @@ const detectRemotePath = async () => {
   currentRemotePath.value = detectedPath;
   lastPathDetectionSource.value = detectionSource;
   if (currentRemotePath.value.startsWith('/')) {
-    lastKnownAbsolutePath.value = normalizeRemotePath(
-      currentRemotePath.value
-    );
+    lastKnownAbsolutePath.value = normalizeRemotePath(currentRemotePath.value);
   }
   logger.info('Path detection complete', {
     finalPath: currentRemotePath.value,

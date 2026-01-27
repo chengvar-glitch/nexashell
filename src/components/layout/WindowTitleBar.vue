@@ -25,7 +25,6 @@ const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
 const isFullscreen = ref(false);
 const isMaximized = ref(false);
-const isFocused = ref(true);
 
 // --- Search Functionality Refs ---
 const searchBoxRef = ref<InstanceType<typeof SearchBox> | null>(null);
@@ -118,12 +117,7 @@ onMounted(async () => {
       isMaximized.value = await appWindow.isMaximized();
     });
 
-    const unlistenFocus = await appWindow.onFocusChanged(({ payload: focused }) => {
-      isFocused.value = focused;
-    });
-
     (window as any).__unlistenResize = unlistenResize;
-    (window as any).__unlistenFocus = unlistenFocus;
   } catch (error) {
     console.error('Failed to detect platform:', error);
     const isMac = isMacOSBrowser();
@@ -142,9 +136,6 @@ onUnmounted(() => {
 
   if ((window as any).__unlistenResize) {
     (window as any).__unlistenResize();
-  }
-  if ((window as any).__unlistenFocus) {
-    (window as any).__unlistenFocus();
   }
 });
 
@@ -202,57 +193,14 @@ const handleMaximize = async () => {
 <template>
   <div
     class="window-title-bar glass-medium border-bottom"
-    :class="{ 'fullscreen-mode': isFullscreen && isMacOS_OS, 'is-windows': isWindowsOS }"
+    :class="{
+      'fullscreen-mode': isFullscreen && isMacOS_OS,
+      'is-windows': isWindowsOS,
+    }"
     data-tauri-drag-region
   >
     <div class="left-section" data-tauri-drag-region>
-      <!-- Window controls for macOS -->
-      <div
-        v-if="showWindowControls && isMacOS_OS && !isFullscreen"
-        class="window-controls macos-controls"
-        :class="{ 'window-inactive': !isFocused }"
-      >
-        <button
-          class="window-control-btn close-btn"
-          aria-label="Close"
-          @click="handleClose"
-        >
-          <svg viewBox="0 0 12 12" class="macos-icon">
-            <path
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.1"
-              d="M3.5,3.5 L8.5,8.5 M8.5,3.5 L3.5,8.5"
-            />
-          </svg>
-        </button>
-        <button
-          class="window-control-btn minimize-btn"
-          aria-label="Minimize"
-          @click="handleMinimize"
-        >
-          <svg viewBox="0 0 12 12" class="macos-icon">
-            <path
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.1"
-              d="M2.5,6 L9.5,6"
-            />
-          </svg>
-        </button>
-        <button
-          class="window-control-btn maximize-btn"
-          aria-label="Fullscreen"
-          @click="handleMaximize"
-        >
-          <svg viewBox="0 0 12 12" class="macos-icon">
-            <path
-              fill="currentColor"
-              d="M4.5,3.5 L3.5,3.5 L3.5,4.5 L4.5,3.5 Z M7.5,8.5 L8.5,8.5 L8.5,7.5 L7.5,8.5 Z M3.5,7.5 L3.5,8.5 L4.5,8.5 L3.5,7.5 Z M8.5,4.5 L8.5,3.5 L7.5,3.5 L8.5,4.5 Z"
-            />
-          </svg>
-        </button>
-      </div>
+      <!-- Native macOS traffic lights will float over this area -->
     </div>
 
     <div class="center-section" data-tauri-drag-region>
@@ -374,6 +322,12 @@ const handleMaximize = async () => {
 
 .left-section {
   padding-left: 16px;
+  min-width: 80px; /* Reserve space for native macOS traffic lights */
+}
+
+.window-title-bar.is-windows .left-section {
+  min-width: 0;
+  padding-left: 12px;
 }
 
 .macos-controls {
@@ -395,83 +349,9 @@ const handleMaximize = async () => {
   align-items: center;
 }
 
-.macos-controls {
+.window-controls {
   display: flex;
   gap: 8px;
-  cursor: default;
-}
-
-.window-control-btn {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 0.5px solid rgba(0, 0, 0, 0.12);
-  cursor: default;
-  position: relative;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.1s ease;
-  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.1);
-}
-
-.macos-icon {
-  width: 100%; /* Icons use 12x12 viewBox, so fill container */
-  height: 100%;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-  pointer-events: none;
-}
-
-.macos-controls:hover .macos-icon {
-  opacity: 1;
-}
-
-.close-btn {
-  background: #ff5f56;
-}
-
-.close-btn:active {
-  background: #bf4942;
-}
-
-.close-btn .macos-icon {
-  color: #4b0002;
-}
-
-.minimize-btn {
-  background: #ffbd2e;
-}
-
-.minimize-btn:active {
-  background: #be8e22;
-}
-
-.minimize-btn .macos-icon {
-  color: #975700;
-}
-
-.maximize-btn {
-  background: #27c93f;
-}
-
-.maximize-btn:active {
-  background: #1e9630;
-}
-
-.maximize-btn .macos-icon {
-  color: #006500;
-}
-
-.window-inactive .window-control-btn {
-  background: #e1e1e1 !important;
-  border-color: #cfcfcf !important;
-  box-shadow: none !important;
-}
-
-.window-inactive .macos-icon {
-  display: none;
 }
 
 .windows-control-btn {
