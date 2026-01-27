@@ -55,6 +55,9 @@
   --color-macos-minimize: #febc2e;
   --color-macos-maximize: #28c840;
 
+  --font-mono: ui-monospace, Monaco, Menlo, Consolas, 'Cascadia Code',
+    'Ubuntu Mono', monospace;
+
   /* macOS glass effect */
   --blur-light: blur(30px) saturate(180%);
   --blur-medium: blur(50px) saturate(180%);

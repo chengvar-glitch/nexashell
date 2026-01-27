@@ -131,7 +131,7 @@
 
 .load-values {
   color: #999;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .sub-label {
@@ -178,7 +178,7 @@
 
 .latency-value {
   font-weight: 600;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .toggle-handle {
@@ -526,7 +526,7 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  font-family: monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   margin-left: auto;
   font-size: 10px;
@@ -664,7 +664,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: 'Monaco', 'Courier New', monospace;
+  font-family: var(--font-mono);
   letter-spacing: -0.2px;
 }
 
@@ -762,7 +762,7 @@
 .metric-value {
   font-size: 10px;
   color: #888;
-  font-family: 'Monaco', monospace;
+  font-family: var(--font-mono);
 }
 
 .task-message {
@@ -844,7 +844,7 @@
 
 .percentage {
   fill: #aaa;
-  font-family: 'Monaco', monospace;
+  font-family: var(--font-mono);
   font-size: 8px;
   text-anchor: middle;
   font-weight: 600;

@@ -1533,7 +1533,7 @@ onMounted(async () => {
   margin-top: 6px;
   padding: 6px 8px;
   border-radius: 3px;
-  font-family: monospace;
+  font-family: var(--font-mono);
 }
 
 .path-status.success {

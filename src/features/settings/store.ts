@@ -8,7 +8,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     cursorStyle: 'block',
     cursorBlink: true,
     fontSize: 14,
-    fontFamily: 'Monaco, Menlo, Ubuntu Mono, monospace',
+    fontFamily: 'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
     scrollback: 80000,
   },
 };
@@ -18,7 +18,19 @@ export const useSettingsStore = defineStore('settings', {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       try {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+        const parsed = JSON.parse(stored);
+        // Migrate old default font family if necessary
+        if (
+          parsed.terminal &&
+          parsed.terminal.fontFamily === 'Monaco, Menlo, Ubuntu Mono, monospace'
+        ) {
+          parsed.terminal.fontFamily = DEFAULT_SETTINGS.terminal.fontFamily;
+        }
+        return {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          terminal: { ...DEFAULT_SETTINGS.terminal, ...(parsed.terminal || {}) },
+        };
       } catch (e) {
         console.error('Failed to parse settings from localStorage', e);
       }
