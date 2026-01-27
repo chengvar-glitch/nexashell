@@ -1,166 +1,172 @@
 # NexaShell
 
-Lightweight terminal manager and SSH client packaged as a Tauri desktop application.
+Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri desktop application.
 
-**Status:** active development
+[![Status](https://img.shields.io/badge/Status-active--development-green.svg)](https://github.com/chengvar/nexashell)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**License:** MIT — see LICENSE
+NexaShell combines the safety and performance of Rust with a modern, high-productivity web-based UI to provide a seamless server management experience.
 
-**Contents**
+---
 
-- **Overview** — what the project is
-- **Installation** — dependencies and local setup
-- **Development** — how to develop and run locally
-- **Running** — building and running the app
-- **Terminal architecture** — how frontend and backend interact
-- **Key IPC commands** — Tauri RPC surface for SSH
-- **Project structure** — important files and locations
+## 🚀 Key Features
 
-**Overview**
+- **Multi-Session Management**: Organize and switch between multiple SSH sessions using a robust tab-based interface.
+- **Session Persistence & Grouping**: Securely store server credentials with support for hierarchical grouping and custom tagging.
+- **Hardware-Accelerated Terminal**: Integrated terminal with low-latency rendering, supporting complex CLI tools and character encoding.
+- **Integrated SFTP Support**: Built-in file explorer and transfer capabilities for easy remote file manipulation.
+- **Real-time Server Dashboard**: Monitor remote server status (CPU, Memory, Disk) directly from the connection view.
+- **Customizable Workspace**: Support for Dark/Light modes and flexible UI layouts.
+- **Cross-Platform**: Consistent experience across macOS (Apple Silicon/Intel), Windows, and Linux.
 
-NexaShell is a desktop terminal manager built with Vue 3 + TypeScript (Vite) and packaged with Tauri (Rust) for native integrations. The frontend renders terminals and UI; the Rust backend manages SSH connections and system-level operations.
+---
 
-**Installation (macOS / Linux / Windows)**
+## 🏗️ Architecture Design
 
-Prerequisites:
+NexaShell adopts a **Multi-Process Architecture** powered by [Tauri](https://tauri.app/), separating the UI concerns from the low-level system operations.
 
-- Node.js (recommended via nvm) and pnpm
-- Rust toolchain (stable) and cargo
-- Tauri CLI dependencies (platform-specific; see Tauri docs)
+### High-Level Overview
 
-Quick setup:
+```mermaid
+graph TD
+    subgraph "Frontend Layer (Vue 3)"
+        UI[User Interface Components]
+        Store[Pinia State Management]
+        EB[Event Bus / Shortcuts]
+    end
+
+    subgraph "Bridge (Tauri IPC)"
+        Invoke[Tauri Invoke/Events]
+    end
+
+    subgraph "Backend Layer (Rust Core)"
+        SM[SshManager]
+        TM[TerminalManager]
+        DB[Database Protocol]
+        SEC[Encryption Module]
+    end
+
+    UI <--> Invoke <--> SM
+    UI <--> Invoke <--> TM
+    Store <--> Invoke <--> DB
+    SM <--> SSH[Remote Server via SSH2]
+```
+
+### 🧩 Layer Responsibilities
+
+- **Frontend (View Layer)**: Built with Vue 3 and TypeScript. Pinia handles session lifecycle, user settings, and UI states. Uses `xterm.js` with WebGL acceleration for GPU-accelerated rendering.
+- **Backend (Service Layer)**: Built on `ssh2-rs` and `tokio`. Handles high-performance, non-blocking SSH communication and local data persistence with AES encryption.
+
+---
+
+## 🔗 Key Workflows
+
+### SSH Connection Sequence
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Vue Frontend
+    participant B as Rust Backend (SshManager)
+    participant S as Remote Server
+
+    U->>F: Input Credentials & Click "Connect"
+    F->>F: Validate Inputs
+    F->>B: tauri::invoke("connect_ssh", config)
+    B->>B: Initialize SSH2 Session
+    B->>S: TCP Handshake (IP:Port)
+    S-->>B: TCP Connected
+    B->>S: SSH Key Exchange & Auth
+    S-->>B: Auth Successful
+    B->>B: Spawn Non-blocking Read/Write Tasks
+    B-->>F: Success Response + SessionID
+    F->>F: Initialize Terminal UI & Tab
+```
+
+### Terminal I/O Stream
+
+```mermaid
+sequenceDiagram
+    participant UI as Terminal UI
+    participant PC as Pinia / Event Manager
+    participant RB as Rust Backend
+    participant RS as Remote Shell
+
+    UI->>PC: User Keypress (e.g., 'ls')
+    PC->>RB: tauri::invoke("send_ssh_input", data)
+    RB->>RS: Write to SSH Channel
+    RS-->>RB: Stdout/Stderr Data
+    RB->>RB: Buffer & Optimize Output
+    RB->>PC: tauri::emit("ssh_output_event")
+    PC->>UI: Update Terminal Buffer
+```
+
+---
+
+## 🛠️ Installation & Development
+
+### Prerequisites
+
+- **Node.js**: (recommended via nvm) and **pnpm**
+- **Rust toolchain**: (stable) and **cargo**
+- **Tauri CLI dependencies**: Platform-specific (see [Tauri documentation](https://tauri.app/v1/guides/getting-started/prerequisites))
+
+### Quick Setup
 
 ```bash
-# install frontend deps
+# Install frontend dependencies
 pnpm install
 
-# (optional) ensure Rust toolchain is installed
-rustup toolchain install stable
-
-# run native development (opens the Tauri window)
+# Run native development (opens the Tauri window)
 pnpm tauri dev
 ```
 
-If you only want to run the web/renderer side during UI development:
+### Development Commands
 
-```bash
-pnpm dev
-```
+- **Run Vite dev server** (Web only): `pnpm dev`
+- **Run full native app**: `pnpm tauri dev`
+- **Build production bundle**:
+  ```bash
+  pnpm build
+  pnpm tauri build
+  ```
+- **Run Tests**:
+  ```bash
+  pnpm test         # Unit tests (Vitest)
+  pnpm test:ui      # Vitest UI
+  ```
 
-**Development**
+---
 
-- Run the Vite dev server with hot reload:
+## ⚙️ Technical Details
 
-```bash
-pnpm dev
-```
+### Key IPC / Tauri Commands
 
-- Run the full native app (Tauri) for end-to-end testing:
+The backend exposes these Tauri commands and events (implemented in `src-tauri/src/ssh.rs`, `src-tauri/src/db.rs`):
 
-```bash
-pnpm tauri dev
-```
+- **SSH Commands**: `connect_ssh`, `disconnect_ssh`, `send_ssh_input`, `upload_file_sftp`, `probe_remote_path`.
+- **Database Management**: `list_sessions`, `add_session`, `save_session`, `add_group`, `list_groups`.
+- **System**: `get_platform`, `read_file_preview`, `toggle_maximize`.
 
-- Build production renderer assets and package the Tauri app:
+### Project Structure
 
-```bash
-pnpm build
-pnpm tauri build
-```
-
-- Tests:
-
-```bash
-pnpm test         # unit tests (vitest)
-pnpm test:ui      # Vitest UI
-pnpm test:coverage
-```
-
-**Running (release)**
-
-After `pnpm build`, package using Tauri to produce platform-native bundles (macOS .app/.dmg, Windows .msi/.exe, etc.):
-
-```bash
-pnpm tauri build
-```
-
-Artifacts will be created in the Tauri target folders (see `src-tauri/target/`).
-
-**Terminal architecture**
-
-The terminal subsystem is split between the frontend (renderer) and the Rust backend:
-
-- Frontend
-  - Built with Vue 3 + TypeScript and uses `xterm.js` for terminal rendering (see `src/components/terminal/TerminalView.vue`).
-  - The UI manages tabs, session state, and dispatches resize / input events to the backend via Tauri events.
-
-- Backend (Rust, Tauri)
-  - The SSH connection manager is implemented in `src-tauri/src/ssh.rs` and exposes a lightweight session/channel model.
-  - `SshManager` tracks active `SshSession` entries and `SshChannelInfo` per session. Channels encapsulate:
-    - an asynchronous receiver for output chunks,
-    - a sender for frontend input,
-    - a background Tokio task that reads/writes the SSH channel,
-    - a shutdown-capable `TcpStream` used to terminate connections cleanly.
-  - Important runtime behaviors implemented in the backend:
-    - PTY allocation and dynamic resize handling (requests `request_pty` on the SSH channel),
-    - Non-blocking SSH session I/O with batching: backend accumulates output into `OutputChunk`s and emits them periodically to reduce event overhead,
-    - Backpressure protection for frontend input: input processing limits to avoid starving the read loop or blocking the Tokio task.
-
-**Key IPC / Tauri commands (RPC surface)**
-
-The backend exposes these Tauri commands and events for the renderer to consume (implemented in `src-tauri/src/ssh.rs`, `src-tauri/src/db.rs` and wired in `src-tauri/src/lib.rs`):
-
-- SSH Commands:
-  - `connect_ssh` — open and initialize an SSH session and PTY
-  - `disconnect_ssh` — terminate a session and clean up resources
-  - `send_ssh_input` — forward user input to the SSH channel
-
-- Database Commands (Management):
-  - `list_sessions`, `add_session`, `edit_session`, `delete_session` — manage SSH connections
-  - `list_groups`, `add_group`, `edit_group`, `delete_group` — manage connection groups
-  - `list_tags`, `add_tag`, `edit_tag`, `delete_tag` — manage session tags
-  - `link_session_group`, `link_session_tag` — create associations
-
-- Events (emitted by backend):
-  - `ssh-output-<session_id>` — carries `OutputChunk` payloads with seq, output, and timestamp
-  - `ssh-input-<session_id>` — listened for by the backend to receive input from UI (renderer emits this)
-  - `ssh-resize-<session_id>` — resize payload for PTY adjustments
-
-**Frontend rendering architecture**
-
-The terminal frontend uses `xterm.js` with WebGL acceleration for GPU-accelerated rendering. To optimize performance:
-
-- SSH output is received via Tauri events (push-based, not polling)
-- Writes to xterm are batched and flushed using `requestAnimationFrame` for per-frame rendering
-- Output deduplication is enforced via sequence numbers to prevent duplicate or out-of-order text
-
-**Project structure (high level)**
-
-- `src/` — frontend renderer (Vue 3 + TypeScript)
-  - `src/components/` — reusable UI components
-  - `src/features/` — feature-based modules (session, settings, tabs, etc.)
-    - `src/features/session/api.ts` — Tauri RPC wrappers
-  - `src/core/` — core utilities, constants, and i18n
-- `src-tauri/` — Rust backend and Tauri config
+- `src/` — Frontend renderer (Vue 3 + TypeScript)
+  - `src/components/` — UI components (SSH form, Terminal, Dashboards)
+  - `src/features/` — Feature modules (session, settings, tabs)
+  - `src/core/` — Core utilities (i18n, shortcut manager, themes)
+- `src-tauri/` — Rust backend
   - `src-tauri/src/ssh.rs` — SSH manager and channel implementation
   - `src-tauri/src/db.rs` — SQLite database manager
-  - `src-tauri/src/lib.rs` — Tauri initialization and command registration
+  - `src-tauri/src/lib.rs` — Tauri initialization
 
-**Contributing**
+---
 
-Contributions are welcome. Please follow these steps:
+## 🛡️ Security
 
-1. Fork the repository.
-2. Create a feature branch.
-3. Run tests and ensure linting/formatting conventions pass (`pnpm lint`, `pnpm format`).
-4. Open a pull request with a clear description of changes.
+- **Credential Safety**: All passwords and private keys are encrypted locally before being stored in the SQLite database.
+- **Rust Memory Safety**: The core SSH logic is implemented in memory-safe Rust, preventing common security vulnerabilities.
+- **Sandboxed WebView**: The frontend runs in a restricted context with communication via secure IPC.
 
-**License**
+---
 
-This project is released under the MIT License. See the `LICENSE` file for full terms.
-
-If you'd like, I can also:
-
-- add a short developer quickstart script,
-- generate a CONTRIBUTING.md,
-- or add CI steps for building and testing. Let me know which you prefer.
+**NexaShell** is licensed under the [MIT License](LICENSE).
