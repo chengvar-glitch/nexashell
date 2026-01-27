@@ -61,6 +61,30 @@
   --blur-heavy: blur(80px) saturate(180%);
 }
 
+/* Base styles and system font stack */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  /* 工业级全球语言字体栈：
+     1. 西文 (macOS/Win)：-apple-system, Segoe UI (覆盖俄语、拉丁、希腊语)
+     2. 日文 (macOS/Win)：PingFang SC, Hiragino, Yu Gothic UI (防止回退到中文字体导致字形错误)
+     3. 中文：Microsoft YaHei, 微软雅黑
+     4. 韩文：Malgun Gothic
+  */
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', '微软雅黑',
+    'Yu Gothic UI', 'Meiryo', 'Malgun Gothic', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: transparent;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 /* Dark theme styles - applied via class or system preference */
 @media (prefers-color-scheme: dark) {
   :root:not(.theme-light) {

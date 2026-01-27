@@ -424,6 +424,7 @@ import {
 } from 'lucide-vue-next';
 import { themeManager, type ThemeMode } from '@/core/utils/theme-manager';
 import { useSettingsStore, type CursorStyle } from '@/features/settings';
+import { isMacOSBrowser } from '@/core/utils/platform/platform-detection';
 
 interface Props {
   visible?: boolean;
@@ -486,8 +487,7 @@ const menuItems = computed(() => [
   { key: 'about', label: t('settings.about'), icon: Info },
 ]);
 
-const isMac =
-  typeof navigator !== 'undefined' && navigator.userAgent.includes('Mac');
+const isMac = isMacOSBrowser();
 const cmdKey = isMac ? '⌘' : 'Ctrl';
 const shiftKey = isMac ? '⇧' : 'Shift';
 

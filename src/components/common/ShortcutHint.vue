@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { formatShortcut } from '@/core/utils/platform/platform-detection';
 
 interface Props {
   text: string;
@@ -11,6 +12,8 @@ const props = withDefaults(defineProps<Props>(), {
   position: 'top',
   offset: 8,
 });
+
+const formattedText = computed(() => formatShortcut(props.text));
 
 const tooltipRef = ref<HTMLElement | null>(null);
 const tooltipPosition = ref({ top: '0px', left: '0px' });
@@ -65,7 +68,7 @@ onUnmounted(() => {
   <div class="shortcut-hint-wrapper">
     <slot />
     <div ref="tooltipRef" class="shortcut-hint" :style="{ ...tooltipPosition }">
-      <span class="shortcut-text">{{ text }}</span>
+      <span class="shortcut-text">{{ formattedText }}</span>
     </div>
   </div>
 </template>

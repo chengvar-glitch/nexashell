@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isMacOSBrowser, isWindowsBrowser } from '@/core/utils/app-utils';
+import {
+  isMacOSBrowser,
+  isWindowsBrowser,
+  formatShortcut,
+} from '@/core/utils/platform/platform-detection';
 
 /**
  * SearchBox Component
@@ -105,15 +109,7 @@ onMounted(async () => {
 /**
  * Computes platform-aware shortcut text for the placeholder.
  */
-const shortcutText = computed(() => {
-  if (isMacOS_OS.value) {
-    return 'Cmd+K';
-  } else if (isWindowsOS.value) {
-    return 'Ctrl+K';
-  } else {
-    return 'Ctrl+K';
-  }
-});
+const shortcutText = computed(() => formatShortcut('Cmd+K'));
 
 /**
  * Generates the final placeholder string including the shortcut key.

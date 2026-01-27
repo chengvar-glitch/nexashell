@@ -88,6 +88,7 @@ import {
 import { sessionApi } from '@/features/session';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
+import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
 
 interface SearchItem {
@@ -191,7 +192,7 @@ const searchItems = computed(() => [
     title: t('settings.openSettings'),
     description: t('search.descSettings'),
     icon: Settings,
-    shortcut: 'Cmd+,',
+    shortcut: formatShortcut('Cmd+,'),
     category: 'settings',
     action: () => window.dispatchEvent(new CustomEvent('app:open-settings')),
   },
@@ -200,7 +201,7 @@ const searchItems = computed(() => [
     title: t('search.newTerminal'),
     description: t('search.descTerminal'),
     icon: Terminal,
-    shortcut: 'Cmd+Shift+T',
+    shortcut: formatShortcut('Cmd+Shift+T'),
     category: 'terminal',
     action: () => window.dispatchEvent(new CustomEvent('app:new-local-tab')),
   },
@@ -209,7 +210,7 @@ const searchItems = computed(() => [
     title: t('search.newSSH'),
     description: t('search.descSSH'),
     icon: Server,
-    shortcut: 'Cmd+T',
+    shortcut: formatShortcut('Cmd+T'),
     category: 'terminal',
     action: () => window.dispatchEvent(new CustomEvent('app:open-ssh-form')),
   },
@@ -226,7 +227,7 @@ const searchItems = computed(() => [
     title: t('search.commandPalette'),
     description: t('search.descCommand'),
     icon: Command,
-    shortcut: 'Cmd+Shift+P',
+    shortcut: formatShortcut('Cmd+Shift+P'),
     category: 'commands',
     action: () =>
       eventBus.emit(APP_EVENTS.OPEN_SETTINGS, { section: 'shortcuts' }),

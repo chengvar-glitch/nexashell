@@ -76,3 +76,23 @@ export function isWindowsBrowser(): boolean {
     typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
   );
 }
+
+/**
+ * Get platform-specific command key label (Cmd or Ctrl)
+ */
+export function getModifierKey(): string {
+  return isMacOSBrowser() ? 'Cmd' : 'Ctrl';
+}
+
+/**
+ * Format a shortcut string based on platform
+ * replaces "Cmd+" with "Ctrl+" if not on macOS
+ */
+export function formatShortcut(shortcut: string): string {
+  if (isMacOSBrowser()) return shortcut;
+  return shortcut
+    .replace(/Cmd\+/g, 'Ctrl+')
+    .replace(/Option\+/g, 'Alt+')
+    .replace(/Command/g, 'Ctrl')
+    .replace(/Cmd/g, 'Ctrl');
+}

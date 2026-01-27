@@ -24,6 +24,7 @@ import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
+import { formatShortcut } from '@/core/utils/platform/platform-detection';
 
 // Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
@@ -53,6 +54,7 @@ const translatedMenuItems = computed(() =>
   NEW_TAB_MENU_ITEMS.map(item => ({
     ...item,
     label: t(item.label),
+    shortcut: item.shortcut ? formatShortcut(item.shortcut) : undefined,
     icon: item.key === 'local' ? Terminal : Server,
   }))
 );
@@ -245,7 +247,10 @@ onBeforeUnmount(() => {
       </TransitionGroup>
 
       <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
-        <ShortcutHint text="Cmd+T to create SSH connection" position="bottom">
+        <ShortcutHint
+          :text="formatShortcut('Cmd+T') + ' to create SSH connection'"
+          position="bottom"
+        >
           <button
             class="action-btn"
             :class="{ 'is-active': isDropdownOpen }"
