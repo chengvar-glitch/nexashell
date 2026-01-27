@@ -61,6 +61,7 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     // Windows/Linux use custom title bar, so hide native decorations
                     let _ = window.set_decorations(false);
+                    let _ = window.center();
                 }
             }
 
