@@ -105,6 +105,7 @@ const isDragging = ref(false);
 const currentRemotePath = ref('.');
 const remoteHomeDir = ref('');
 const lastPathDetectionSource = ref<string>('none'); // Track how we detected the path
+const lastKnownAbsolutePath = ref('');
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
@@ -174,6 +175,44 @@ interface UploadProgressPayload {
   error?: string;
 }
 
+const normalizeRemotePath = (path: string): string => {
+  if (!path.startsWith('/')) return path;
+  const parts = path.split('/');
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      stack.pop();
+    } else {
+      stack.push(part);
+    }
+  }
+  return '/' + stack.join('/');
+};
+
+const resolveRelativeCd = (
+  relativePath: string,
+  basePath: string,
+  homePath: string
+): string => {
+  if (!relativePath) return '';
+  if (relativePath === '-') return '';
+  if (relativePath === '.') return basePath || '';
+  if (relativePath === '..') {
+    return basePath ? normalizeRemotePath(`${basePath}/..`) : '';
+  }
+  if (relativePath === '~') {
+    return homePath ? normalizeRemotePath(homePath) : '';
+  }
+  if (relativePath.startsWith('~/')) {
+    return homePath
+      ? normalizeRemotePath(`${homePath}/${relativePath.slice(2)}`)
+      : '';
+  }
+  if (!basePath) return '';
+  return normalizeRemotePath(`${basePath}/${relativePath}`);
+};
+
 /**
  * Detect current path from terminal buffer
  */
@@ -184,6 +223,7 @@ const detectRemotePath = async () => {
   let hasRecentRelativeCd = false; // Track if user did cd .., cd -, etc
   let promptGuess = '';
   let cdGuess = '';
+  let relativeCdGuess = '';
   let pwdOutputGuess = '';
 
   // Try to guess path from terminal buffer (most accurate for interactive shell)
@@ -242,6 +282,9 @@ const detectRemotePath = async () => {
                 lineIndex: index,
               });
             }
+            if (!relativeCdGuess) {
+              relativeCdGuess = relativeCdMatch[1];
+            }
           } else if (absoluteCdMatch && absoluteCdMatch[2]) {
             let path = absoluteCdMatch[2];
             if (path.endsWith('/') && path !== '/') {
@@ -249,6 +292,17 @@ const detectRemotePath = async () => {
             }
             if (path.startsWith('/')) {
               logger.debug('Recorded cd history', { path, index });
+            } else {
+              if (!hasRecentRelativeCd) {
+                hasRecentRelativeCd = true;
+                logger.debug('Detected relative cd command', {
+                  command: `cd ${path}`,
+                  lineIndex: index,
+                });
+              }
+              if (!relativeCdGuess) {
+                relativeCdGuess = path;
+              }
             }
           }
         }
@@ -467,61 +521,41 @@ const detectRemotePath = async () => {
     }
   }
 
-  // If still no path and we have just a prompt name, we should NOT use it directly
-  // Instead, we should try to probe the remote path because this situation
-  // usually means a relative cd happened and we're unsure of the absolute path
-  if (
-    hasRecentRelativeCd &&
-    !detectedPath &&
-    promptGuess &&
-    !promptGuess.startsWith('/')
-  ) {
-    logger.warn(
-      'Relative cd detected with only prompt name, should probe instead',
-      { promptGuess }
+  if (!detectedPath && relativeCdGuess) {
+    const resolved = resolveRelativeCd(
+      relativeCdGuess,
+      lastKnownAbsolutePath.value,
+      remoteHomeDir.value
     );
-    // Don't set detectedPath here - let the probe below handle it
-    // This prevents using relative paths like "sankuai" as-is
-  }
-
-  // If relative cd was detected, probe for actual pwd
-  // Relative cd commands (cd .., cd -, cd .) change the directory in ways we can't predict
-  // This is CRITICAL to maintain accuracy
-  if (hasRecentRelativeCd && props.sessionId && props.tabType === 'ssh') {
-    logger.info('Probing remote path (relative cd detected)', {
-      detectionSource,
-      detectedPath,
-      hasPath: !!detectedPath,
-    });
-    try {
-      const probedPath = await invoke<string>('probe_remote_path', {
-        sessionId: props.sessionId,
+    if (resolved) {
+      detectedPath = resolved;
+      detectionSource = 'relative-cd-resolved';
+      hasRecentRelativeCd = false;
+      logger.debug('✅ Resolved relative cd with last known path', {
+        relativeCd: relativeCdGuess,
+        basePath: lastKnownAbsolutePath.value,
+        resolved,
       });
-      if (probedPath && probedPath.startsWith('/')) {
-        // Store home directory for expansion
-        if (!remoteHomeDir.value) {
-          remoteHomeDir.value = probedPath;
-        }
-        detectedPath = probedPath;
-        detectionSource = 'probed-after-relative-cd';
-        logger.debug('✅ Successfully probed path after relative cd', {
-          probedPath,
-        });
-      }
-    } catch (e) {
-      logger.debug('Probe failed', e);
     }
   }
 
   // Final fallback
   if (!detectedPath) {
-    detectedPath = remoteHomeDir.value || '.';
-    detectionSource = 'fallback-home';
+    detectedPath =
+      lastKnownAbsolutePath.value || remoteHomeDir.value || '.';
+    detectionSource = lastKnownAbsolutePath.value
+      ? 'fallback-last-known'
+      : 'fallback-home';
   }
 
   // Update the UI with the detected path
   currentRemotePath.value = detectedPath;
   lastPathDetectionSource.value = detectionSource;
+  if (currentRemotePath.value.startsWith('/')) {
+    lastKnownAbsolutePath.value = normalizeRemotePath(
+      currentRemotePath.value
+    );
+  }
   logger.info('Path detection complete', {
     finalPath: currentRemotePath.value,
     source: detectionSource,
@@ -594,23 +628,26 @@ const processFileUpload = async (path: string) => {
       }
     }
 
+    // Resolve relative paths against last known absolute path
+    if (
+      targetDir &&
+      !targetDir.startsWith('/') &&
+      lastKnownAbsolutePath.value
+    ) {
+      targetDir = normalizeRemotePath(
+        `${lastKnownAbsolutePath.value}/${targetDir}`
+      );
+      pathSource = 'resolved-relative-to-last-known';
+    }
+
     // 2. Robust path normalization
     let remoteFilePath = '';
 
     if (!targetDir || targetDir === '.' || targetDir === '') {
-      try {
-        const probedPath = await invoke<string>('probe_remote_path', {
-          sessionId: props.sessionId,
-        });
-        if (probedPath && probedPath.startsWith('/')) {
-          targetDir = probedPath;
-          pathSource = 'probed';
-        } else {
-          targetDir = remoteHomeDir.value || '.';
-          pathSource = 'fallback-home';
-        }
-      } catch (probeErr) {
-        logger.debug('Probe failed, using home or dot', probeErr);
+      if (lastKnownAbsolutePath.value) {
+        targetDir = lastKnownAbsolutePath.value;
+        pathSource = 'last-known-absolute';
+      } else {
         targetDir = remoteHomeDir.value || '.';
         pathSource = 'fallback-home';
       }
@@ -1002,6 +1039,11 @@ onMounted(async () => {
       } else {
         currentRemotePath.value = data;
       }
+      if (currentRemotePath.value.startsWith('/')) {
+        lastKnownAbsolutePath.value = normalizeRemotePath(
+          currentRemotePath.value
+        );
+      }
       logger.debug('Detected remote CWD (OSC 7)', {
         path: currentRemotePath.value,
       });
@@ -1017,6 +1059,11 @@ onMounted(async () => {
       const path = data.substring(2);
       if (path) {
         currentRemotePath.value = path;
+        if (currentRemotePath.value.startsWith('/')) {
+          lastKnownAbsolutePath.value = normalizeRemotePath(
+            currentRemotePath.value
+          );
+        }
         logger.debug('Detected remote CWD (OSC 9;9)', { path });
       }
       return true;
@@ -1038,6 +1085,11 @@ onMounted(async () => {
           currentRemotePath.value === '~'
         ) {
           currentRemotePath.value = potentialPath;
+          if (currentRemotePath.value.startsWith('/')) {
+            lastKnownAbsolutePath.value = normalizeRemotePath(
+              currentRemotePath.value
+            );
+          }
         }
       }
     }
@@ -1050,6 +1102,11 @@ onMounted(async () => {
           currentRemotePath.value === '~'
         ) {
           currentRemotePath.value = match[1].trim();
+          if (currentRemotePath.value.startsWith('/')) {
+            lastKnownAbsolutePath.value = normalizeRemotePath(
+              currentRemotePath.value
+            );
+          }
         }
       }
     }
