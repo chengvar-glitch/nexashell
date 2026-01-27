@@ -71,11 +71,6 @@ const TERMINAL_CONFIG = {
   },
 };
 
-const INPUT_BUFFER_CONFIG = {
-  FLUSH_THRESHOLD: 32,
-  FLUSH_DELAY_MS: 20,
-};
-
 const LATENCY_THRESHOLD_MS = 100;
 
 /**
@@ -977,7 +972,6 @@ onMounted(async () => {
     cursorBlink: settingsStore.terminal.cursorBlink,
     cursorStyle: settingsStore.terminal.cursorStyle,
     theme: TERMINAL_CONFIG.THEME,
-    convertEol: true,
   });
 
   // Watch for cursor style changes
@@ -1322,55 +1316,20 @@ onMounted(async () => {
    * Terminal input handling
    * Using onData instead of onKey to properly handle IME (Chinese input)
    */
-  let inputBuffer = '';
-  let inputFlushTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  const flushInput = async (): Promise<void> => {
-    if (!inputBuffer || !props.sessionId) return;
-
-    const data = inputBuffer;
-    inputBuffer = '';
-
-    try {
-      await emit(`ssh-input-${props.sessionId}`, { input: data });
-    } catch (error) {
-      logger.error('Input emit failed', error);
-    }
-  };
-
   terminal.onData(async (data: string) => {
     const hasSession =
       props.sessionId && sessionStore.hasSession(props.sessionId);
 
     if (hasSession) {
-      // For control characters (like Backspace \x7f, Enter \r, Ctrl+C \x03),
-      // we flush immediately to ensure responsiveness and correct handling.
-      const isControlChar =
-        data.length === 1 && (data.charCodeAt(0) < 32 || data.charCodeAt(0) === 127);
-
-      if (isControlChar) {
-        // Flush existing buffer first, then send the control character immediately
-        if (inputBuffer.length > 0) {
-          clearTimeout(inputFlushTimeout!);
-          await flushInput();
-        }
+      // Send data immediately to ensure interactive tools (vim, ssh, etc.)
+      // work correctly without broken escape sequences or latency.
+      try {
         await emit(`ssh-input-${props.sessionId}`, { input: data });
-      } else {
-        inputBuffer += data;
-
-        if (inputBuffer.length > INPUT_BUFFER_CONFIG.FLUSH_THRESHOLD) {
-          clearTimeout(inputFlushTimeout!);
-          await flushInput();
-        } else {
-          clearTimeout(inputFlushTimeout!);
-          inputFlushTimeout = setTimeout(
-            flushInput,
-            INPUT_BUFFER_CONFIG.FLUSH_DELAY_MS
-          );
-        }
+      } catch (error) {
+        logger.error('Input emit failed', error);
       }
     } else if (data.length === 1 && data >= ' ' && data !== '\x7f') {
-      // No active session: echo printable characters locally (excluding Backspace)
+      // No active session: echo printable characters locally
       terminal?.write(data);
     }
   });
