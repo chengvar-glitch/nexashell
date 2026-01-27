@@ -150,14 +150,14 @@ const dynamicPlaceholder = computed(() => {
 
 .search-input {
   width: 100%;
-  max-width: 860px;
-  min-width: 500px;
-  padding: 10px 20px;
-  padding-left: 42px;
-  border-radius: var(--radius-2xl);
+  max-width: 850px;
+  min-width: 450px;
+  height: 30px;
+  padding: 0 16px 0 38px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-secondary);
   background-color: var(--color-bg-elevated);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-primary);
   font-family: inherit;
   outline: none;
@@ -172,7 +172,7 @@ const dynamicPlaceholder = computed(() => {
 }
 
 .search-input::placeholder {
-  text-align: center;
+  text-align: left;
   color: var(--color-text-placeholder);
   font-weight: 400;
 }
@@ -201,7 +201,7 @@ const dynamicPlaceholder = computed(() => {
 
 /* Focus state: rounded bottom corners removed to integrate with dropdown */
 .search-input-focused {
-  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   border-bottom-color: transparent;
 }
 </style>

@@ -57,8 +57,27 @@
             class="add-input"
             placeholder="Group name..."
             autofocus
+            @blur="handleGroupInputBlur"
             @keydown="handleGroupInputKeydown"
           />
+          <div class="add-actions">
+            <button
+              class="action-btn tiny confirm"
+              title="Confirm"
+              @mousedown.prevent
+              @click="handleAddGroup"
+            >
+              <Check :size="12" />
+            </button>
+            <button
+              class="action-btn tiny cancel"
+              title="Cancel"
+              @mousedown.prevent
+              @click="handleGroupInputBlur"
+            >
+              <X :size="12" />
+            </button>
+          </div>
         </div>
         <nav class="sidebar-nav">
           <div v-for="group in groups" :key="group.id" class="nav-item-wrapper">
@@ -130,8 +149,27 @@
             class="add-input"
             placeholder="Tag name..."
             autofocus
+            @blur="handleTagInputBlur"
             @keydown="handleTagInputKeydown"
           />
+          <div class="add-actions">
+            <button
+              class="action-btn tiny confirm"
+              title="Confirm"
+              @mousedown.prevent
+              @click="handleAddTag"
+            >
+              <Check :size="12" />
+            </button>
+            <button
+              class="action-btn tiny cancel"
+              title="Cancel"
+              @mousedown.prevent
+              @click="handleTagInputBlur"
+            >
+              <X :size="12" />
+            </button>
+          </div>
         </div>
         <div class="tag-cloud">
           <div v-for="tag in tags" :key="tag.id" class="tag-item-wrapper">
@@ -406,6 +444,7 @@ import {
   Pencil,
   Trash2,
   Check,
+  X,
   GripVertical,
   MoreVertical,
 } from 'lucide-vue-next';
@@ -853,12 +892,23 @@ const handleAddTag = async () => {
   }
 };
 
+const handleGroupInputBlur = () => {
+  // Discard if empty or when blurring
+  showAddGroupInput.value = false;
+  newGroupName.value = '';
+};
+
+const handleTagInputBlur = () => {
+  // Discard if empty or when blurring
+  showAddTagInput.value = false;
+  newTagName.value = '';
+};
+
 const handleGroupInputKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter') {
     handleAddGroup();
   } else if (e.key === 'Escape') {
-    showAddGroupInput.value = false;
-    newGroupName.value = '';
+    handleGroupInputBlur();
   }
 };
 
@@ -866,8 +916,7 @@ const handleTagInputKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter') {
     handleAddTag();
   } else if (e.key === 'Escape') {
-    showAddTagInput.value = false;
-    newTagName.value = '';
+    handleTagInputBlur();
   }
 };
 
@@ -1321,10 +1370,29 @@ const onCancelDelete = () => {
 
 .add-input-wrapper {
   padding: 0 12px 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.add-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.action-btn.confirm:hover {
+  background: rgba(40, 200, 64, 0.15);
+  color: var(--color-macos-maximize);
+}
+
+.action-btn.cancel:hover {
+  background: rgba(255, 95, 87, 0.15);
+  color: var(--color-macos-close);
 }
 
 .add-input {
-  width: 100%;
+  flex: 1;
+  width: 0; /* Allow flex to shrink if needed */
   padding: 6px 8px;
   border: 1px solid var(--color-primary);
   border-radius: var(--radius-md);

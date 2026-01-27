@@ -42,7 +42,12 @@ import { eventBus } from '@/core/utils/event-bus';
 import { createLogger } from '@/core/utils/logger';
 import { TAB_TYPE } from '@/features/tabs';
 
+import { isWindows } from '@/core/utils/platform/platform-detection';
+
 const logger = createLogger('APP');
+
+// Platform state
+const isWindowsState = ref(false);
 
 // Global contextmenu handler reference so we can remove it on unmount
 let __globalContextMenuHandler: ((e: MouseEvent) => void) | null = null;
@@ -108,7 +113,9 @@ provide(SHOW_SETTINGS_KEY, showSettings);
 const tabManagement = useTabManagement();
 provide(TAB_MANAGEMENT_KEY, tabManagement);
 
-onMounted(() => {
+onMounted(async () => {
+  isWindowsState.value = await isWindows();
+
   // Initialize theme system
   themeManager.initialize();
 
@@ -637,7 +644,7 @@ const handleCreateTab = (tab: any) => {
 
 <template>
   <div id="app" class="app-wrapper">
-    <div class="app-root">
+    <div class="app-root" :class="{ 'is-windows': isWindowsState }">
       <template v-if="!showWelcome">
         <WindowTitleBar />
         <AppTabs />
@@ -709,6 +716,11 @@ const handleCreateTab = (tab: any) => {
   transition: all var(--transition-base);
   /* Use clip-path to force cropping and prevent black edges from rendering overflow */
   clip-path: inset(0 round var(--radius-2xl));
+}
+
+.app-root.is-windows {
+  border-radius: 0;
+  clip-path: none;
 }
 
 /* Fullscreen mode: remove rounded corners and borders */

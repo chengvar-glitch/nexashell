@@ -303,7 +303,12 @@ const handleMaximize = async () => {
 }
 
 .window-title-bar.is-windows {
-  border-radius: 0;
+  border-radius: 0 !important;
+}
+
+.window-title-bar.is-windows .right-section {
+  align-items: stretch;
+  padding-right: 0; /* Ensure buttons are flush to the right edge */
 }
 
 .window-title-bar.fullscreen-mode {
@@ -354,17 +359,21 @@ const handleMaximize = async () => {
   gap: 8px;
 }
 
+.window-title-bar.is-windows .window-controls {
+  gap: 0;
+}
+
 .windows-control-btn {
   width: 46px;
   height: 100%;
   border: none;
   background: transparent;
-  cursor: pointer;
+  cursor: default; /* Windows uses standard arrow cursor for these buttons */
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--color-text-primary);
-  transition: background-color 0.1s; /* Windows has a very fast fade */
+  transition: background-color 0.1s;
 }
 
 .windows-control-btn:hover {
