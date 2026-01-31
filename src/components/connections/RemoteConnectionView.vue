@@ -1134,10 +1134,10 @@ onMounted(async () => {
     const key = event.key.toLowerCase();
 
     // 1. Allow global app shortcuts to bubble up to the window
-    // This includes Cmd+T, Cmd+Shift+T, Cmd+W, Cmd+K, Cmd+, and Cmd+Shift+P
+    // This includes Cmd+T, Cmd+Shift+T, Cmd+W, Cmd+P, Cmd+, and Cmd+Shift+P
     if (
       isControlKey &&
-      (['t', 'w', 'k', ','].includes(key) || event.shiftKey)
+      (['t', 'w', 'p', ','].includes(key) || event.shiftKey)
     ) {
       return false;
     }
@@ -1169,7 +1169,7 @@ onMounted(async () => {
       return false;
     }
 
-    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyL') {
+    if ((event.metaKey || event.ctrlKey) && event.code === 'KeyK') {
       terminal?.clear();
       return false;
     }

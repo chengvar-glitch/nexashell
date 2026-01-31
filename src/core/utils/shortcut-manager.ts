@@ -89,7 +89,7 @@ export class ShortcutManager {
 
     // Global shortcuts that should trigger even in input fields
     const isGlobalShortcut =
-      (['k', 'w', 't', 'q', ','].includes(event.key.toLowerCase()) &&
+      (['p', 'w', 't', 'q', ','].includes(event.key.toLowerCase()) &&
         (event.metaKey || event.ctrlKey)) ||
       event.key === 'Escape';
 
@@ -232,7 +232,7 @@ export const PredefinedShortcuts = {
     },
   },
   FOCUS_SEARCH: {
-    key: 'k',
+    key: 'p',
     metaKey: IS_MAC,
     ctrlKey: !IS_MAC,
     shiftKey: false,

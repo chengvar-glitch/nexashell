@@ -109,7 +109,7 @@ onMounted(async () => {
 /**
  * Computes platform-aware shortcut text for the placeholder.
  */
-const shortcutText = computed(() => formatShortcut('Cmd+K'));
+const shortcutText = computed(() => formatShortcut('Cmd+P'));
 
 /**
  * Generates the final placeholder string including the shortcut key.

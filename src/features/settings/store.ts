@@ -8,7 +8,8 @@ const DEFAULT_SETTINGS: SettingsState = {
     cursorStyle: 'block',
     cursorBlink: true,
     fontSize: 14,
-    fontFamily: 'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
+    fontFamily:
+      'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
     scrollback: 80000,
   },
 };
@@ -29,7 +30,10 @@ export const useSettingsStore = defineStore('settings', {
         return {
           ...DEFAULT_SETTINGS,
           ...parsed,
-          terminal: { ...DEFAULT_SETTINGS.terminal, ...(parsed.terminal || {}) },
+          terminal: {
+            ...DEFAULT_SETTINGS.terminal,
+            ...(parsed.terminal || {}),
+          },
         };
       } catch (e) {
         console.error('Failed to parse settings from localStorage', e);
