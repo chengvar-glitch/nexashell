@@ -2,8 +2,8 @@
 
 Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri desktop application.
 
-[![Status](https://img.shields.io/badge/Status-active--development-green.svg)](https://github.com/chengvar/nexashell)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)](https://github.com/chengvar/nexashell)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 NexaShell combines the safety and performance of Rust with a modern, high-productivity web-based UI to provide a seamless server management experience.
 
@@ -12,12 +12,45 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 ## 🚀 Key Features
 
 - **Multi-Session Management**: Organize and switch between multiple SSH sessions using a robust tab-based interface.
-- **Session Persistence & Grouping**: Securely store server credentials with support for hierarchical grouping and custom tagging.
-- **Hardware-Accelerated Terminal**: Integrated terminal with low-latency rendering, supporting complex CLI tools and character encoding.
+- **Session Persistence & Grouping**: Securely store server credentials with support for hierarchical grouping and custom tagging (AES-GCM encrypted).
+- **Hardware-Accelerated Terminal**: Integrated terminal with low-latency rendering powered by `xterm.js` and WebGL.
 - **Integrated SFTP Support**: Built-in file explorer and transfer capabilities for easy remote file manipulation.
 - **Real-time Server Dashboard**: Monitor remote server status (CPU, Memory, Disk) directly from the connection view.
 - **Customizable Workspace**: Support for Dark/Light modes and flexible UI layouts.
-- **Cross-Platform**: Consistent experience across macOS (Apple Silicon/Intel), Windows, and Linux.
+- **Cross-Platform**: Production-ready for macOS (Apple Silicon/Intel), Windows, and Linux.
+
+---
+
+## 🛠️ Getting Started
+
+### Prerequisites
+
+- [Rust](https://www.rust-lang.org/tools/install) (latest stable)
+- [Node.js](https://nodejs.org/) (v18+)
+- [pnpm](https://pnpm.io/installation)
+
+### Build from Source
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/chengvar/nexashell.git
+   cd nexashell
+   ```
+
+2. **Install dependencies**
+   ```bash
+   pnpm install
+   ```
+
+3. **Run in development mode**
+   ```bash
+   pnpm tauri dev
+   ```
+
+4. **Build for production**
+   ```bash
+   pnpm tauri build
+   ```
 
 ---
 
