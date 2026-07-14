@@ -135,5 +135,6 @@ export default {
     themeDark: 'غامق',
     themeSystem: 'نظام',
     getStarted: 'ابدأ',
+    skip: 'تخطي',
   },
 };

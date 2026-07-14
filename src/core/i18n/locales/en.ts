@@ -180,5 +180,6 @@ export default {
     themeDark: 'Dark',
     themeSystem: 'System',
     getStarted: 'Get Started',
+    skip: 'Skip',
   },
 };

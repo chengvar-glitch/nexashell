@@ -136,5 +136,6 @@ export default {
     themeDark: 'Scuro',
     themeSystem: 'Sistema',
     getStarted: 'Inizia',
+    skip: 'Salta',
   },
 };

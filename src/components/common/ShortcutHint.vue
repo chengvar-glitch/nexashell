@@ -90,7 +90,7 @@ onUnmounted(() => {
   z-index: 1000;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--transition-fast);
   border: 0.5px solid var(--color-border-secondary);
 }
 

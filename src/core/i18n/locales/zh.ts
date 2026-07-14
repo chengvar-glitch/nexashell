@@ -179,5 +179,6 @@ export default {
     themeDark: '深色',
     themeSystem: '系统',
     getStarted: '开始',
+    skip: '跳过',
   },
 };

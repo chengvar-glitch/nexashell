@@ -68,11 +68,10 @@ onMounted(async () => {
   const detected = await detectLanguage();
   selectedLanguage.value = detected;
 
-  // 3. After 2.2 seconds (Golden ratio for breathing animation peak),
-  // animate logo to left and show options
+  // 3. After 1.2s, animate logo to left and show options
   setTimeout(() => {
     showOptions.value = true;
-  }, 2200);
+  }, 1200);
 });
 
 const handleThemeSelect = (theme: 'auto' | 'light' | 'dark') => {
@@ -160,6 +159,9 @@ const handleSave = () => {
             <button class="save-btn" @click="handleSave">
               {{ $t('welcome.getStarted') }}
             </button>
+            <button class="skip-btn" @click="handleSave">
+              {{ $t('welcome.skip') }}
+            </button>
           </div>
         </div>
       </div>
@@ -221,7 +223,7 @@ const handleSave = () => {
   transform: translateZ(0);
   backface-visibility: hidden;
   will-change: transform, filter, opacity;
-  transition: filter 0.5s ease;
+  transition: filter 0.5s var(--ease-spring-out);
 }
 
 .theme-dark .logo-img {
@@ -345,6 +347,26 @@ h3 {
   transform: translateY(0);
 }
 
+.skip-btn {
+  display: block;
+  margin: 12px auto 0;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+
+.skip-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.skip-btn:active {
+  transform: scale(0.97);
+}
+
 @keyframes breathing {
   0% {
     transform: translateZ(0) scale(1);
@@ -365,7 +387,7 @@ h3 {
 
 .fade-enter-active,
 .fade-leave-active {
-  transition: opacity 0.8s ease;
+  transition: opacity 0.8s var(--ease-emphasized);
 }
 
 .fade-enter-from,

@@ -454,7 +454,7 @@ const handleClose = () => {
   height: 100%;
   background: var(--color-primary);
   border-radius: 3px;
-  transition: width 0.3s ease;
+  transition: width 0.3s var(--ease-snappy);
 }
 
 .progress-percentage {
@@ -492,7 +492,7 @@ const handleClose = () => {
   gap: 12px;
   font-size: 13px;
   color: var(--color-text-secondary);
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
 }
 
 .status-step.active {
@@ -656,7 +656,7 @@ const handleClose = () => {
   font-size: 0.9em;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
   text-align: center;
 }
 
@@ -692,7 +692,7 @@ const handleClose = () => {
 /* Transition animations */
 .progress-fade-enter-active,
 .progress-fade-leave-active {
-  transition: opacity 0.3s ease;
+  transition: opacity 0.3s var(--ease-spring-out);
 }
 
 .progress-fade-enter-from,

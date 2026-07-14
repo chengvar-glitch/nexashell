@@ -135,5 +135,6 @@ export default {
     themeDark: 'ダーク',
     themeSystem: 'システム',
     getStarted: '始める',
+    skip: 'スキップ',
   },
 };

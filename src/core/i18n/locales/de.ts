@@ -135,5 +135,6 @@ export default {
     themeDark: 'Dunkel',
     themeSystem: 'System',
     getStarted: 'Erste Schritte',
+    skip: 'Überspringen',
   },
 };

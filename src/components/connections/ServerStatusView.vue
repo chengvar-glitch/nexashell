@@ -203,7 +203,7 @@ watch(
   color: #888;
   font-family: inherit;
   font-size: 10px;
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
   user-select: none;
   pointer-events: auto;
   cursor: pointer;

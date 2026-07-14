@@ -134,5 +134,6 @@ export default {
     themeDark: '다크',
     themeSystem: '시스템',
     getStarted: '시작하기',
+    skip: '건너뛰기',
   },
 };

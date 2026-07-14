@@ -816,7 +816,7 @@ const handleTabKey = (event: KeyboardEvent) => {
 }
 
 .checkbox-label {
-  transition: color 0.2s ease;
+  transition: color var(--transition-fast);
 }
 
 .checkbox-container:hover .checkbox-label {

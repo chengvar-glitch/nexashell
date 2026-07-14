@@ -135,5 +135,6 @@ export default {
     themeDark: 'Темная',
     themeSystem: 'Система',
     getStarted: 'Начать',
+    skip: 'Пропустить',
   },
 };

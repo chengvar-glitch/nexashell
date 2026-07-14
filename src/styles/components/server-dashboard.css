@@ -214,7 +214,7 @@
   width: 10px;
   height: 10px;
   color: rgba(255, 255, 255, 0.7);
-  transition: all 0.3s ease;
+  transition: all var(--transition-base);
 }
 
 .toggle-handle:hover .handle-icon {
@@ -839,7 +839,7 @@
   fill: none;
   stroke-width: 3.8;
   stroke-linecap: round;
-  transition: stroke-dasharray 0.3s ease;
+  transition: stroke-dasharray 0.3s var(--ease-snappy);
 }
 
 .percentage {

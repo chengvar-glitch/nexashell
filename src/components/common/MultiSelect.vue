@@ -649,7 +649,7 @@ watch(isOpen, async newVal => {
 /* ==================== Transitions ==================== */
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all var(--transition-fast) ease;
+  transition: all var(--transition-fast);
 }
 
 .dropdown-enter-from {

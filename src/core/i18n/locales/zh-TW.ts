@@ -134,5 +134,6 @@ export default {
     themeDark: '深色',
     themeSystem: '系統',
     getStarted: '開始',
+    skip: '跳過',
   },
 };

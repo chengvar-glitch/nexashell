@@ -15,7 +15,6 @@ import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import {
   Plus,
   ChevronDown,
-  X,
   MoreHorizontal,
   Terminal,
   Server,
@@ -267,8 +266,7 @@ onBeforeUnmount(() => {
             aria-label="More options"
             @click="toggleDropdown"
           >
-            <ChevronDown v-if="!isDropdownOpen" :size="14" />
-            <X v-else :size="14" />
+          <ChevronDown :size="14" />
           </button>
         </ShortcutHint>
       </div>
@@ -327,7 +325,7 @@ onBeforeUnmount(() => {
 /* Tab animations */
 .tab-list-enter-active,
 .tab-list-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--transition-base);
 }
 .tab-list-enter-from {
   opacity: 0;
@@ -338,7 +336,7 @@ onBeforeUnmount(() => {
   transform: scale(0.9);
 }
 .tab-list-move {
-  transition: transform 0.3s ease;
+  transition: transform var(--transition-base);
 }
 
 .tab-actions {
@@ -373,6 +371,11 @@ onBeforeUnmount(() => {
 .action-btn:hover {
   background-color: var(--color-bg-hover);
   color: var(--color-text-primary);
+}
+
+.dropdown-btn.is-active svg {
+  transition: transform var(--transition-base);
+  transform: rotate(180deg);
 }
 
 .right-actions {

@@ -136,5 +136,6 @@ export default {
     themeDark: 'Oscuro',
     themeSystem: 'Sistema',
     getStarted: 'Empezar',
+    skip: 'Saltar',
   },
 };

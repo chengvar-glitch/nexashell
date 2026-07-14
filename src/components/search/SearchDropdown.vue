@@ -624,7 +624,7 @@ defineExpose({
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: all 0.2s ease;
+  transition: all var(--transition-fast);
 }
 
 .search-dropdown-item.active .item-enter-hint {

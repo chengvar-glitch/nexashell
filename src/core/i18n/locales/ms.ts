@@ -135,5 +135,6 @@ export default {
     themeDark: 'Gelap',
     themeSystem: 'Sistem',
     getStarted: 'Mulakan',
+    skip: 'Langkau',
   },
 };
