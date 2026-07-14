@@ -807,6 +807,8 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
         props.port || 22,
         props.username || '',
         props.password || '',
+        null,
+        null,
         cols,
         rows
       );
@@ -918,9 +920,9 @@ onMounted(async () => {
   logger.info('Terminal component mounted', { sessionId: props.sessionId });
   await setupStatusListener();
 
-  // Listen for background upload progress
+  // Listen for session-specific upload progress
   unlistenUpload = await listen<UploadProgressPayload>(
-    'upload-progress',
+    `ssh-upload-progress-${props.sessionId}`,
     event => {
       const payload = event.payload;
       // Only update if it belongs to this session

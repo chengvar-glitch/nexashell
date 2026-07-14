@@ -91,18 +91,9 @@ class ModuleLogger {
       second: '2-digit',
     });
 
-    const levelColors: Record<LogLevel, string> = {
-      DEBUG: '\x1b[36m', // Cyan
-      INFO: '\x1b[32m', // Green
-      WARN: '\x1b[33m', // Yellow
-      ERROR: '\x1b[31m', // Red
-    };
-
-    const reset = '\x1b[0m';
-    const color = levelColors[level];
     const levelStr = level.padEnd(5);
 
-    return `${color}[${timestamp}] [${levelStr}] [${this.moduleName}]${reset} ${message}`;
+    return `[${timestamp}] [${levelStr}] [${this.moduleName}] ${message}`;
   }
 
   /**
@@ -347,18 +338,15 @@ class LoggerManager {
     const content =
       format === 'json' ? this.exportAllAsJSON() : this.exportAllAsCSV();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const blob = new (window as any).Blob([content], {
+    const blob = new Blob([content], {
       type: format === 'json' ? 'application/json' : 'text/csv',
     });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const objectUrl = (window as any).URL.createObjectURL(blob);
+    const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = objectUrl;
     link.download = `nexashell-logs-${new Date().toISOString().slice(0, 10)}.${format}`;
     link.click();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).URL.revokeObjectURL(objectUrl);
+    URL.revokeObjectURL(objectUrl);
   }
 }
 
@@ -398,8 +386,7 @@ export function getLoggerManager(): LoggerManager {
  * Expose global logger manager in development environment
  */
 if (import.meta.env.DEV) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (window as any).__LOGGER_MANAGER__ = LoggerManager.getInstance();
+  window.__LOGGER_MANAGER__ = LoggerManager.getInstance();
   console.log(
     '%cLogger Manager available at window.__LOGGER_MANAGER__',
     'color: #00aa00; font-weight: bold;'

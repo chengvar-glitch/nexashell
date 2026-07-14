@@ -1,8 +1,10 @@
+use crate::common::{OutputChunk, SessionId};
 use serde::Serialize;
-use ssh2::{Session, OpenFlags, OpenType};
+use ssh2::{Session, OpenFlags, OpenType, PtyModes, PtyModeOpcode, ExtensiblePtyModeOpcode};
 use std::collections::HashMap;
 use std::io::{Read, Write, Seek, SeekFrom};
 use std::net::TcpStream;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -68,22 +70,6 @@ const NORMAL_BATCH_TIME_MS: u64 = 20;
 // Data Structures
 // ============================================================================
 
-/// Newtype pattern for type-safe session identifiers
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub struct SessionId(String);
-
-impl From<String> for SessionId {
-    fn from(s: String) -> Self {
-        SessionId(s)
-    }
-}
-
-impl AsRef<str> for SessionId {
-    fn as_ref(&self) -> &str {
-        &self.0
-    }
-}
-
 /// SSH connection configuration
 #[derive(Debug, Clone)]
 pub struct SshSession {
@@ -93,32 +79,6 @@ pub struct SshSession {
     pub port: u16,
     #[allow(dead_code)]
     pub username: String,
-}
-
-/// Represents a chunk of output data from an SSH session
-///
-/// Each chunk has a monotonically increasing sequence number
-/// to enable reliable client-side buffering and deduplication.
-#[derive(Debug, Clone, Serialize)]
-pub struct OutputChunk {
-    pub seq: u64,
-    pub output: String,
-    pub ts: u128,
-}
-
-/// Represents the progress of an SFTP file upload
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadProgress {
-    pub task_id: String,
-    pub session_id: String,
-    pub progress: f64,
-    pub uploaded_bytes: u64,
-    pub total_bytes: u64,
-    pub status: String,
-    pub message: String,
-    pub speed: f64,
-    pub error: Option<String>,
 }
 
 /// Server performance metrics
@@ -144,15 +104,19 @@ pub struct ServerStatus {
     pub uptime: String,
 }
 
-impl OutputChunk {
-    /// Creates a new output chunk with current timestamp
-    fn new(seq: u64, output: String) -> Self {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        Self { seq, output, ts }
-    }
+/// Represents the progress of an SFTP file upload
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadProgress {
+    pub task_id: String,
+    pub session_id: String,
+    pub progress: f64,
+    pub uploaded_bytes: u64,
+    pub total_bytes: u64,
+    pub status: String,
+    pub message: String,
+    pub speed: f64,
+    pub error: Option<String>,
 }
 
 /// Contains state and communication handles for an active SSH channel
@@ -184,6 +148,65 @@ pub struct SshChannelInfo {
 
     /// Session handle for opening new channels
     pub sess_arc: Arc<tokio::sync::Mutex<Session>>,
+}
+
+fn build_pty_modes() -> PtyModes {
+    let mut modes = PtyModes::new();
+
+    // Character mappings (standard control characters)
+    modes.set_character(PtyModeOpcode::VINTR, Some('\x03' as u8 as char));  // Ctrl+C
+    modes.set_character(PtyModeOpcode::VQUIT, Some('\x1c' as u8 as char));  // Ctrl+\
+    modes.set_character(PtyModeOpcode::VERASE, Some('\x7f' as u8 as char)); // Backspace
+    modes.set_character(PtyModeOpcode::VKILL, Some('\x15' as u8 as char));  // Ctrl+U
+    modes.set_character(PtyModeOpcode::VEOF, Some('\x04' as u8 as char));   // Ctrl+D
+    modes.set_character(PtyModeOpcode::VEOL, None);   // disabled
+    modes.set_character(PtyModeOpcode::VEOL2, None);  // disabled
+    modes.set_character(PtyModeOpcode::VSTART, None); // disabled (flow control off)
+    modes.set_character(PtyModeOpcode::VSTOP, None);  // disabled (flow control off)
+    modes.set_character(PtyModeOpcode::VSUSP, Some('\x1a' as u8 as char));  // Ctrl+Z
+    modes.set_character(PtyModeOpcode::VDSUSP, None); // disabled
+    modes.set_character(PtyModeOpcode::VREPRINT, Some('\x12' as u8 as char)); // Ctrl+R
+    modes.set_character(PtyModeOpcode::VWERASE, Some('\x17' as u8 as char));  // Ctrl+W
+    modes.set_character(PtyModeOpcode::VLNEXT, Some('\x16' as u8 as char));   // Ctrl+V
+
+    // Input modes — disable output processing on the server side
+    modes.set_boolean(PtyModeOpcode::IGNPAR, false);
+    modes.set_boolean(PtyModeOpcode::PARMRK, false);
+    modes.set_boolean(PtyModeOpcode::INPCK, false);
+    modes.set_boolean(PtyModeOpcode::ISTRIP, false);
+    modes.set_boolean(PtyModeOpcode::INLCR, false);
+    modes.set_boolean(PtyModeOpcode::IGNCR, false);
+    modes.set_boolean(PtyModeOpcode::ICRNL, true);
+    modes.set_boolean(PtyModeOpcode::IUCLC, false);
+
+    // CRITICAL: disable XON/XOFF software flow control
+    modes.set_boolean(PtyModeOpcode::IXON, false);
+    modes.set_boolean(PtyModeOpcode::IXANY, false);
+    modes.set_boolean(PtyModeOpcode::IXOFF, false);
+
+    modes.set_boolean(PtyModeOpcode::IMAXBEL, false);
+
+    // IUTF8 = 42 (not in PtyModeOpcode enum, use Extended)
+    const IUTF8: u8 = 42;
+    modes.set_boolean(ExtensiblePtyModeOpcode::Extended(IUTF8), true);
+
+    // Local modes — shell-appropriate defaults (vim/tools will override via tcsetattr)
+    modes.set_boolean(PtyModeOpcode::ISIG, true);
+    modes.set_boolean(PtyModeOpcode::ICANON, true);
+    modes.set_boolean(PtyModeOpcode::ECHO, true);
+    modes.set_boolean(PtyModeOpcode::ECHOE, true);
+    modes.set_boolean(PtyModeOpcode::ECHOK, true);
+    modes.set_boolean(PtyModeOpcode::ECHONL, false);
+
+    // Output modes — ONLCR must be true for normal terminal display
+    modes.set_boolean(PtyModeOpcode::OPOST, true);
+    modes.set_boolean(PtyModeOpcode::ONLCR, true);
+
+    // Baud rates
+    modes.set_u32(PtyModeOpcode::TTY_OP_ISPEED, 38400);
+    modes.set_u32(PtyModeOpcode::TTY_OP_OSPEED, 38400);
+
+    modes
 }
 
 /// Global manager for coordinating SSH sessions and channels
@@ -227,6 +250,8 @@ impl SshManager {
         port: u16,
         username: String,
         password: String,
+        private_key_path: Option<String>,
+        key_passphrase: Option<String>,
         cols: u32,
         rows: u32,
     ) -> Result<(), SshError> {
@@ -236,6 +261,8 @@ impl SshManager {
         let addr = format!("{}:{}", ip, port);
         let username_for_spawn = username.clone();
         let password_for_spawn = password.clone();
+        let private_key_path_for_spawn = private_key_path.clone();
+        let key_passphrase_for_spawn = key_passphrase.clone();
 
         // 1. Establish connection and authenticate (blocking part in separate thread)
         let connection_res = tokio::task::spawn_blocking(move || {
@@ -270,8 +297,37 @@ impl SshManager {
             sess.handshake()
                 .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
 
-            sess.userauth_password(&username_for_spawn, &password_for_spawn)
-                .map_err(|_| SshError::AuthenticationFailed("Invalid credentials".to_string()))?;
+            // Try public key authentication first if a key path is provided
+            let mut authenticated = false;
+            if let Some(ref key_path) = private_key_path_for_spawn {
+                let path = Path::new(key_path);
+                if path.exists() {
+                    let key_result = if let Some(ref passphrase) = key_passphrase_for_spawn {
+                        sess.userauth_pubkey_file(
+                            &username_for_spawn,
+                            None,
+                            path,
+                            Some(passphrase),
+                        )
+                    } else {
+                        sess.userauth_pubkey_file(
+                            &username_for_spawn,
+                            None,
+                            path,
+                            None,
+                        )
+                    };
+                    authenticated = key_result.is_ok() && sess.authenticated();
+                } else {
+                    eprintln!("Warning: private key file not found: {}", key_path);
+                }
+            }
+
+            // Fallback to password authentication if key auth did not succeed
+            if !authenticated {
+                sess.userauth_password(&username_for_spawn, &password_for_spawn)
+                    .map_err(|_| SshError::AuthenticationFailed("Invalid credentials".to_string()))?;
+            }
 
             if !sess.authenticated() {
                 return Err(SshError::AuthenticationFailed(
@@ -283,8 +339,9 @@ impl SshManager {
                 .channel_session()
                 .map_err(|e| SshError::ChannelError(format!("Create channel failed: {}", e)))?;
 
+            let pty_modes = build_pty_modes();
             channel
-                .request_pty("xterm-256color", None, Some((cols, rows, 0, 0)))
+                .request_pty("xterm-256color", Some(pty_modes), Some((cols, rows, 0, 0)))
                 .map_err(|e| SshError::ChannelError(format!("Failed to request PTY: {}", e)))?;
 
             channel
@@ -928,11 +985,11 @@ impl SshManager {
             info.sess_arc.clone()
         };
 
-        // Perform the upload in background thread to avoid blocking the main thread
-        // We do NOT await this spawn to ensure true async behavior
-        std::thread::spawn(move || {
+        // Perform the upload in a blocking tokio task to avoid blocking the runtime
+        tokio::task::spawn_blocking(move || {
             let sid = session_id.as_ref().to_string();
             let upload_start = std::time::Instant::now();
+            let upload_event_name = format!("ssh-upload-progress-{}", sid);
             
             let result: Result<u64, SshError> = (|| {
                 let mut local_file = std::fs::File::open(&local_path).map_err(|e| {
@@ -1015,7 +1072,7 @@ impl SshManager {
                     let progress = if total_bytes > 0 { (total_written as f64 / total_bytes as f64) * 100.0 } else { 0.0 };
 
                     // Emit progress event
-                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                    let _ = app_handle.emit(&upload_event_name, UploadProgress {
                         task_id: task_id.clone(),
                         session_id: sid.clone(),
                         progress,
@@ -1040,7 +1097,7 @@ impl SshManager {
                 Ok(total_bytes) => {
                     let elapsed = upload_start.elapsed().as_secs_f64();
                     let speed = if elapsed > 0.0 { total_bytes as f64 / elapsed } else { 0.0 };
-                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                    let _ = app_handle.emit(&upload_event_name, UploadProgress {
                         task_id: task_id.clone(),
                         session_id: sid,
                         progress: 100.0,
@@ -1053,7 +1110,7 @@ impl SshManager {
                     });
                 }
                 Err(e) => {
-                    let _ = app_handle.emit("upload-progress", UploadProgress {
+                    let _ = app_handle.emit(&upload_event_name, UploadProgress {
                         task_id: task_id.clone(),
                         session_id: sid,
                         progress: 0.0,
@@ -1145,6 +1202,8 @@ pub async fn connect_ssh(
     port: u16,
     username: String,
     password: String,
+    privateKeyPath: Option<String>,
+    keyPassphrase: Option<String>,
     cols: u32,
     rows: u32,
 ) -> Result<(), SshError> {
@@ -1156,6 +1215,8 @@ pub async fn connect_ssh(
             port,
             username,
             password,
+            privateKeyPath,
+            keyPassphrase,
             cols,
             rows,
         )

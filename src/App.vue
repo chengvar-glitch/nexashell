@@ -14,8 +14,7 @@ import {
   PredefinedShortcuts,
 } from '@/core/utils/shortcut-manager';
 import { themeManager } from '@/core/utils/theme-manager';
-import { useModal } from '@/composables';
-import { useTabManagement } from '@/composables';
+import { useModal, useTabManagement } from '@/composables';
 import { useSessionStore } from '@/features/session';
 import type { SavedSession } from '@/features/session/types';
 import {
@@ -75,7 +74,7 @@ const savedSSHFormData = ref<SSHConnectionFormData | null>(null);
 // Connection progress state
 const showConnectionProgress = ref(false);
 const connectionTime = ref(0);
-let connectionTimerInterval: any = null;
+let connectionTimerInterval: ReturnType<typeof setInterval> | null = null;
 const connectionProgress = ref(0);
 const connectionCurrentStep = ref(0);
 const connectionMessage = ref('');
@@ -196,10 +195,11 @@ onMounted(async () => {
     }
   });
 
-  eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (session: SavedSession) => {
-    // 1. Fetch credentials
+  eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (args: unknown) => {
+    const session = args as SavedSession;
+    if (!session) return;
+
     try {
-      // Use create mode to allow connection (edit mode only updates DB)
       sshFormMode.value = 'create';
       editingSessionId.value = session.id;
 
@@ -208,7 +208,7 @@ onMounted(async () => {
         { sessionId: session.id }
       ).catch(() => [session.id, null, null]);
 
-      const connectData = {
+      const connectData: SSHConnectionFormData = {
         server_name: session.server_name,
         addr: session.addr,
         port: session.port,
@@ -216,34 +216,23 @@ onMounted(async () => {
         password: credentials[1] || '',
         private_key_path: session.private_key_path || '',
         key_passphrase: credentials[2] || '',
-        save_session: false, // Don't save again as it's already in DB
+        save_session: false,
         groups: [],
         tags: [],
       };
 
-      // Ensure form is open and showing progress immediately to avoid form field flash
-      savedSSHFormData.value = connectData;
-      showConnectionProgress.value = true;
-      sshErrorMessage.value = null;
-      isConnecting.value = true;
-      openSSHForm();
-
-      // Update timestamp to mark as recent
       await invoke('update_session_timestamp', { id: session.id }).catch(err =>
         logger.error('Failed to update timestamp', err)
       );
-
-      // Refresh home list to show new timestamp
       eventBus.emit(APP_EVENTS.SESSION_SAVED);
 
-      // Trigger connection logic
+      savedSSHFormData.value = connectData;
+      openSSHForm();
       handleSSHConnect(connectData);
     } catch (error) {
       logger.error('Failed to connect to saved session', error);
-      isConnecting.value = false;
-      showConnectionProgress.value = false;
     }
-  }) as any);
+  }) as (...args: unknown[]) => void);
 
   // Global right-click handling: prevent browser default menu in production
   // but only when clicking on empty areas (not on interactive components)
@@ -387,6 +376,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       data.port || 22,
       data.username,
       data.password || '',
+      data.private_key_path || null,
+      data.key_passphrase || null,
       80, // Default columns
       24 // Default rows
     );

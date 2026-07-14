@@ -4,6 +4,7 @@ import {
   createNewLocalTab,
   focusSearch,
 } from '@/core/utils/app-utils';
+import { APP_EVENTS } from '@/core/constants';
 
 export interface ShortcutConfig {
   key: string;
@@ -206,7 +207,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Open settings',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:open-settings'));
+      window.dispatchEvent(new CustomEvent(APP_EVENTS.OPEN_SETTINGS));
     },
   },
   NEW_LOCAL_TAB: {
@@ -228,7 +229,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'New SSH connection tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:open-ssh-form'));
+      window.dispatchEvent(new CustomEvent(APP_EVENTS.OPEN_SSH_FORM));
     },
   },
   FOCUS_SEARCH: {
@@ -250,7 +251,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Close dialog',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:close-dialog'));
+      window.dispatchEvent(new CustomEvent(APP_EVENTS.CLOSE_DIALOG));
     },
   },
   CLOSE_CURRENT_TAB: {
@@ -261,7 +262,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Close current tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent('app:close-tab'));
+      window.dispatchEvent(new CustomEvent(APP_EVENTS.CLOSE_TAB));
     },
   },
 };

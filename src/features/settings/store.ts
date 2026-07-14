@@ -1,65 +1,72 @@
 import { defineStore } from 'pinia';
-import type { SettingsState, CursorStyle } from './types';
+import { reactive } from 'vue';
+import type { CursorStyle, TerminalSettings } from './types';
 
 const STORAGE_KEY = 'nexashell-settings';
 
-const DEFAULT_SETTINGS: SettingsState = {
-  terminal: {
-    cursorStyle: 'block',
-    cursorBlink: true,
-    fontSize: 14,
-    fontFamily:
-      'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
-    scrollback: 80000,
-  },
+const DEFAULT_TERMINAL: TerminalSettings = {
+  cursorStyle: 'block',
+  cursorBlink: true,
+  fontSize: 14,
+  fontFamily:
+    'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
+  scrollback: 80000,
 };
 
-export const useSettingsStore = defineStore('settings', {
-  state: (): SettingsState => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored);
-        // Migrate old default font family if necessary
-        if (
-          parsed.terminal &&
-          parsed.terminal.fontFamily === 'Monaco, Menlo, Ubuntu Mono, monospace'
-        ) {
-          parsed.terminal.fontFamily = DEFAULT_SETTINGS.terminal.fontFamily;
-        }
-        return {
-          ...DEFAULT_SETTINGS,
-          ...parsed,
-          terminal: {
-            ...DEFAULT_SETTINGS.terminal,
-            ...(parsed.terminal || {}),
-          },
-        };
-      } catch (e) {
-        console.error('Failed to parse settings from localStorage', e);
+function loadTerminal(): TerminalSettings {
+  const stored = localStorage.getItem(STORAGE_KEY);
+  if (stored) {
+    try {
+      const parsed = JSON.parse(stored);
+      const terminal = parsed.terminal || parsed;
+      if (
+        terminal &&
+        terminal.fontFamily === 'Monaco, Menlo, Ubuntu Mono, monospace'
+      ) {
+        terminal.fontFamily = DEFAULT_TERMINAL.fontFamily;
       }
+      return { ...DEFAULT_TERMINAL, ...terminal };
+    } catch (e) {
+      console.error('Failed to parse settings from localStorage', e);
     }
-    return { ...DEFAULT_SETTINGS };
-  },
+  }
+  return { ...DEFAULT_TERMINAL };
+}
 
-  actions: {
-    setCursorStyle(style: CursorStyle) {
-      this.terminal.cursorStyle = style;
-      this.saveSettings();
-    },
+function persistSettings(terminal: TerminalSettings) {
+  localStorage.setItem(
+    STORAGE_KEY,
+    JSON.stringify({ terminal })
+  );
+}
 
-    setCursorBlink(blink: boolean) {
-      this.terminal.cursorBlink = blink;
-      this.saveSettings();
-    },
+export const useSettingsStore = defineStore('settings', () => {
+  const terminal = reactive<TerminalSettings>(loadTerminal());
 
-    setFontSize(size: number) {
-      this.terminal.fontSize = size;
-      this.saveSettings();
-    },
+  function setCursorStyle(style: CursorStyle) {
+    terminal.cursorStyle = style;
+    persistSettings({ ...terminal });
+  }
 
-    saveSettings() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.$state));
-    },
-  },
+  function setCursorBlink(blink: boolean) {
+    terminal.cursorBlink = blink;
+    persistSettings({ ...terminal });
+  }
+
+  function setFontSize(size: number) {
+    terminal.fontSize = size;
+    persistSettings({ ...terminal });
+  }
+
+  function saveSettings() {
+    persistSettings({ ...terminal });
+  }
+
+  return {
+    terminal,
+    setCursorStyle,
+    setCursorBlink,
+    setFontSize,
+    saveSettings,
+  };
 });

@@ -1,3 +1,4 @@
+use crate::common::{OutputChunk, SessionId};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,32 +36,6 @@ const BATCH_TIME_MS: u64 = 20;
 // ============================================================================
 // Data Structures
 // ============================================================================
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
-pub struct SessionId(String);
-
-impl From<String> for SessionId {
-    fn from(s: String) -> Self {
-        SessionId(s)
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct OutputChunk {
-    pub seq: u64,
-    pub output: String,
-    pub ts: u128,
-}
-
-impl OutputChunk {
-    fn new(seq: u64, output: String) -> Self {
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
-        Self { seq, output, ts }
-    }
-}
 
 pub struct TerminalInfo {
     pub handle: Option<tokio::task::JoinHandle<()>>,

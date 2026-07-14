@@ -1,3 +1,4 @@
+mod common;
 mod db;
 mod encryption;
 mod ssh;

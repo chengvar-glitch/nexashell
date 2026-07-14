@@ -16,7 +16,7 @@ export interface TabManagement {
   activeTabId: import('vue').Ref<string>;
   setActiveTab: (id: string) => void;
   addTab: (tab: Tab) => void;
-  closeTab: (id: string) => void;
+  closeTab: (id: string) => Promise<void>;
 }
 
 // Export constants for tab types

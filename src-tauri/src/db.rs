@@ -82,6 +82,30 @@ pub struct ExportData {
     pub tags: Vec<Tag>,
 }
 
+/// Add a column to a table only if it doesn't already exist
+fn add_column_if_not_exists(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            params![table, column],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if count == 0 {
+        conn.execute(
+            &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition),
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn init_db() -> Result<String, String> {
     let db_path = db_path()?;
@@ -106,20 +130,14 @@ pub fn init_db() -> Result<String, String> {
         )",
         [],
     )
-    .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?;
 
-    // Migration for missing columns if they don't exist
-    let _ = conn.execute(
-        "ALTER TABLE sessions ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE sessions ADD COLUMN encrypted_credentials TEXT",
-        [],
-    );
-    let _ = conn.execute("ALTER TABLE sessions ADD COLUMN last_connected_at TEXT", []);
+    // Safe column migrations: only add columns that don't already exist
+    add_column_if_not_exists(&conn, "sessions", "is_favorite", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_not_exists(&conn, "sessions", "encrypted_credentials", "TEXT")?;
+    add_column_if_not_exists(&conn, "sessions", "last_connected_at", "TEXT")?;
 
-    // Data migration: fill last_connected_at with updated_at for existing sessions that were never connected
+    // Data migration: fill last_connected_at with updated_at for existing sessions
     let _ = conn.execute(
         "UPDATE sessions SET last_connected_at = updated_at WHERE last_connected_at IS NULL",
         [],
@@ -318,6 +336,10 @@ pub fn save_session_with_credentials(
 pub fn get_session_credentials(
     sessionId: String,
 ) -> Result<(String, Option<String>, Option<String>), String> {
+    if sessionId.len() < 32 || sessionId.len() > 40 {
+        return Err("Invalid session ID format".to_string());
+    }
+
     let db_path = db_path()?;
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
@@ -761,7 +783,7 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
 
     // Try to add color column if it doesn't exist (for existing databases)
-    let _ = conn.execute("ALTER TABLE tags ADD COLUMN color TEXT", []);
+    let _ = add_column_if_not_exists(conn, "tags", "color", "TEXT");
 
     // Junction table for sessions <-> groups (logical association only)
     conn.execute(

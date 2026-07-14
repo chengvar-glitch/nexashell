@@ -7,14 +7,13 @@ use pbkdf2::pbkdf2_hmac;
 use rand::{thread_rng, RngCore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use std::fs;
+use std::path::PathBuf;
 
-/// Sensitive SSH credentials
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SensitiveData {
-    /// SSH password
     pub password: Option<String>,
-    /// Passphrase for private keys
     pub key_passphrase: Option<String>,
 }
 
@@ -22,78 +21,118 @@ pub struct EncryptionManager;
 
 impl EncryptionManager {
     const ITERATIONS: u32 = 100_000;
+    const KEY_FILE_NAME: &str = ".encryption_master_key";
 
-    /// Gets a unique machine-specific ID to use as a master key.
-    /// This is transparent to the user and avoids system keychain prompts.
-    fn get_machine_id() -> String {
-        machine_uid::get().unwrap_or_else(|_| "nexashell-fallback-id".into())
+    fn key_file_path() -> Result<PathBuf, String> {
+        let data_dir = dirs::data_dir()
+            .ok_or_else(|| "Failed to determine app data directory".to_string())?
+            .join("NexaShell");
+        fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
+        Ok(data_dir.join(Self::KEY_FILE_NAME))
     }
 
-    /// Encrypt sensitive data using the machine-specific ID.
-    pub fn encrypt(data: &SensitiveData) -> Result<String, String> {
-        Self::encrypt_with_key(data, &Self::get_machine_id())
-    }
+    /// Load or create a persistent random master key.
+    /// Uses machine-uid as an entropy source for the initial key,
+    /// but the key is persisted to disk so it survives machine-uid changes.
+    fn get_master_key() -> Result<[u8; 32], String> {
+        let key_path = Self::key_file_path()?;
 
-    /// Decrypt sensitive data using the machine-specific ID.
-    pub fn decrypt(encrypted_base64: &str) -> Result<SensitiveData, String> {
-        Self::decrypt_with_key(encrypted_base64, &Self::get_machine_id())
-    }
+        if key_path.exists() {
+            let bytes = fs::read(&key_path).map_err(|e| e.to_string())?;
+            if bytes.len() == 32 {
+                let mut key = [0u8; 32];
+                key.copy_from_slice(&bytes);
+                return Ok(key);
+            }
+        }
 
-    /// Encrypt sensitive data with a custom key (useful for export).
-    pub fn encrypt_with_key(data: &SensitiveData, key_str: &str) -> Result<String, String> {
-        let json = serde_json::to_string(data).map_err(|e| e.to_string())?;
+        // Generate a new persistent key seeded by machine-uid + random
+        let machine_seed = machine_uid::get().unwrap_or_else(|_| {
+            let fallback = format!("nexashell-{}", rand::random::<u64>());
+            eprintln!(
+                "Warning: machine_uid unavailable, using fallback seed. \
+                 Existing encrypted data may be lost if this changes."
+            );
+            fallback
+        });
 
-        // 1. Generate random Salt
         let mut salt = [0u8; 16];
         thread_rng().fill_bytes(&mut salt);
-
-        // 2. Derive key using PBKDF2
         let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), &salt, Self::ITERATIONS, &mut key);
+        pbkdf2_hmac::<Sha256>(machine_seed.as_bytes(), &salt, Self::ITERATIONS, &mut key);
 
-        // 3. Generate random IV (Nonce)
+        fs::write(&key_path, &key).map_err(|e| e.to_string())?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
+        }
+
+        Ok(key)
+    }
+
+    pub fn encrypt(data: &SensitiveData) -> Result<String, String> {
+        let key = Self::get_master_key()?;
+        Self::encrypt_with_key_bytes(data, &key)
+    }
+
+    pub fn decrypt(encrypted_base64: &str) -> Result<SensitiveData, String> {
+        let key = Self::get_master_key()?;
+        Self::decrypt_with_key_bytes(encrypted_base64, &key)
+    }
+
+    pub fn encrypt_with_key(data: &SensitiveData, key_str: &str) -> Result<String, String> {
+        let mut key = [0u8; 32];
+        let salt = b"nexashell-export";
+        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), salt, Self::ITERATIONS, &mut key);
+        Self::encrypt_with_key_bytes(data, &key)
+    }
+
+    pub fn decrypt_with_key(
+        encrypted_base64: &str,
+        key_str: &str,
+    ) -> Result<SensitiveData, String> {
+        let mut key = [0u8; 32];
+        let salt = b"nexashell-export";
+        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), salt, Self::ITERATIONS, &mut key);
+        Self::decrypt_with_key_bytes(encrypted_base64, &key)
+    }
+
+    fn encrypt_with_key_bytes(data: &SensitiveData, key_bytes: &[u8; 32]) -> Result<String, String> {
+        let json = serde_json::to_string(data).map_err(|e| e.to_string())?;
+
         let mut iv = [0u8; 12];
         thread_rng().fill_bytes(&mut iv);
         let nonce = Nonce::from_slice(&iv);
 
-        // 4. Encrypt
-        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
+        let cipher = Aes256Gcm::new_from_slice(key_bytes).map_err(|e| e.to_string())?;
         let ciphertext = cipher
             .encrypt(nonce, json.as_bytes().as_ref())
             .map_err(|e| format!("Encryption failed: {}", e))?;
 
-        // 5. Package: Salt(16) + IV(12) + Ciphertext
-        let mut combined = salt.to_vec();
-        combined.extend_from_slice(&iv);
+        let mut combined = iv.to_vec();
         combined.extend_from_slice(&ciphertext);
 
         Ok(general_purpose::STANDARD.encode(combined))
     }
 
-    /// Decrypt sensitive data with a custom key (useful for import).
-    pub fn decrypt_with_key(
+    fn decrypt_with_key_bytes(
         encrypted_base64: &str,
-        key_str: &str,
+        key_bytes: &[u8; 32],
     ) -> Result<SensitiveData, String> {
         let combined = general_purpose::STANDARD
             .decode(encrypted_base64)
             .map_err(|e| format!("Invalid base64: {}", e))?;
 
-        if combined.len() < 16 + 12 {
+        if combined.len() < 12 {
             return Err("Invalid encrypted data format".to_string());
         }
 
-        // 1. Extract Salt, IV and Ciphertext
-        let salt = &combined[0..16];
-        let iv = &combined[16..28];
-        let ciphertext = &combined[28..];
+        let iv = &combined[0..12];
+        let ciphertext = &combined[12..];
 
-        // 2. Derive key
-        let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(key_str.as_bytes(), salt, Self::ITERATIONS, &mut key);
-
-        // 3. Decrypt
-        let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
+        let cipher = Aes256Gcm::new_from_slice(key_bytes).map_err(|e| e.to_string())?;
         let nonce = Nonce::from_slice(iv);
 
         let plaintext = cipher

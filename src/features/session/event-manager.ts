@@ -1,20 +1,18 @@
-import { listen, Event } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-/**
- * SSH Event Manager
- *
- * Handles SSH output events emitted from the Tauri backend and distributes them
- * to registered listeners. Includes a buffering mechanism for events received
- * before a listener is attached.
- */
+interface OutputPayload {
+  seq: number;
+  output: string;
+  ts: number;
+}
+
 class SSHEventManager {
   private static instance: SSHEventManager;
   private eventListeners: Map<string, ((data: string) => void)[]> = new Map();
-  private eventBuffer: Map<string, string[]> = new Map(); // Buffer to store events received before high-level listeners register
+  private eventBuffer: Map<string, string[]> = new Map();
+  private unlistenFns: Map<string, UnlistenFn> = new Map();
 
-  private constructor() {
-    this.setupGlobalListener();
-  }
+  private constructor() {}
 
   public static getInstance(): SSHEventManager {
     if (!SSHEventManager.instance) {
@@ -23,40 +21,20 @@ class SSHEventManager {
     return SSHEventManager.instance;
   }
 
-  /**
-   * Initialize global SSH output event listener (Tauri IPC)
-   */
-  private async setupGlobalListener() {
-    console.log('[SSH_EVENT_MGR] Setting up global SSH output listener');
+  private async ensureSessionListener(sessionId: string) {
+    if (this.unlistenFns.has(sessionId)) return;
 
-    await listen('any', (event: Event<unknown>) => {
-      // Check if it's an ssh-output event
-      if (event.event.startsWith('ssh-output-')) {
-        const sessionId = event.event.substring('ssh-output-'.length);
-        const payload = event.payload as unknown;
-        let outputStr: string;
+    const eventName = `ssh-output-${sessionId}`;
+    try {
+      const unlisten = await listen<OutputPayload>(eventName, (event) => {
+        const payload = event.payload;
+        const outputStr = String(payload.output ?? '');
 
-        if (payload && typeof payload === 'object' && 'output' in payload) {
-          const p = payload as Record<string, unknown>;
-          outputStr = String(p['output']);
-        } else {
-          outputStr = String(payload ?? '');
-        }
-
-        console.log(
-          '[SSH_EVENT_MGR] Received SSH output for session:',
-          sessionId,
-          'payload:',
-          outputStr
-        );
-
-        // Add event to buffer
         if (!this.eventBuffer.has(sessionId)) {
           this.eventBuffer.set(sessionId, []);
         }
         this.eventBuffer.get(sessionId)!.push(outputStr);
 
-        // Notify registered listeners immediately
         const listeners = this.eventListeners.get(sessionId);
         if (listeners) {
           listeners.forEach(listener => {
@@ -70,23 +48,22 @@ class SSHEventManager {
             }
           });
         }
-      }
-    }).catch(error => {
-      console.error('[SSH_EVENT_MGR] Failed to set up global listener:', error);
-    });
+      });
+      this.unlistenFns.set(sessionId, unlisten);
+    } catch (error) {
+      console.error(
+        '[SSH_EVENT_MGR] Failed to set up listener for session:',
+        sessionId,
+        error
+      );
+    }
   }
 
-  /**
-   * Subscribe to SSH output events for a specific session
-   */
-  public subscribe(
+  public async subscribe(
     sessionId: string,
     callback: (data: string) => void
-  ): () => void {
-    console.log(
-      '[SSH_EVENT_MGR] Subscribing to SSH output for session:',
-      sessionId
-    );
+  ): Promise<() => void> {
+    await this.ensureSessionListener(sessionId);
 
     if (!this.eventListeners.has(sessionId)) {
       this.eventListeners.set(sessionId, []);
@@ -95,7 +72,6 @@ class SSHEventManager {
     const listeners = this.eventListeners.get(sessionId)!;
     listeners.push(callback);
 
-    // Flush all buffered events to the new listener
     const bufferedEvents = this.eventBuffer.get(sessionId) || [];
     bufferedEvents.forEach(data => {
       try {
@@ -108,24 +84,25 @@ class SSHEventManager {
       }
     });
 
-    // Return unsubscription cleanup function
     return () => {
       const index = listeners.indexOf(callback);
       if (index > -1) {
         listeners.splice(index, 1);
       }
 
-      // If no listeners remain, consider cleanup
       if (listeners.length === 0) {
         this.eventListeners.delete(sessionId);
-        this.eventBuffer.set(sessionId, []); // Clear buffer for now
+        this.eventBuffer.set(sessionId, []);
+
+        const unlisten = this.unlistenFns.get(sessionId);
+        if (unlisten) {
+          unlisten();
+          this.unlistenFns.delete(sessionId);
+        }
       }
     };
   }
 
-  /**
-   * Get count of buffered events (primarily for debugging)
-   */
   public getBufferSize(sessionId: string): number {
     return this.eventBuffer.get(sessionId)?.length || 0;
   }

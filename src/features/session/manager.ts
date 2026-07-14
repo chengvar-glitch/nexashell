@@ -34,6 +34,8 @@ class SessionManager {
     port: number,
     username: string,
     password: string,
+    privateKeyPath: string | null = null,
+    keyPassphrase: string | null = null,
     cols: number = 80,
     rows: number = 24
   ): Promise<void> {
@@ -46,6 +48,8 @@ class SessionManager {
       port,
       username,
       password,
+      privateKeyPath,
+      keyPassphrase,
       cols,
       rows
     );

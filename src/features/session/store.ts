@@ -1,19 +1,3 @@
-/**
- * Session Store (Pinia)
- *
- * Centralized, type-safe state management for SSH sessions and terminal
- * connections. Responsibilities:
- * - Maintain canonical session state used by UI components
- * - Orchestrate lifecycle operations (create, disconnect, cleanup)
- * - Delegate transport-level operations to `sessionApi` (Tauri IPC)
- *
- * Design notes:
- * - The store intentionally separates state and transport: `sessionApi`
- *   handles Tauri RPCs while the store manages local in-memory state.
- * - This separation makes the store easier to unit-test and prevents
- *   UI components from needing to know about Tauri specifics.
- */
-
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { sessionApi } from '@/features/session';
@@ -21,25 +5,12 @@ import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('SESSION_STORE');
 
-/**
- * Session lifecycle status enum (string union for readability in devtools)
- */
 export type SessionStatus =
   | 'connecting'
   | 'connected'
   | 'disconnected'
   | 'error';
 
-/**
- * SessionState describes a single terminal/SSH session's canonical state.
- * @property id Unique session identifier (used by backend and store)
- * @property tabId Associated UI tab identifier
- * @property type Session type: 'ssh' for remote, 'terminal' for local shells
- * @property status Current lifecycle status
- * @property createdAt Timestamp when the session was created
- * @property errorMessage Optional human-readable error details when in 'error' state
- * @property connectionParams Optional connection parameters used to establish the session
- */
 export interface SessionState {
   id: string;
   tabId: string;
@@ -55,69 +26,31 @@ export interface SessionState {
   };
 }
 
-/**
- * Pinia session store
- *
- * Usage:
- * ```typescript
- * const sessionStore = useSessionStore();
- *
- * // Create session
- * await sessionStore.createSSHSession(params);
- *
- * // Disconnect session
- * await sessionStore.disconnectSession(sessionId);
- *
- * // Query sessions
- * const session = sessionStore.getSession(sessionId);
- * const tabSession = sessionStore.getSessionByTabId(tabId);
- * ```
- */
 export const useSessionStore = defineStore('session', () => {
-  // State
-  const sessions = ref<Map<string, SessionState>>(new Map());
-  const tabToSessionMap = ref<Map<string, string>>(new Map());
+  const sessions = ref<Record<string, SessionState>>({});
+  const tabToSessionMap = ref<Record<string, string>>({});
 
-  // Getters
-  /**
-   * Get all sessions
-   */
   const allSessions = computed(() => {
-    return Array.from(sessions.value.values());
+    return Object.values(sessions.value);
   });
 
-  /**
-   * Get session by ID
-   */
   const getSession = (sessionId: string): SessionState | undefined => {
-    return sessions.value.get(sessionId);
+    return sessions.value[sessionId];
   };
 
-  /**
-   * Get session by tab ID
-   */
   const getSessionByTabId = (tabId: string): SessionState | undefined => {
-    const sessionId = tabToSessionMap.value.get(tabId);
-    return sessionId ? sessions.value.get(sessionId) : undefined;
+    const sessionId = tabToSessionMap.value[tabId];
+    return sessionId ? sessions.value[sessionId] : undefined;
   };
 
-  /**
-   * Check if session exists
-   */
   const hasSession = (sessionId: string): boolean => {
-    return sessions.value.has(sessionId);
+    return sessionId in sessions.value;
   };
 
-  /**
-   * Check if tab has an active session
-   */
   const hasSessionForTab = (tabId: string): boolean => {
-    return tabToSessionMap.value.has(tabId);
+    return tabId in tabToSessionMap.value;
   };
 
-  /**
-   * Get session statistics
-   */
   const sessionStats = computed(() => {
     const allSess = allSessions.value;
     return {
@@ -129,31 +62,10 @@ export const useSessionStore = defineStore('session', () => {
     };
   });
 
-  /**
-   * Get active session count
-   */
   const activeSessionCount = computed(() => {
     return sessionStats.value.connected;
   });
 
-  // Actions
-  /**
-   * Create an SSH session and request the backend to establish the connection.
-   * This action will:
-   * - Add an entry to the local store immediately with status 'connecting'
-   * - Call `sessionApi.connectSSH(...)` to trigger the backend connection
-   * - Update the session status to 'connected' on success or 'error' on failure
-   *
-   * @param sessionId Unique session identifier
-   * @param tabId UI tab identifier associated with this session
-   * @param serverName Human-friendly server name
-   * @param ip Remote host
-   * @param port Remote port
-   * @param username Login username
-   * @param password Password or empty string if using key-based auth
-   * @param cols Initial terminal columns
-   * @param rows Initial terminal rows
-   */
   const createSSHSession = async (
     sessionId: string,
     tabId: string,
@@ -162,11 +74,12 @@ export const useSessionStore = defineStore('session', () => {
     port: number,
     username: string,
     password: string,
-    cols: number,
-    rows: number
+    privateKeyPath?: string | null,
+    keyPassphrase?: string | null,
+    cols: number = 80,
+    rows: number = 24
   ): Promise<void> => {
     try {
-      // Create session state
       const session: SessionState = {
         id: sessionId,
         tabId,
@@ -181,8 +94,8 @@ export const useSessionStore = defineStore('session', () => {
         },
       };
 
-      sessions.value.set(sessionId, session);
-      tabToSessionMap.value.set(tabId, sessionId);
+      sessions.value = { ...sessions.value, [sessionId]: session };
+      tabToSessionMap.value = { ...tabToSessionMap.value, [tabId]: sessionId };
 
       logger.debug('Creating SSH session', {
         sessionId,
@@ -192,47 +105,44 @@ export const useSessionStore = defineStore('session', () => {
         rows,
       });
 
-      // Call API to establish connection (Tauri 2.0+ optimized, no serverName param)
       await sessionApi.connectSSH(
         sessionId,
         ip,
         port,
         username,
         password,
+        privateKeyPath,
+        keyPassphrase,
         cols,
         rows
       );
 
-      // Update status
-      const sess = sessions.value.get(sessionId);
+      const sess = sessions.value[sessionId];
       if (sess) {
-        sess.status = 'connected';
+        sessions.value = { ...sessions.value, [sessionId]: { ...sess, status: 'connected' } };
       }
 
       logger.info('SSH session connected', { sessionId });
     } catch (error) {
       logger.error('Failed to create SSH session', error);
 
-      // Update status to error
-      const sess = sessions.value.get(sessionId);
+      const sess = sessions.value[sessionId];
       if (sess) {
-        sess.status = 'error';
-        sess.errorMessage =
-          error instanceof Error ? error.message : String(error);
+        sessions.value = {
+          ...sessions.value,
+          [sessionId]: {
+            ...sess,
+            status: 'error',
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          },
+        };
       }
 
       throw error;
     }
   };
 
-  /**
-   * Create a local terminal session and request the backend to spawn the shell.
-   *
-   * @param sessionId Unique session identifier
-   * @param tabId UI tab identifier
-   * @param cols Initial terminal columns
-   * @param rows Initial terminal rows
-   */
   const createLocalSession = async (
     sessionId: string,
     tabId: string,
@@ -254,39 +164,38 @@ export const useSessionStore = defineStore('session', () => {
         },
       };
 
-      sessions.value.set(sessionId, session);
-      tabToSessionMap.value.set(tabId, sessionId);
+      sessions.value = { ...sessions.value, [sessionId]: session };
+      tabToSessionMap.value = { ...tabToSessionMap.value, [tabId]: sessionId };
 
       await sessionApi.connectLocal(sessionId, cols, rows);
 
-      const sess = sessions.value.get(sessionId);
+      const sess = sessions.value[sessionId];
       if (sess) {
-        sess.status = 'connected';
+        sessions.value = { ...sessions.value, [sessionId]: { ...sess, status: 'connected' } };
       }
 
       logger.info('Local terminal session connected', { sessionId });
     } catch (error) {
       logger.error('Failed to create local session', error);
-      const sess = sessions.value.get(sessionId);
+      const sess = sessions.value[sessionId];
       if (sess) {
-        sess.status = 'error';
-        sess.errorMessage =
-          error instanceof Error ? error.message : String(error);
+        sessions.value = {
+          ...sessions.value,
+          [sessionId]: {
+            ...sess,
+            status: 'error',
+            errorMessage:
+              error instanceof Error ? error.message : String(error),
+          },
+        };
       }
       throw error;
     }
   };
 
-  /**
-   * Disconnect a session by its session ID.
-   * Behavior:
-   * - Calls the appropriate disconnect API based on session type
-   * - Marks the session as 'disconnected'
-   * - Removes session state mappings from the store
-   */
   const disconnectSession = async (sessionId: string): Promise<void> => {
     try {
-      const session = sessions.value.get(sessionId);
+      const session = sessions.value[sessionId];
       if (!session) {
         logger.warn('Session not found', { sessionId });
         return;
@@ -312,12 +221,21 @@ export const useSessionStore = defineStore('session', () => {
         }
       }
 
-      // Update status
-      session.status = 'disconnected';
+      sessions.value = {
+        ...sessions.value,
+        [sessionId]: { ...session, status: 'disconnected' },
+      };
 
-      // Remove from mappings AFTER backend cleanup completes
-      sessions.value.delete(sessionId);
-      tabToSessionMap.value.delete(session.tabId);
+      const restSessions: Record<string, SessionState> = {};
+      for (const key of Object.keys(sessions.value)) {
+        if (key !== sessionId) restSessions[key] = sessions.value[key];
+      }
+      const restTabs: Record<string, string> = {};
+      for (const key of Object.keys(tabToSessionMap.value)) {
+        if (key !== session.tabId) restTabs[key] = tabToSessionMap.value[key];
+      }
+      sessions.value = restSessions;
+      tabToSessionMap.value = restTabs;
 
       logger.info('disconnectSession: removed session state locally', {
         sessionId,
@@ -328,11 +246,8 @@ export const useSessionStore = defineStore('session', () => {
     }
   };
 
-  /**
-   * Disconnect session by tab ID
-   */
   const disconnectByTabId = async (tabId: string): Promise<void> => {
-    const sessionId = tabToSessionMap.value.get(tabId);
+    const sessionId = tabToSessionMap.value[tabId];
     if (!sessionId) {
       logger.warn('No session found for tab', { tabId });
       return;
@@ -340,32 +255,25 @@ export const useSessionStore = defineStore('session', () => {
     await disconnectSession(sessionId);
   };
 
-  /**
-   * Update session status
-   */
   const updateSessionStatus = (sessionId: string, status: SessionStatus) => {
-    const session = sessions.value.get(sessionId);
+    const session = sessions.value[sessionId];
     if (session) {
-      session.status = status;
+      sessions.value = { ...sessions.value, [sessionId]: { ...session, status } };
     }
   };
 
-  /**
-   * Set session error
-   */
   const setSessionError = (sessionId: string, errorMessage: string) => {
-    const session = sessions.value.get(sessionId);
+    const session = sessions.value[sessionId];
     if (session) {
-      session.status = 'error';
-      session.errorMessage = errorMessage;
+      sessions.value = {
+        ...sessions.value,
+        [sessionId]: { ...session, status: 'error' as const, errorMessage },
+      };
     }
   };
 
-  /**
-   * Clean up all sessions
-   */
   const cleanupAllSessions = async (): Promise<void> => {
-    const sessionIds = Array.from(sessions.value.keys());
+    const sessionIds = Object.keys(sessions.value);
     for (const sessionId of sessionIds) {
       try {
         await disconnectSession(sessionId);
@@ -375,31 +283,21 @@ export const useSessionStore = defineStore('session', () => {
     }
   };
 
-  /**
-   * Reset store (for testing)
-   */
   const reset = () => {
-    sessions.value.clear();
-    tabToSessionMap.value.clear();
+    sessions.value = {};
+    tabToSessionMap.value = {};
   };
 
   return {
-    // State
     sessions,
     tabToSessionMap,
-
-    // Getters
     allSessions,
     sessionStats,
     activeSessionCount,
-
-    // Methods
     getSession,
     getSessionByTabId,
     hasSession,
     hasSessionForTab,
-
-    // Actions
     createSSHSession,
     createLocalSession,
     disconnectSession,
