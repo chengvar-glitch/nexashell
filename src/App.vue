@@ -25,6 +25,7 @@ import {
   SHOW_SETTINGS_KEY,
 } from '@/core/types';
 interface SSHConnectionFormData {
+  id?: string; // session ID, set when editing existing session
   server_name: string;
   addr: string;
   port: number | null;
@@ -153,6 +154,7 @@ onMounted(async () => {
     editingSessionId.value = session.id;
 
     const initialFormData: SSHConnectionFormData = {
+      id: session.id,
       server_name: session.server_name || '',
       addr: session.addr || '',
       port: session.port || 22,
@@ -209,6 +211,7 @@ onMounted(async () => {
       ).catch(() => [session.id, null, null]);
 
       const connectData: SSHConnectionFormData = {
+        id: session.id,
         server_name: session.server_name,
         addr: session.addr,
         port: session.port,
@@ -384,23 +387,16 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     logger.info('SSH session created successfully', { sessionId });
 
     // 1.5. Save or update session in database AFTER successful connection
-    // We save if it's a new connection and user requested "Save",
-    // OR if we're in "Edit" mode (in which case we always update on success).
-    if (
-      (data.save_session && sshFormMode.value === 'create') ||
-      (sshFormMode.value === 'edit' && editingSessionId.value)
-    ) {
+    if (data.id || (data.save_session && sshFormMode.value === 'create')) {
       try {
         const authType = data.password ? 'password' : 'key';
 
         const { groupIds, tagIds } = await processMetadata(data);
 
         logger.info(
-          sshFormMode.value === 'edit'
-            ? 'Updating existing session after successful connection...'
-            : 'Saving new session after successful connection...',
+          data.id ? 'Updating existing session...' : 'Saving new session...',
           {
-            id: editingSessionId.value,
+            id: data.id || 'new',
             name: data.server_name,
             host: data.addr,
             authType,
@@ -408,7 +404,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         );
 
         const savePayload = {
-          id: sshFormMode.value === 'edit' ? editingSessionId.value : null,
+          id: data.id || null,
           addr: data.addr,
           port: data.port || 22,
           serverName: data.server_name,
@@ -427,8 +423,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         );
 
         // Update timestamp for recency tracking
-        const timestampId =
-          sshFormMode.value === 'edit' ? editingSessionId.value : resultId;
+        const timestampId = data.id || resultId;
         if (timestampId) {
           await invoke('update_session_timestamp', { id: timestampId }).catch(
             e => logger.error('Failed to update timestamp', e)
@@ -437,7 +432,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
         logger.info('SSH session persistence completed', {
           sessionId: timestampId,
-          mode: sshFormMode.value,
+          hadId: !!data.id,
         });
 
         // Emit event to notify other components to refresh lists
@@ -548,7 +543,7 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
   logger.info('Performing Save Only', {
     name: data.server_name,
     host: data.addr,
-    mode: sshFormMode.value,
+    hasId: !!data.id,
   });
 
   try {
@@ -556,7 +551,7 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
     const { groupIds, tagIds } = await processMetadata(data);
 
     const savePayload = {
-      id: sshFormMode.value === 'edit' ? editingSessionId.value : null,
+      id: data.id || null,
       addr: data.addr,
       port: data.port || 22,
       serverName: data.server_name,
@@ -574,9 +569,7 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
       savePayload
     );
 
-    // Update timestamp for recency tracking
-    const timestampId =
-      sshFormMode.value === 'edit' ? editingSessionId.value : resultId;
+    const timestampId = data.id || resultId;
     if (timestampId) {
       await invoke('update_session_timestamp', { id: timestampId });
     }

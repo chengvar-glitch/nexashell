@@ -282,13 +282,14 @@ interface Props {
 }
 
 interface SSHConnectionFormData {
+  id?: string;
   server_name: string;
   addr: string;
   port: number | null;
   username: string;
   password: string;
   private_key_path: string;
-  key_passphrase: string; // internal to frontend logic mostly
+  key_passphrase: string;
   save_session: boolean;
   groups?: string[];
   tags?: string[];
@@ -316,6 +317,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const formData = reactive<SSHConnectionFormData>({
+  id: props.initialData?.id || undefined,
   server_name: props.initialData?.server_name || '',
   addr: props.initialData?.addr || '',
   port:
@@ -341,6 +343,7 @@ watch(
   () => props.initialData,
   newData => {
     if (newData) {
+      if (newData.id !== undefined) formData.id = newData.id;
       // Update basic fields if they are different
       if (newData.server_name !== undefined)
         formData.server_name = newData.server_name;
