@@ -61,16 +61,18 @@ const handleConnect = (data: any) => {
 
 <template>
   <div class="app-content">
-    <KeepAlive :max="10">
-      <component
-        :is="currentComponent"
-        :key="activeTabId"
-        :session-id="activeTabId"
-        :tab-type="currentTabType"
-        @create-tab="handleCreateTab"
-        @connect="handleConnect"
-      />
-    </KeepAlive>
+    <Transition name="tab-switch" mode="out-in">
+      <KeepAlive :max="10">
+        <component
+          :is="currentComponent"
+          :key="activeTabId"
+          :session-id="activeTabId"
+          :tab-type="currentTabType"
+          @create-tab="handleCreateTab"
+          @connect="handleConnect"
+        />
+      </KeepAlive>
+    </Transition>
   </div>
 </template>
 
@@ -83,5 +85,21 @@ const handleConnect = (data: any) => {
   border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
   overflow: hidden;
   border: none;
+}
+
+/* Tab switch transition */
+.tab-switch-enter-active {
+  transition: opacity 0.18s var(--ease-snappy), transform 0.18s var(--ease-snappy);
+}
+.tab-switch-leave-active {
+  transition: opacity 0.12s var(--ease-snappy), transform 0.12s var(--ease-snappy);
+}
+.tab-switch-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.tab-switch-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
 }
 </style>

@@ -521,12 +521,23 @@ const handleClose = () => {
   font-weight: 600;
   color: var(--color-text-secondary);
   flex-shrink: 0;
-  transition: all 0.2s ease;
+  transition: transform 0.25s var(--ease-spring), background-color 0.2s var(--ease-spring-out), color 0.15s var(--ease-snappy);
 }
 
 .status-step.active .step-indicator {
   background-color: var(--color-primary);
   color: white;
+  transform: scale(1.1);
+}
+
+.status-step.completed .step-indicator {
+  background-color: var(--color-primary);
+  color: white;
+  transform: scale(1);
+}
+
+.status-step.completed {
+  color: var(--color-text-secondary);
 }
 
 .status-step.completed .step-indicator {
@@ -592,15 +603,40 @@ const handleClose = () => {
 
 @keyframes success-bounce {
   0% {
-    transform: scale(0);
+    transform: scale(0) rotate(-15deg);
     opacity: 0;
   }
-  70% {
-    transform: scale(1.1);
+  50% {
+    transform: scale(1.2) rotate(3deg);
+    opacity: 1;
+  }
+  80% {
+    transform: scale(0.95);
   }
   100% {
-    transform: scale(1);
+    transform: scale(1) rotate(0deg);
     opacity: 1;
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-error {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
   }
 }
 

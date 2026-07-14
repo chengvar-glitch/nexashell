@@ -82,12 +82,17 @@ const handleClose = (e: Event) => {
   max-width: 200px;
   border-radius: var(--radius-md);
   position: relative;
-  transition: all var(--transition-base);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast), transform var(--transition-micro);
   user-select: none;
+  will-change: transform;
 }
 
 .tab-item:hover {
   background-color: var(--color-interactive-hover);
+}
+
+.tab-item:active {
+  transform: scale(0.96);
 }
 
 .tab-item.active {
@@ -132,9 +137,10 @@ const handleClose = (e: Event) => {
   border-radius: var(--radius-xs);
   cursor: pointer;
   color: var(--color-text-tertiary);
-  transition: all var(--transition-fast);
+  transition: transform var(--transition-micro), background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
   flex-shrink: 0;
   opacity: 0;
+  will-change: transform;
 }
 
 .tab-item:hover .close-btn,
@@ -146,6 +152,11 @@ const handleClose = (e: Event) => {
   background-color: rgba(255, 95, 87, 0.1);
   color: var(--color-macos-close);
   opacity: 1 !important;
+}
+
+.close-btn:active {
+  transform: scale(0.8);
+  background-color: rgba(255, 95, 87, 0.2);
 }
 
 /* Home tab special styling */

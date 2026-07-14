@@ -762,22 +762,22 @@ const handleCreateTab = (tab: any) => {
   /* Remove physical border and clip-path, switch to shadow simulation */
   border: none;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.05),
-    0 10px 40px rgba(0, 0, 0, 0.15);
+     0 0 0 1px rgba(0, 0, 0, 0.05),
+     0 10px 40px rgba(0, 0, 0, 0.15);
   border-radius: var(--radius-lg);
   overflow: hidden;
   clip-path: none;
-  animation: modal-appear 0.2s ease-out forwards;
+  animation: modal-appear 0.35s var(--ease-spring);
 }
 
 @keyframes modal-appear {
   from {
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.93) translateY(8px);
   }
   to {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(0);
   }
 }
 </style>

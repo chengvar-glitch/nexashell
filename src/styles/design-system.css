@@ -7,21 +7,32 @@
   --radius-xl: 14px;
   --radius-2xl: 20px;
 
-  /* macOS style shadows - lighter and more natural */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.03), 0 1px 4px rgba(0, 0, 0, 0.02);
-  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.04), 0 3px 12px rgba(0, 0, 0, 0.03);
-  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.05), 0 6px 20px rgba(0, 0, 0, 0.04);
-  --shadow-xl: 0 8px 20px rgba(0, 0, 0, 0.08), 0 12px 32px rgba(0, 0, 0, 0.06);
+  /* Spring-like animation curves for substantial feel */
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-snappy: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-emphasized: cubic-bezier(0.18, 0.89, 0.32, 1.1);
+
+  /* macOS style shadows - enhanced depth */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.08), 0 6px 24px rgba(0, 0, 0, 0.06);
+  --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.1), 0 16px 40px rgba(0, 0, 0, 0.08);
   --shadow-2xl:
-    0 20px 40px rgba(0, 0, 0, 0.12), 0 30px 60px rgba(0, 0, 0, 0.08);
+    0 20px 50px rgba(0, 0, 0, 0.15), 0 36px 80px rgba(0, 0, 0, 0.1);
+  --shadow-3xl:
+    0 32px 64px rgba(0, 0, 0, 0.2), 0 48px 96px rgba(0, 0, 0, 0.12);
+  --shadow-float:
+    0 2px 8px rgba(0, 0, 0, 0.04), 0 16px 32px rgba(0, 0, 0, 0.06);
 
   --focus-ring: 0 0 0 3px rgba(0, 122, 255, 0.15);
   --focus-ring-intense: 0 0 0 4px rgba(0, 122, 255, 0.25);
 
-  /* macOS style transition animations - more natural and smooth */
-  --transition-fast: 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --transition-base: 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  --transition-slow: 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  /* Physics-based transition durations */
+  --transition-micro: 0.1s var(--ease-snappy);
+  --transition-fast: 0.18s var(--ease-snappy);
+  --transition-base: 0.25s var(--ease-spring-out);
+  --transition-slow: 0.35s var(--ease-emphasized);
 
   /* macOS light mode backgrounds */
   --color-bg-primary: #ffffff;
@@ -111,13 +122,17 @@ body {
     --color-interactive-active: rgba(255, 255, 255, 0.15);
     --color-interactive-selected: rgba(10, 132, 255, 0.2);
 
-    /* macOS dark mode shadows */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 5px rgba(0, 0, 0, 0.4);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.7), 0 4px 16px rgba(0, 0, 0, 0.5);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6);
-    --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.9), 0 16px 40px rgba(0, 0, 0, 0.7);
+    /* macOS dark mode shadows - deeper for dark mode */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 5px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.7), 0 8px 28px rgba(0, 0, 0, 0.5);
+    --shadow-xl: 0 8px 28px rgba(0, 0, 0, 0.8), 0 16px 48px rgba(0, 0, 0, 0.6);
     --shadow-2xl:
-      0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
+      0 20px 52px rgba(0, 0, 0, 0.9), 0 36px 80px rgba(0, 0, 0, 0.7);
+    --shadow-3xl:
+      0 32px 72px rgba(0, 0, 0, 0.95), 0 48px 100px rgba(0, 0, 0, 0.8);
+    --shadow-float:
+      0 2px 8px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
 
     --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
     --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
@@ -152,11 +167,13 @@ body {
   --color-interactive-selected: rgba(10, 132, 255, 0.2);
 
   /* macOS dark mode shadows */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.6), 0 1px 5px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.7), 0 4px 16px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.8), 0 8px 24px rgba(0, 0, 0, 0.6);
-  --shadow-xl: 0 8px 24px rgba(0, 0, 0, 0.9), 0 16px 40px rgba(0, 0, 0, 0.7);
-  --shadow-2xl: 0 20px 48px rgba(0, 0, 0, 0.95), 0 32px 72px rgba(0, 0, 0, 0.8);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 5px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.7), 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-xl: 0 8px 28px rgba(0, 0, 0, 0.8), 0 16px 48px rgba(0, 0, 0, 0.6);
+  --shadow-2xl: 0 20px 52px rgba(0, 0, 0, 0.9), 0 36px 80px rgba(0, 0, 0, 0.7);
+  --shadow-3xl: 0 32px 72px rgba(0, 0, 0, 0.95), 0 48px 100px rgba(0, 0, 0, 0.8);
+  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
 
   --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
   --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
@@ -209,4 +226,53 @@ body {
 }
 .shadow-2xl {
   box-shadow: var(--shadow-2xl);
+}
+.shadow-3xl {
+  box-shadow: var(--shadow-3xl);
+}
+.shadow-float {
+  box-shadow: var(--shadow-float);
+}
+
+/* Micro-interaction press effect */
+.pressable {
+  cursor: pointer;
+  transition: transform var(--transition-micro), box-shadow var(--transition-micro), background-color var(--transition-fast);
+  will-change: transform;
+  -webkit-tap-highlight-color: transparent;
+}
+.pressable:hover {
+  transform: translateY(-1px);
+}
+.pressable:active {
+  transform: scale(0.97) translateY(0);
+}
+
+/* Entrance animation with spring */
+@keyframes spring-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.animate-spring-in {
+  animation: spring-in 0.35s var(--ease-spring);
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.2s var(--ease-spring-out);
 }
