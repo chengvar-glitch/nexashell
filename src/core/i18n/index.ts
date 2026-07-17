@@ -37,7 +37,7 @@ async function loadLocale(locale: string): Promise<MessageSchema> {
   if (loadedMessages[locale]) return loadedMessages[locale];
   let mod: Record<string, unknown>;
   switch (locale) {
-    case 'zh': mod = await import('./locales/zh.ts'); break;
+    case 'zh': mod = (await import('./locales/zh.ts')).default as Record<string, unknown>; break;
     default: return en;
   }
   const merged = mergeDefaults(en, mod) as MessageSchema;
