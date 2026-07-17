@@ -57,6 +57,45 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 - `VITE_APP_VERSION` — override app version
 - `VITE_DEBUG` — enable debug mode
 
+## Workflow — Agent-Managed Development
+
+### 1. 全权托管 (Full Agent Delegation)
+- Agent 拥有项目全部决策权，用户只提需求、审查结果。
+- Agent 直接修改代码、运行命令、提交推送，无需逐事请示。
+- 用户指出的问题，Agent 自主排查并修复。
+
+### 2. 版本即 Push (Push = Version)
+- 每次 `git push` 都是一个版本，commit message 即为版本日志。
+- 语义化提交：`feat:` / `fix:` / `refactor:` / `chore:` 前缀标明类型。
+- 版本号格式：从 `v1.0.0` 递增，每次 push 前检查是否需要 tag。
+  - `fix:` → patch 版本 (+1)
+  - `feat:` → minor 版本 (+1)
+  - 破坏性变更 → major 版本 (+1)
+- Push 前必须确保代码通过 `pnpm lint`。
+
+### 3. 构建交付 (Build for MacBook)
+- 每次 push **后**，自动执行：
+  ```bash
+  pnpm tauri build
+  ```
+- 产物路径：`src-tauri/target/release/bundle/dmg/nexashell_<version>_aarch64.dmg`
+- 构建失败则 Agent 必须修复后再 push。
+
+### 提交-构建 标准流程
+
+```bash
+# Agent 执行：
+git add -A
+git commit -m "type: 描述"
+
+# 检查版本并打 tag
+git tag v<new-version>
+git push origin main --tags
+
+# 构建 MacBook 版本
+pnpm tauri build
+```
+
 ## Gotchas
 
 - `pnpm test` script is **not defined** in `package.json` despite being listed in README.

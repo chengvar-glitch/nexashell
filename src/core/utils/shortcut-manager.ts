@@ -1,10 +1,12 @@
 import {
   quitApp,
   closeWindow,
-  createNewLocalTab,
-  focusSearch,
-} from '@/core/utils/app-utils';
+} from '@/features/window';
+import { createNewLocalTab } from '@/features/tabs';
+import { eventBus } from './event-bus';
 import { APP_EVENTS } from '@/core/constants';
+
+const focusSearch = () => eventBus.emit(APP_EVENTS.FOCUS_SEARCH);
 
 export interface ShortcutConfig {
   key: string;

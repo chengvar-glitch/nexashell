@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, nextTick, watch, onActivated } from 'vue';
+import { onMounted, onUnmounted, ref, shallowRef, triggerRef, nextTick, watch, onActivated } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -41,7 +41,7 @@ interface ServerStatus {
   uptime: string;
 }
 
-const statusHistory = ref<ServerStatus[]>([]);
+const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
 let statusUnlisten: UnlistenFn | null = null;
 
@@ -57,6 +57,7 @@ const setupStatusListener = async () => {
       if (statusHistory.value.length > MAX_HISTORY) {
         statusHistory.value.shift();
       }
+      triggerRef(statusHistory);
     }
   );
 };
@@ -123,7 +124,7 @@ interface UploadTask {
   eta?: number; // seconds remaining
 }
 
-const uploadTasks = ref<UploadTask[]>([]);
+const uploadTasks = shallowRef<UploadTask[]>([]);
 
 const addUploadTask = (fileName: string): string => {
   const id = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -135,6 +136,7 @@ const addUploadTask = (fileName: string): string => {
     message: 'Preparing...',
     timestamp: Date.now(),
   });
+  triggerRef(uploadTasks);
   return id;
 };
 
@@ -142,6 +144,7 @@ const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
   const task = uploadTasks.value.find(t => t.id === id);
   if (task) {
     Object.assign(task, updates);
+    triggerRef(uploadTasks);
   }
 };
 

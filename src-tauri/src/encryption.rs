@@ -3,6 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose, Engine as _};
+use once_cell::sync::OnceCell;
 use pbkdf2::pbkdf2_hmac;
 use rand::{thread_rng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -31,55 +32,55 @@ impl EncryptionManager {
         Ok(data_dir.join(Self::KEY_FILE_NAME))
     }
 
-    /// Load or create a persistent random master key.
-    /// Uses machine-uid as an entropy source for the initial key,
-    /// but the key is persisted to disk so it survives machine-uid changes.
-    fn get_master_key() -> Result<[u8; 32], String> {
-        let key_path = Self::key_file_path()?;
+    /// Load or create a persistent random master key (cached after first call).
+    fn get_master_key() -> Result<&'static [u8; 32], String> {
+        static MASTER_KEY: OnceCell<[u8; 32]> = OnceCell::new();
+        MASTER_KEY.get_or_try_init(|| {
+            let key_path = Self::key_file_path()?;
 
-        if key_path.exists() {
-            let bytes = fs::read(&key_path).map_err(|e| e.to_string())?;
-            if bytes.len() == 32 {
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&bytes);
-                return Ok(key);
+            if key_path.exists() {
+                let bytes = fs::read(&key_path).map_err(|e| e.to_string())?;
+                if bytes.len() == 32 {
+                    let mut key = [0u8; 32];
+                    key.copy_from_slice(&bytes);
+                    return Ok(key);
+                }
             }
-        }
 
-        // Generate a new persistent key seeded by machine-uid + random
-        let machine_seed = machine_uid::get().unwrap_or_else(|_| {
-            let fallback = format!("nexashell-{}", rand::random::<u64>());
-            eprintln!(
-                "Warning: machine_uid unavailable, using fallback seed. \
-                 Existing encrypted data may be lost if this changes."
-            );
-            fallback
-        });
+            let machine_seed = machine_uid::get().unwrap_or_else(|_| {
+                let fallback = format!("nexashell-{}", rand::random::<u64>());
+                eprintln!(
+                    "Warning: machine_uid unavailable, using fallback seed. \
+                     Existing encrypted data may be lost if this changes."
+                );
+                fallback
+            });
 
-        let mut salt = [0u8; 16];
-        thread_rng().fill_bytes(&mut salt);
-        let mut key = [0u8; 32];
-        pbkdf2_hmac::<Sha256>(machine_seed.as_bytes(), &salt, Self::ITERATIONS, &mut key);
+            let mut salt = [0u8; 16];
+            thread_rng().fill_bytes(&mut salt);
+            let mut key = [0u8; 32];
+            pbkdf2_hmac::<Sha256>(machine_seed.as_bytes(), &salt, Self::ITERATIONS, &mut key);
 
-        fs::write(&key_path, &key).map_err(|e| e.to_string())?;
+            fs::write(&key_path, &key).map_err(|e| e.to_string())?;
 
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
-        }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600));
+            }
 
-        Ok(key)
+            Ok(key)
+        }).map_err(|e: String| e)
     }
 
     pub fn encrypt(data: &SensitiveData) -> Result<String, String> {
         let key = Self::get_master_key()?;
-        Self::encrypt_with_key_bytes(data, &key)
+        Self::encrypt_with_key_bytes(data, key)
     }
 
     pub fn decrypt(encrypted_base64: &str) -> Result<SensitiveData, String> {
         let key = Self::get_master_key()?;
-        Self::decrypt_with_key_bytes(encrypted_base64, &key)
+        Self::decrypt_with_key_bytes(encrypted_base64, key)
     }
 
     pub fn encrypt_with_key(data: &SensitiveData, key_str: &str) -> Result<String, String> {
@@ -100,7 +101,7 @@ impl EncryptionManager {
     }
 
     fn encrypt_with_key_bytes(data: &SensitiveData, key_bytes: &[u8; 32]) -> Result<String, String> {
-        let json = serde_json::to_string(data).map_err(|e| e.to_string())?;
+        let json = serde_json::to_vec(data).map_err(|e| e.to_string())?;
 
         let mut iv = [0u8; 12];
         thread_rng().fill_bytes(&mut iv);
@@ -108,7 +109,7 @@ impl EncryptionManager {
 
         let cipher = Aes256Gcm::new_from_slice(key_bytes).map_err(|e| e.to_string())?;
         let ciphertext = cipher
-            .encrypt(nonce, json.as_bytes().as_ref())
+            .encrypt(nonce, json.as_ref())
             .map_err(|e| format!("Encryption failed: {}", e))?;
 
         let mut combined = iv.to_vec();

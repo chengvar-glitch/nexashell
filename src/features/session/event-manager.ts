@@ -11,6 +11,7 @@ class SSHEventManager {
   private eventListeners: Map<string, ((data: string) => void)[]> = new Map();
   private eventBuffer: Map<string, string[]> = new Map();
   private unlistenFns: Map<string, UnlistenFn> = new Map();
+  private static readonly MAX_BUFFER_SIZE = 1000;
 
   private constructor() {}
 
@@ -33,7 +34,11 @@ class SSHEventManager {
         if (!this.eventBuffer.has(sessionId)) {
           this.eventBuffer.set(sessionId, []);
         }
-        this.eventBuffer.get(sessionId)!.push(outputStr);
+        const buf = this.eventBuffer.get(sessionId)!;
+        buf.push(outputStr);
+        if (buf.length > SSHEventManager.MAX_BUFFER_SIZE) {
+          buf.splice(0, buf.length - SSHEventManager.MAX_BUFFER_SIZE);
+        }
 
         const listeners = this.eventListeners.get(sessionId);
         if (listeners) {

@@ -12,6 +12,8 @@ use tauri::{Emitter, Listener};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
+const MAX_CACHED_INITIAL_CHUNKS: usize = 200;
+
 // ============================================================================
 // Error Types
 // ============================================================================
@@ -121,7 +123,6 @@ pub struct UploadProgress {
 
 /// Contains state and communication handles for an active SSH channel
 pub struct SshChannelInfo {
-    /// Asynchronous receiver for SSH output chunks
     pub receiver: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<OutputChunk>>>,
 
     /// Handle to the background tokio task processing the SSH data
@@ -130,7 +131,6 @@ pub struct SshChannelInfo {
     /// Handle to the background monitoring task
     pub status_handle: Option<tokio::task::JoinHandle<()>>,
 
-    /// Sender to transmit user input to the SSH channel
     pub input_sender: mpsc::UnboundedSender<String>,
 
     /// Atomic flag to signal the background task to terminate
@@ -259,10 +259,11 @@ impl SshManager {
         let channels_arc = Arc::clone(&self.channels);
 
         let addr = format!("{}:{}", ip, port);
+        let host_for_err = addr.clone();
         let username_for_spawn = username.clone();
-        let password_for_spawn = password.clone();
-        let private_key_path_for_spawn = private_key_path.clone();
-        let key_passphrase_for_spawn = key_passphrase.clone();
+        let password_for_spawn = password;
+        let private_key_path_for_spawn = private_key_path;
+        let key_passphrase_for_spawn = key_passphrase;
 
         // 1. Establish connection and authenticate (blocking part in separate thread)
         let connection_res = tokio::task::spawn_blocking(move || {
@@ -270,13 +271,13 @@ impl SshManager {
             let socket_addr = addr
                 .to_socket_addrs()
                 .map_err(|e| SshError::ConnectionFailed {
-                    host: addr.clone(),
+                    host: host_for_err.clone(),
                     port,
                     reason: format!("Failed to resolve address: {}", e),
                 })?
                 .next()
                 .ok_or_else(|| SshError::ConnectionFailed {
-                    host: addr.clone(),
+                    host: host_for_err.clone(),
                     port,
                     reason: "No addresses found".to_string(),
                 })?;
@@ -284,7 +285,7 @@ impl SshManager {
             let tcp =
                 TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(|e| {
                     SshError::ConnectionFailed {
-                        host: addr.clone(),
+                        host: host_for_err.clone(),
                         port,
                         reason: e.to_string(),
                     }
@@ -361,7 +362,7 @@ impl SshManager {
             Err(e) => return Err(SshError::TaskError(e.to_string())),
         };
 
-        // 2. Setup communication channels
+        // 2. Setup communication channels (bounded to prevent OOM)
         let (output_sender, output_receiver) = mpsc::unbounded_channel::<OutputChunk>();
         let (input_sender, input_receiver) = mpsc::unbounded_channel::<String>();
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -513,6 +514,13 @@ impl SshManager {
                     break;
                 }
 
+                // Process user input FIRST for low-latency IME response
+                while let Ok(input) = input_receiver.try_recv() {
+                    let _sess_lock = sess_arc.lock().await;
+                    let mut ch = channel_arc.lock().await;
+                    let _ = ch.write_all(input.as_bytes()).and_then(|_| ch.flush());
+                }
+
                 // Attempt non-blocking read from SSH channel
                 // We lock the session to ensure thread safety with monitoring task
                 let read_result = {
@@ -535,32 +543,18 @@ impl SshManager {
                         break;
                     }
                     None => {
-                        // No data available, yield to other tasks
                         tokio::task::yield_now().await;
                     }
                 }
 
-                // Check if initial buffering phase has ended
-                if in_initial_buffering
+                let in_initial = in_initial_buffering
                     && initial_buffering_start.elapsed()
-                        > Duration::from_millis(INITIAL_BUFFERING_TIMEOUT_MS)
-                {
+                        > Duration::from_millis(INITIAL_BUFFERING_TIMEOUT_MS);
+
+                if in_initial {
                     in_initial_buffering = false;
-                    // Flush any remaining pending output
-                    if !pending_output.is_empty() {
-                        let seq = next_seq.fetch_add(1, Ordering::SeqCst);
-                        let chunk = OutputChunk::new(seq, pending_output.clone());
-                        if let Some(h) = &app_handle {
-                            let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
-                        }
-                        let _ = output_sender.send(chunk);
-                        pending_output.clear();
-                        last_emit = std::time::Instant::now();
-                        seen_first_output = true;
-                    }
                 }
 
-                // Batch and emit output
                 let (size_threshold, time_threshold_ms) =
                     if in_initial_buffering && !seen_first_output {
                         (INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
@@ -568,35 +562,31 @@ impl SshManager {
                         (NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
                     };
 
-                if !pending_output.is_empty()
-                    && (pending_output.len() > size_threshold
-                        || last_emit.elapsed() > Duration::from_millis(time_threshold_ms))
+                // Flush initial buffering or batch emit
+                if (!pending_output.is_empty() && in_initial)
+                    || (!pending_output.is_empty()
+                        && (pending_output.len() > size_threshold
+                            || last_emit.elapsed() > Duration::from_millis(time_threshold_ms)))
                 {
                     let seq = next_seq.fetch_add(1, Ordering::SeqCst);
-                    let chunk = OutputChunk::new(seq, pending_output.clone());
+                    let output = std::mem::take(&mut pending_output);
+                    let chunk = OutputChunk::new(seq, output);
 
-                    // Cache initial outputs for late-joining clients
+                    // Cache initial outputs (capped)
                     if in_initial_buffering {
                         let mut cache = initial_outputs.lock().await;
-                        cache.push(chunk.clone());
+                        if cache.len() < MAX_CACHED_INITIAL_CHUNKS {
+                            cache.push(chunk.clone());
+                        }
                     }
 
-                    // Emit event to frontend
                     if let Some(h) = &app_handle {
                         let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
                     }
 
                     let _ = output_sender.send(chunk);
-                    pending_output.clear();
                     last_emit = std::time::Instant::now();
                     seen_first_output = true;
-                }
-
-                // Process queued user input
-                while let Ok(input) = input_receiver.try_recv() {
-                    let _sess_lock = sess_arc.lock().await;
-                    let mut ch = channel_arc.lock().await;
-                    let _ = ch.write_all(input.as_bytes()).and_then(|_| ch.flush());
                 }
             }
         })
@@ -621,9 +611,16 @@ impl SshManager {
                 }
 
                 let start_time = std::time::Instant::now();
-                let status_res = {
+                let channel = {
                     let sess = sess_arc.lock().await;
-                    Self::fetch_server_status(&sess, last_cpu_read).await
+                    sess.channel_session()
+                        .map_err(|e| SshError::ChannelError(e.to_string()))
+                };
+                let status_res = match channel {
+                    Ok(mut ch) => {
+                        Self::fetch_server_status_from_channel(&mut ch, last_cpu_read).await
+                    }
+                    Err(e) => Err(e),
                 };
                 let latency = start_time.elapsed().as_millis() as u32;
 
@@ -671,14 +668,11 @@ impl SshManager {
         })
     }
 
-    /// Fetches server performance metrics via a short-lived SSH channel
-    async fn fetch_server_status(
-        sess: &Session,
+    /// Fetches server performance metrics via a short-lived SSH channel (no session lock held)
+    async fn fetch_server_status_from_channel(
+        channel: &mut ssh2::Channel,
         last_cpu: Option<(u64, u64)>,
     ) -> Result<(ServerStatus, (u64, u64)), SshError> {
-        let mut channel = sess
-            .channel_session()
-            .map_err(|e| SshError::ChannelError(e.to_string()))?;
 
         // Use more robust commands that work on various Linux environments
         // 1. CPU: /proc/stat
@@ -873,7 +867,7 @@ impl SshManager {
             }
             Ok(outputs)
         } else {
-            Err(SshError::SessionNotFound(session_id.0.clone()))
+            Err(SshError::SessionNotFound(session_id.0.to_string()))
         }
     }
 
@@ -890,7 +884,7 @@ impl SshManager {
                 .send(input)
                 .map_err(|_| SshError::ChannelError("Failed to send input".to_string()))
         } else {
-            Err(SshError::SessionNotFound(session_id.0.clone()))
+            Err(SshError::SessionNotFound(session_id.0.to_string()))
         }
     }
 
@@ -910,7 +904,7 @@ impl SshManager {
             let outputs = channel_info.initial_outputs.blocking_lock().clone();
             Ok(outputs)
         } else {
-            Err(SshError::SessionNotFound(session_id.0.clone()))
+            Err(SshError::SessionNotFound(session_id.0.to_string()))
         }
     }
 

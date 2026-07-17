@@ -1,5 +1,5 @@
 use crate::common::{OutputChunk, SessionId};
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -41,6 +41,7 @@ pub struct TerminalInfo {
     pub handle: Option<tokio::task::JoinHandle<()>>,
     pub input_sender: mpsc::UnboundedSender<String>,
     pub stop_flag: Arc<AtomicBool>,
+    pub child: Option<Arc<std::sync::Mutex<Box<dyn Child + Send>>>>,
 }
 
 #[derive(Default)]
@@ -79,7 +80,7 @@ impl TerminalManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
-        let _child = pair
+        let child = pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| TerminalError::SpawnFailed(format!("Failed to spawn shell: {}", e)))?;
@@ -125,7 +126,7 @@ impl TerminalManager {
                     Ok(0) => break, // EOF
                     Ok(n) => {
                         let seq = next_seq_reader.fetch_add(1, Ordering::SeqCst);
-                        let output = String::from_utf8_lossy(&buffer[..n]).to_string();
+                        let output = String::from_utf8_lossy(&buffer[..n]).into_owned();
                         let chunk = OutputChunk::new(seq, output);
 
                         if let Some(h) = &app_handle_clone {
@@ -162,6 +163,7 @@ impl TerminalManager {
                     handle: Some(output_handle),
                     input_sender,
                     stop_flag,
+                    child: Some(Arc::new(std::sync::Mutex::new(child))),
                 },
             );
         }
@@ -220,6 +222,12 @@ impl TerminalManager {
                 info.stop_flag.store(true, Ordering::SeqCst);
                 if let Some(handle) = info.handle.take() {
                     handle.abort();
+                }
+                if let Some(child_arc) = info.child.take() {
+                    if let Ok(mut child) = child_arc.lock() {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
                 }
             }
         }

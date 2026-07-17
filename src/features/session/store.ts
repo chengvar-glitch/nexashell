@@ -94,8 +94,8 @@ export const useSessionStore = defineStore('session', () => {
         },
       };
 
-      sessions.value = { ...sessions.value, [sessionId]: session };
-      tabToSessionMap.value = { ...tabToSessionMap.value, [tabId]: sessionId };
+      sessions.value[sessionId] = session;
+      tabToSessionMap.value[tabId] = sessionId;
 
       logger.debug('Creating SSH session', {
         sessionId,
@@ -119,7 +119,7 @@ export const useSessionStore = defineStore('session', () => {
 
       const sess = sessions.value[sessionId];
       if (sess) {
-        sessions.value = { ...sessions.value, [sessionId]: { ...sess, status: 'connected' } };
+        sess.status = 'connected';
       }
 
       logger.info('SSH session connected', { sessionId });
@@ -128,15 +128,8 @@ export const useSessionStore = defineStore('session', () => {
 
       const sess = sessions.value[sessionId];
       if (sess) {
-        sessions.value = {
-          ...sessions.value,
-          [sessionId]: {
-            ...sess,
-            status: 'error',
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
-          },
-        };
+        sess.status = 'error';
+        sess.errorMessage = error instanceof Error ? error.message : String(error);
       }
 
       throw error;
@@ -164,14 +157,14 @@ export const useSessionStore = defineStore('session', () => {
         },
       };
 
-      sessions.value = { ...sessions.value, [sessionId]: session };
-      tabToSessionMap.value = { ...tabToSessionMap.value, [tabId]: sessionId };
+      sessions.value[sessionId] = session;
+      tabToSessionMap.value[tabId] = sessionId;
 
       await sessionApi.connectLocal(sessionId, cols, rows);
 
       const sess = sessions.value[sessionId];
       if (sess) {
-        sessions.value = { ...sessions.value, [sessionId]: { ...sess, status: 'connected' } };
+        sess.status = 'connected';
       }
 
       logger.info('Local terminal session connected', { sessionId });
@@ -179,15 +172,8 @@ export const useSessionStore = defineStore('session', () => {
       logger.error('Failed to create local session', error);
       const sess = sessions.value[sessionId];
       if (sess) {
-        sessions.value = {
-          ...sessions.value,
-          [sessionId]: {
-            ...sess,
-            status: 'error',
-            errorMessage:
-              error instanceof Error ? error.message : String(error),
-          },
-        };
+        sess.status = 'error';
+        sess.errorMessage = error instanceof Error ? error.message : String(error);
       }
       throw error;
     }
@@ -221,21 +207,8 @@ export const useSessionStore = defineStore('session', () => {
         }
       }
 
-      sessions.value = {
-        ...sessions.value,
-        [sessionId]: { ...session, status: 'disconnected' },
-      };
-
-      const restSessions: Record<string, SessionState> = {};
-      for (const key of Object.keys(sessions.value)) {
-        if (key !== sessionId) restSessions[key] = sessions.value[key];
-      }
-      const restTabs: Record<string, string> = {};
-      for (const key of Object.keys(tabToSessionMap.value)) {
-        if (key !== session.tabId) restTabs[key] = tabToSessionMap.value[key];
-      }
-      sessions.value = restSessions;
-      tabToSessionMap.value = restTabs;
+      delete sessions.value[sessionId];
+      delete tabToSessionMap.value[session.tabId];
 
       logger.info('disconnectSession: removed session state locally', {
         sessionId,
@@ -258,17 +231,15 @@ export const useSessionStore = defineStore('session', () => {
   const updateSessionStatus = (sessionId: string, status: SessionStatus) => {
     const session = sessions.value[sessionId];
     if (session) {
-      sessions.value = { ...sessions.value, [sessionId]: { ...session, status } };
+      session.status = status;
     }
   };
 
   const setSessionError = (sessionId: string, errorMessage: string) => {
     const session = sessions.value[sessionId];
     if (session) {
-      sessions.value = {
-        ...sessions.value,
-        [sessionId]: { ...session, status: 'error' as const, errorMessage },
-      };
+      session.status = 'error';
+      session.errorMessage = errorMessage;
     }
   };
 

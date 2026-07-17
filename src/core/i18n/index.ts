@@ -1,88 +1,77 @@
 import { createI18n } from 'vue-i18n';
 import en from './locales/en.ts';
-import zh from './locales/zh.ts';
-import zhTW from './locales/zh-TW.ts';
-import ja from './locales/ja.ts';
-import ko from './locales/ko.ts';
-import fr from './locales/fr.ts';
-import de from './locales/de.ts';
-import ru from './locales/ru.ts';
-import ar from './locales/ar.ts';
-import es from './locales/es.ts';
-import ms from './locales/ms.ts';
-import it from './locales/it.ts';
 
 type MessageSchema = typeof en;
 
-const rawMessages: Record<string, MessageSchema> = {
-  en,
-  zh: zh as MessageSchema,
-  'zh-TW': zhTW as MessageSchema,
-  ja: ja as MessageSchema,
-  ko: ko as MessageSchema,
-  fr: fr as MessageSchema,
-  de: de as MessageSchema,
-  ru: ru as MessageSchema,
-  ar: ar as MessageSchema,
-  es: es as MessageSchema,
-  ms: ms as MessageSchema,
-  it: it as MessageSchema,
-};
+export const AVAILABLE_LOCALES = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'ru', 'ar', 'es', 'ms', 'it'];
 
 function mergeDefaults(base: unknown, target: unknown): unknown {
-  if (target === undefined || target === null) {
-    return base;
-  }
-  if (Array.isArray(base)) {
-    return target !== undefined ? target : base;
-  }
+  if (target === undefined || target === null) return base;
+  if (Array.isArray(base)) return target !== undefined ? target : base;
   if (typeof base === 'object' && base !== null) {
     const res: Record<string, unknown> = {};
     const baseObj = base as Record<string, unknown>;
-    const targetObj =
-      typeof target === 'object' && target !== null
-        ? (target as Record<string, unknown>)
-        : {};
-
+    const targetObj = typeof target === 'object' && target !== null
+      ? (target as Record<string, unknown>)
+      : {};
     for (const key of Object.keys(baseObj)) {
       const baseVal = baseObj[key];
-      const targetVal = Object.prototype.hasOwnProperty.call(targetObj, key)
-        ? targetObj[key]
-        : undefined;
+      const targetVal = Object.prototype.hasOwnProperty.call(targetObj, key) ? targetObj[key] : undefined;
       if (typeof baseVal === 'object' && baseVal !== null) {
         res[key] = mergeDefaults(baseVal, targetVal);
       } else {
         res[key] = targetVal !== undefined ? targetVal : baseVal;
       }
     }
-    // include any extra keys present in target
     for (const key of Object.keys(targetObj)) {
-      if (!Object.prototype.hasOwnProperty.call(res, key)) {
-        res[key] = targetObj[key];
-      }
+      if (!Object.prototype.hasOwnProperty.call(res, key)) res[key] = targetObj[key];
     }
     return res;
   }
   return target !== undefined ? target : base;
 }
 
-const messages: Record<string, MessageSchema> = {};
-for (const key of Object.keys(rawMessages)) {
-  messages[key] = (
-    key === 'en'
-      ? rawMessages.en
-      : mergeDefaults(rawMessages.en, rawMessages[key])
-  ) as MessageSchema;
+const loadedMessages: Record<string, MessageSchema> = { en };
+
+async function loadLocale(locale: string): Promise<MessageSchema> {
+  if (loadedMessages[locale]) return loadedMessages[locale];
+  let mod: Record<string, unknown>;
+  switch (locale) {
+    case 'zh': mod = await import('./locales/zh.ts'); break;
+    case 'zh-TW': mod = await import('./locales/zh-TW.ts'); break;
+    case 'ja': mod = await import('./locales/ja.ts'); break;
+    case 'ko': mod = await import('./locales/ko.ts'); break;
+    case 'fr': mod = await import('./locales/fr.ts'); break;
+    case 'de': mod = await import('./locales/de.ts'); break;
+    case 'ru': mod = await import('./locales/ru.ts'); break;
+    case 'ar': mod = await import('./locales/ar.ts'); break;
+    case 'es': mod = await import('./locales/es.ts'); break;
+    case 'ms': mod = await import('./locales/ms.ts'); break;
+    case 'it': mod = await import('./locales/it.ts'); break;
+    default: return en;
+  }
+  const merged = mergeDefaults(en, mod) as MessageSchema;
+  loadedMessages[locale] = merged;
+  return merged;
 }
 
-const availableLocales = Object.keys(messages);
-const storedLocale = localStorage.getItem('language');
-const locale =
-  storedLocale && availableLocales.includes(storedLocale) ? storedLocale : 'en';
+const storedLocale: string = localStorage.getItem('language') || 'en';
+const locale = storedLocale === 'en' || AVAILABLE_LOCALES.includes(storedLocale) ? storedLocale : 'en';
 
 export const i18n = createI18n({
   legacy: false,
   locale,
   fallbackLocale: 'en',
-  messages,
+  messages: { en },
 });
+
+export async function setLocale(locale: string) {
+  const msg = await loadLocale(locale);
+  i18n.global.setLocaleMessage(locale, msg);
+  i18n.global.locale.value = locale as any;
+  localStorage.setItem('language', locale);
+}
+
+if (locale !== 'en') {
+  loadLocale(locale);
+}

@@ -413,6 +413,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { i18n, setLocale } from '@/core/i18n';
 import { getVersion } from '@tauri-apps/api/app';
 import {
   Palette,
@@ -432,7 +433,8 @@ interface Props {
   initialSection?: string;
 }
 
-const { locale, t } = useI18n({ useScope: 'global' });
+const locale = i18n.global.locale;
+const { t } = useI18n({ useScope: 'global' });
 const settingsStore = useSettingsStore();
 
 const props = withDefaults(defineProps<Props>(), {
@@ -588,9 +590,7 @@ watch(
 
 const handleLanguageChange = (event: Event) => {
   const target = event.target as HTMLSelectElement;
-  const lang = target.value;
-  locale.value = lang;
-  localStorage.setItem('language', lang);
+  setLocale(target.value);
 };
 
 const handleCursorStyleChange = (event: Event) => {

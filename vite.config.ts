@@ -6,8 +6,23 @@ import { dirname } from 'node:path';
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [vue()],
+  build: {
+    target: 'es2021',
+    cssCodeSplit: true,
+    cssMinify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vue: ['vue', 'pinia', 'vue-i18n'],
+          xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-search', '@xterm/addon-webgl'],
+          ui: ['lucide-vue-next'],
+          tauri: ['@tauri-apps/api', '@tauri-apps/plugin-opener'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'happy-dom',
     globals: true,
@@ -45,4 +60,4 @@ export default defineConfig(async () => ({
       ignored: ['**/src-tauri/**'],
     },
   },
-}));
+});

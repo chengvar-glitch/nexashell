@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue';
-import { useI18n } from 'vue-i18n';
 import { themeManager } from '@/core/utils/theme-manager';
+import { i18n, setLocale, AVAILABLE_LOCALES } from '@/core/i18n';
 
 const emit = defineEmits(['complete']);
 
-const { locale, availableLocales } = useI18n({ useScope: 'global' });
+const locale = i18n.global.locale;
+const availableLocales = AVAILABLE_LOCALES;
 
 const showContent = ref(true);
 const showOptions = ref(false);
-const selectedLanguage = ref(locale.value);
+const selectedLanguage = ref<string>(locale.value as string);
 const selectedTheme = ref(themeManager.getTheme());
 
 const logoSrc = computed(() => {
@@ -80,8 +81,7 @@ const handleThemeSelect = (theme: 'auto' | 'light' | 'dark') => {
 };
 
 const handleSave = () => {
-  locale.value = selectedLanguage.value;
-  localStorage.setItem('language', selectedLanguage.value);
+  setLocale(selectedLanguage.value);
   themeManager.setTheme(selectedTheme.value);
   localStorage.setItem('hasLaunched', 'true');
   emit('complete');
