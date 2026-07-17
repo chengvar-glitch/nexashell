@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef, triggerRef, nextTick, watch, onActivated } from 'vue';
+import { onMounted, onUnmounted, ref, shallowRef, triggerRef, nextTick, watch, onActivated, onDeactivated } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -238,7 +238,7 @@ const detectRemotePath = async () => {
       });
 
       // 1. Scan back from current cursor position for prompts, cd commands, and pwd output
-      const maxScanLines = 500; // Increased: Scan deeper to catch recent history (up to 500 lines)
+      const maxScanLines = 100;
       const startLine = buffer.baseY + buffer.cursorY;
       const endLine = Math.max(0, startLine - maxScanLines);
 
@@ -1226,6 +1226,12 @@ onMounted(async () => {
         }
       }
     });
+    window.addEventListener('resize', handleResize);
+  });
+
+  // Handle deactivation (KeepAlive) — stop listening to resize
+  onDeactivated(() => {
+    window.removeEventListener('resize', handleResize);
   });
 
   // Handle window resize

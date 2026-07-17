@@ -120,7 +120,6 @@ onMounted(async () => {
   themeManager.initialize();
 
   shortcutManager.register(PredefinedShortcuts.QUIT_APP);
-  shortcutManager.register(PredefinedShortcuts.CLOSE_WINDOW);
   shortcutManager.register(PredefinedShortcuts.OPEN_SETTINGS);
   shortcutManager.register(PredefinedShortcuts.NEW_LOCAL_TAB);
   shortcutManager.register(PredefinedShortcuts.NEW_SSH_TAB);
@@ -143,9 +142,9 @@ onMounted(async () => {
   });
 
   eventBus.on(APP_EVENTS.EDIT_SESSION, async (session: any) => {
-    console.log('[APP] Handling EDIT_SESSION event', session?.id);
+    logger.debug('Handling EDIT_SESSION event', session?.id);
     if (!session) {
-      console.error('[APP] EDIT_SESSION session is null');
+      logger.error('EDIT_SESSION session is null');
       return;
     }
 
@@ -172,12 +171,12 @@ onMounted(async () => {
     isConnecting.value = false;
 
     // 2. Open form immediately to respond to user click
-    console.log('[APP] Calling openSSHForm()');
+    logger.debug('Calling openSSHForm()');
     openSSHForm();
 
     // 3. Fetch credentials in background
     try {
-      console.log('[APP] Fetching credentials in background for', session.id);
+      logger.debug('Fetching credentials in background for', session.id);
       const credentials = await invoke<[string, string | null, string | null]>(
         'get_session_credentials',
         { sessionId: session.id }
@@ -185,7 +184,7 @@ onMounted(async () => {
 
       // 4. If form is still open and we're editing the same session, update sensitive fields
       if (showSSHForm.value && editingSessionId.value === session.id) {
-        console.log('[APP] Updating sensitive fields in background');
+        logger.debug('Updating sensitive fields in background');
         savedSSHFormData.value = {
           ...initialFormData,
           password: credentials[1] || '',
@@ -193,7 +192,7 @@ onMounted(async () => {
         };
       }
     } catch (error) {
-      console.error('[APP] Failed to fetch credentials in background', error);
+      logger.error('Failed to fetch credentials in background', error);
     }
   });
 

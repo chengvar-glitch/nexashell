@@ -235,9 +235,9 @@ class LoggerManager {
     this.config = {
       level: isDev ? 'DEBUG' : 'INFO',
       enableConsole: true,
-      enableHistory: true,
+      enableHistory: isDev,
       maxHistorySize: 1000,
-      moduleFilters: undefined, // No filtering, record all modules
+      moduleFilters: undefined,
     };
   }
 

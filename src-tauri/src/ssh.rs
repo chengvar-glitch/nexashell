@@ -123,8 +123,6 @@ pub struct UploadProgress {
 
 /// Contains state and communication handles for an active SSH channel
 pub struct SshChannelInfo {
-    pub receiver: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<OutputChunk>>>,
-
     /// Handle to the background tokio task processing the SSH data
     pub handle: Option<tokio::task::JoinHandle<()>>,
 
@@ -362,8 +360,7 @@ impl SshManager {
             Err(e) => return Err(SshError::TaskError(e.to_string())),
         };
 
-        // 2. Setup communication channels (bounded to prevent OOM)
-        let (output_sender, output_receiver) = mpsc::unbounded_channel::<OutputChunk>();
+        // 2. Setup communication channels
         let (input_sender, input_receiver) = mpsc::unbounded_channel::<String>();
         let stop_flag = Arc::new(AtomicBool::new(false));
         let next_seq = Arc::new(AtomicU64::new(1));
@@ -387,7 +384,6 @@ impl SshManager {
             next_seq.clone(),
             initial_outputs.clone(),
             input_receiver,
-            output_sender,
             app_handle.clone(),
             session_id.clone(),
         );
@@ -414,7 +410,6 @@ impl SshManager {
             channels.insert(
                 session_id,
                 SshChannelInfo {
-                    receiver: Arc::new(tokio::sync::Mutex::new(output_receiver)),
                     handle: Some(handle),
                     status_handle: Some(status_handle),
                     input_sender,
@@ -497,7 +492,6 @@ impl SshManager {
         next_seq: Arc<AtomicU64>,
         initial_outputs: Arc<tokio::sync::Mutex<Vec<OutputChunk>>>,
         mut input_receiver: mpsc::UnboundedReceiver<String>,
-        output_sender: mpsc::UnboundedSender<OutputChunk>,
         app_handle: Option<tauri::AppHandle>,
         session_id: SessionId,
     ) -> tokio::task::JoinHandle<()> {
@@ -584,7 +578,6 @@ impl SshManager {
                         let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
                     }
 
-                    let _ = output_sender.send(chunk);
                     last_emit = std::time::Instant::now();
                     seen_first_output = true;
                 }
@@ -848,27 +841,6 @@ impl SshManager {
             },
             (current_cpu_total, current_cpu_idle),
         ))
-    }
-
-    /// Retrieves all pending output chunks from a session
-    ///
-    /// This drains the output receiver, so each chunk is returned only once.
-    pub fn get_session_output(&self, session_id: &SessionId) -> Result<Vec<OutputChunk>, SshError> {
-        let channels = self
-            .channels
-            .read()
-            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
-
-        if let Some(channel_info) = channels.get(session_id) {
-            let mut outputs = Vec::new();
-            let mut receiver = channel_info.receiver.blocking_lock();
-            while let Ok(chunk) = receiver.try_recv() {
-                outputs.push(chunk);
-            }
-            Ok(outputs)
-        } else {
-            Err(SshError::SessionNotFound(session_id.0.to_string()))
-        }
     }
 
     /// Sends user input to a specific SSH session
@@ -1239,18 +1211,6 @@ pub fn disconnect_ssh(
     sessionId: String,
 ) -> Result<(), SshError> {
     state.disconnect_ssh(&SessionId::from(sessionId))
-}
-
-/// Retrieves all pending output chunks from a session
-///
-/// # Tauri Command: `get_ssh_output`
-#[tauri::command]
-#[allow(non_snake_case)]
-pub fn get_ssh_output(
-    state: tauri::State<'_, SshManager>,
-    sessionId: String,
-) -> Result<Vec<OutputChunk>, SshError> {
-    state.get_session_output(&SessionId::from(sessionId))
 }
 
 /// Sends user input to an SSH session

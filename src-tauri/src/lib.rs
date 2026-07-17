@@ -20,13 +20,16 @@ pub fn run() {
             // schema and indexes exist even if the DB file was absent.
             match db::init_db() {
                 Ok(v) => {
-                    // log to stdout for visibility during startup
                     println!("db init: {}", v);
                 }
                 Err(e) => {
                     eprintln!("db init error: {}", e);
                 }
             }
+
+            // Pre-initialize encryption key (PBKDF2) to avoid
+            // blocking the main thread on first credential access
+            encryption::EncryptionManager::init();
             #[cfg(target_os = "macos")]
             {
                 use cocoa::appkit::{NSWindow, NSWindowTitleVisibility};
@@ -83,7 +86,6 @@ pub fn run() {
             ssh::connect_ssh,
             ssh::disconnect_ssh,
             ssh::send_ssh_input,
-            ssh::get_ssh_output,
             ssh::get_buffered_ssh_output,
             ssh::upload_file_sftp,
             ssh::probe_remote_path,

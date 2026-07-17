@@ -183,7 +183,17 @@ pub fn init_db() -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_groups_session_id ON session_groups(session_id)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_tags_tag_id ON session_tags(tag_id)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_tags_session_id ON session_tags(session_id)",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -399,9 +409,9 @@ pub fn save_session(
     group_ids: Option<Vec<String>>,
     tag_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
-    let db_path = db_path()?;
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-    ensure_groups_and_tags(&conn)?;
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    ensure_groups_and_tags(conn)?;
 
     let id = Uuid::new_v4().to_string();
 
@@ -660,8 +670,8 @@ pub fn edit_tag(
 /// Delete a tag and its logical associations.
 #[tauri::command]
 pub fn delete_tag(id: String) -> Result<(), String> {
-    let db_path = db_path()?;
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     conn.execute(
         "DELETE FROM session_tags WHERE tag_id = ?1",
         params![id.clone()],
@@ -1059,11 +1069,53 @@ pub fn export_sessions(password: String) -> Result<String, String> {
         })
         .map_err(|e| e.to_string())?;
 
-    let mut export_sessions = Vec::new();
-    for row in session_rows {
-        let (metadata, encrypted_creds) = row.map_err(|e| e.to_string())?;
+    let sessions: Vec<(Session, Option<String>)> = session_rows
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
 
-        // Decrypt from machine ID and re-encrypt with export password
+    // 2. Batch-fetch all group associations (single query)
+    let mut group_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut g_stmt = conn
+            .prepare("SELECT session_id, group_id FROM session_groups")
+            .map_err(|e| e.to_string())?;
+        let rows = g_stmt
+            .query_map([], |row| {
+                let sid: String = row.get(0)?;
+                let gid: String = row.get(1)?;
+                Ok((sid, gid))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (sid, gid) = row.map_err(|e| e.to_string())?;
+            group_map.entry(sid).or_default().push(gid);
+        }
+    }
+
+    // 3. Batch-fetch all tag associations (single query)
+    let mut tag_map: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    {
+        let mut t_stmt = conn
+            .prepare("SELECT session_id, tag_id FROM session_tags")
+            .map_err(|e| e.to_string())?;
+        let rows = t_stmt
+            .query_map([], |row| {
+                let sid: String = row.get(0)?;
+                let tid: String = row.get(1)?;
+                Ok((sid, tid))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (sid, tid) = row.map_err(|e| e.to_string())?;
+            tag_map.entry(sid).or_default().push(tid);
+        }
+    }
+
+    // 4. Assemble sessions
+    let mut export_sessions = Vec::new();
+    for (metadata, encrypted_creds) in sessions {
         let re_encrypted = if let Some(creds) = encrypted_creds {
             let sensitive = crate::encryption::EncryptionManager::decrypt(&creds)?;
             Some(crate::encryption::EncryptionManager::encrypt_with_key(
@@ -1073,35 +1125,15 @@ pub fn export_sessions(password: String) -> Result<String, String> {
             None
         };
 
-        // Get groups for this session
-        let mut g_stmt = conn
-            .prepare("SELECT group_id FROM session_groups WHERE session_id = ?1")
-            .map_err(|e| e.to_string())?;
-        let groups: Vec<String> = g_stmt
-            .query_map(params![metadata.id], |r| r.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| e.to_string())?;
-
-        // Get tags for this session
-        let mut t_stmt = conn
-            .prepare("SELECT tag_id FROM session_tags WHERE session_id = ?1")
-            .map_err(|e| e.to_string())?;
-        let tags: Vec<String> = t_stmt
-            .query_map(params![metadata.id], |r| r.get(0))
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<String>, _>>()
-            .map_err(|e| e.to_string())?;
-
         export_sessions.push(ExportSession {
+            group_ids: group_map.remove(&metadata.id).unwrap_or_default(),
+            tag_ids: tag_map.remove(&metadata.id).unwrap_or_default(),
             metadata,
             encrypted_credentials: re_encrypted,
-            group_ids: groups,
-            tag_ids: tags,
         });
     }
 
-    // 2. Get all groups
+    // 5. Get all groups
     let mut g_stmt = conn
         .prepare("SELECT id, name, sort, created_at, updated_at FROM groups")
         .map_err(|e| e.to_string())?;
@@ -1119,7 +1151,7 @@ pub fn export_sessions(password: String) -> Result<String, String> {
         .collect::<Result<Vec<Group>, _>>()
         .map_err(|e| e.to_string())?;
 
-    // 3. Get all tags
+    // 6. Get all tags
     let mut t_stmt = conn
         .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags")
         .map_err(|e| e.to_string())?;

@@ -24,6 +24,10 @@ impl EncryptionManager {
     const ITERATIONS: u32 = 100_000;
     const KEY_FILE_NAME: &str = ".encryption_master_key";
 
+    pub fn init() {
+        let _ = Self::get_master_key();
+    }
+
     fn key_file_path() -> Result<PathBuf, String> {
         let data_dir = dirs::data_dir()
             .ok_or_else(|| "Failed to determine app data directory".to_string())?

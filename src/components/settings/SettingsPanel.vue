@@ -433,7 +433,7 @@ interface Props {
   initialSection?: string;
 }
 
-const locale = i18n.global.locale;
+const locale = (i18n as any).global.locale as import('vue').Ref<string>;
 const { t } = useI18n({ useScope: 'global' });
 const settingsStore = useSettingsStore();
 
@@ -462,18 +462,8 @@ const setSectionRef = (el: unknown, key: string) => {
 };
 
 const languages = [
-  { value: 'ar', label: 'Arabic' },
-  { value: 'zh', label: 'Chinese Simplified (简体中文)' },
-  { value: 'zh-TW', label: 'Chinese Traditional (繁體中文)' },
+  { value: 'zh', label: '简体中文' },
   { value: 'en', label: 'English' },
-  { value: 'fr', label: 'French (Français)' },
-  { value: 'de', label: 'German (Deutsch)' },
-  { value: 'it', label: 'Italian (Italiano)' },
-  { value: 'ja', label: 'Japanese (日本語)' },
-  { value: 'ko', label: 'Korean (한국어)' },
-  { value: 'ms', label: 'Malay (Bahasa Melayu)' },
-  { value: 'ru', label: 'Russian (Русский)' },
-  { value: 'es', label: 'Spanish (Español)' },
 ];
 
 const menuItems = computed(() => [

@@ -5,7 +5,7 @@ import { i18n, setLocale, AVAILABLE_LOCALES } from '@/core/i18n';
 
 const emit = defineEmits(['complete']);
 
-const locale = i18n.global.locale;
+const locale = (i18n as any).global.locale as import('vue').Ref<string>;
 const availableLocales = AVAILABLE_LOCALES;
 
 const showContent = ref(true);
@@ -28,37 +28,15 @@ const themeClass = computed(() => {
 const languageNames: Record<string, string> = {
   en: 'English',
   zh: '简体中文',
-  'zh-TW': '繁體中文',
-  ja: '日本語',
-  ko: '한국어',
-  fr: 'Français',
-  de: 'Deutsch',
-  ru: 'Русский',
-  es: 'Español',
-  ms: 'Bahasa Melayu',
-  it: 'Italiano',
-  ar: 'العربية',
 };
 
 const detectLanguage = async () => {
-  // Simulate async detection
   await new Promise(resolve => setTimeout(resolve, 500));
 
   const browserLang = navigator.language;
-  console.log('Detected browser language:', browserLang);
-
   if (browserLang.startsWith('zh')) {
-    if (browserLang.includes('TW') || browserLang.includes('HK')) {
-      return 'zh-TW';
-    }
     return 'zh';
   }
-
-  const langPrefix = browserLang.split('-')[0];
-  if (availableLocales.indexOf(langPrefix) !== -1) {
-    return langPrefix;
-  }
-
   return 'en';
 };
 

@@ -1,6 +1,5 @@
 import {
   quitApp,
-  closeWindow,
 } from '@/features/window';
 import { createNewLocalTab } from '@/features/tabs';
 import { eventBus } from './event-bus';
@@ -188,17 +187,6 @@ export const PredefinedShortcuts = {
     description: 'Quit application',
     handler: async () => {
       await quitApp();
-    },
-  },
-  CLOSE_WINDOW: {
-    key: 'w',
-    metaKey: IS_MAC,
-    ctrlKey: !IS_MAC,
-    shiftKey: false,
-    altKey: false,
-    description: 'Close window',
-    handler: async () => {
-      await closeWindow();
     },
   },
   OPEN_SETTINGS: {

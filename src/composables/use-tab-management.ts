@@ -8,6 +8,9 @@
 import { ref } from 'vue';
 import { type Tab, DEFAULT_TAB } from '@/features/tabs';
 import { useSessionStore } from '@/features/session';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('TAB_MANAGEMENT');
 
 export function useTabManagement() {
   const tabs = ref<Tab[]>([
@@ -60,26 +63,17 @@ export function useTabManagement() {
 
       // Step 2: Clean up session if it's a terminal tab
       if (isTerminalTab) {
-        // Use Pinia store to cleanup session
         const sessionStore = useSessionStore();
-        console.log('[TAB_MANAGEMENT] Starting cleanup for tab:', id);
+        logger.debug('Starting cleanup for tab:', id);
         sessionStore
           .disconnectByTabId(id)
           .catch(error => {
-            console.error(
-              '[TAB_MANAGEMENT] Error disconnecting session for tab:',
-              id,
-              error
-            );
+            logger.error(`Error disconnecting session for tab: ${id}`, error);
           })
           .finally(() => {
-            // Step 3: Remove tab after async cleanup is done
             const tabIndex = tabs.value.findIndex(tab => tab.id === id);
             if (tabIndex !== -1) {
               tabs.value.splice(tabIndex, 1);
-              console.log('[TAB_MANAGEMENT] Tab removed after cleanup:', id);
-              // Additional log to confirm mapping removed
-              console.log('[TAB_MANAGEMENT] Finished cleanup for tab:', id);
             }
             resolve();
           });

@@ -3,7 +3,7 @@ import en from './locales/en.ts';
 
 type MessageSchema = typeof en;
 
-export const AVAILABLE_LOCALES = ['en', 'zh', 'zh-TW', 'ja', 'ko', 'fr', 'de', 'ru', 'ar', 'es', 'ms', 'it'];
+export const AVAILABLE_LOCALES = ['en', 'zh'] as const;
 
 function mergeDefaults(base: unknown, target: unknown): unknown {
   if (target === undefined || target === null) return base;
@@ -38,16 +38,6 @@ async function loadLocale(locale: string): Promise<MessageSchema> {
   let mod: Record<string, unknown>;
   switch (locale) {
     case 'zh': mod = await import('./locales/zh.ts'); break;
-    case 'zh-TW': mod = await import('./locales/zh-TW.ts'); break;
-    case 'ja': mod = await import('./locales/ja.ts'); break;
-    case 'ko': mod = await import('./locales/ko.ts'); break;
-    case 'fr': mod = await import('./locales/fr.ts'); break;
-    case 'de': mod = await import('./locales/de.ts'); break;
-    case 'ru': mod = await import('./locales/ru.ts'); break;
-    case 'ar': mod = await import('./locales/ar.ts'); break;
-    case 'es': mod = await import('./locales/es.ts'); break;
-    case 'ms': mod = await import('./locales/ms.ts'); break;
-    case 'it': mod = await import('./locales/it.ts'); break;
     default: return en;
   }
   const merged = mergeDefaults(en, mod) as MessageSchema;
@@ -56,22 +46,33 @@ async function loadLocale(locale: string): Promise<MessageSchema> {
 }
 
 const storedLocale: string = localStorage.getItem('language') || 'en';
-const locale = storedLocale === 'en' || AVAILABLE_LOCALES.includes(storedLocale) ? storedLocale : 'en';
+const initialLocale = storedLocale === 'zh' ? 'zh' : 'en';
 
-export const i18n = createI18n({
+const i18n = createI18n({
   legacy: false,
-  locale,
+  locale: initialLocale,
   fallbackLocale: 'en',
   messages: { en },
 });
 
+export { i18n };
+
 export async function setLocale(locale: string) {
+  if (!AVAILABLE_LOCALES.includes(locale as 'en' | 'zh')) {
+    locale = 'en';
+  }
   const msg = await loadLocale(locale);
-  i18n.global.setLocaleMessage(locale, msg);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (i18n as any).global.setLocaleMessage(locale, msg);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   i18n.global.locale.value = locale as any;
   localStorage.setItem('language', locale);
 }
 
-if (locale !== 'en') {
-  loadLocale(locale);
+async function initLocale() {
+  if (initialLocale !== 'en') {
+    await setLocale(initialLocale);
+  }
 }
+
+initLocale();
