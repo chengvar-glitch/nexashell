@@ -30,3 +30,6 @@ Thumbs.db
 # Architecture documentation (auto-generated)
 ARCHITECTURE.md
 ARCHITECTURE.en.md
+
+# Agent orchestration plans
+.omo/
