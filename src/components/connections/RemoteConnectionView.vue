@@ -1234,13 +1234,12 @@ onMounted(async () => {
     window.removeEventListener('resize', handleResize);
   });
 
-  // Handle window resize
+  // Handle window resize (managed via onActivated/onDeactivated for KeepAlive)
   const handleResize = (): void => {
     if (fitAddon) {
       fitAddon.fit();
     }
   };
-  window.addEventListener('resize', handleResize);
 
   /**
    * Setup SSH output event listener before connection

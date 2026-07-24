@@ -502,6 +502,7 @@ impl SshManager {
             let mut seen_first_output = false;
             let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
+            let mut idle_reads = 0u32;
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
@@ -530,6 +531,7 @@ impl SshManager {
 
                 match read_result {
                     Some(Ok(n)) => {
+                        idle_reads = 0;
                         pending_output.push_str(&String::from_utf8_lossy(&buffer[..n]));
                     }
                     Some(Err(_)) => {
@@ -537,7 +539,12 @@ impl SshManager {
                         break;
                     }
                     None => {
-                        tokio::task::yield_now().await;
+                        idle_reads += 1;
+                        // Sleep progressively to reduce CPU usage when idle:
+                        //   first few idle cycles: sleep 1ms
+                        //   sustained idle: sleep 10ms
+                        let sleep_ms = if idle_reads > 5 { 10 } else { 1 };
+                        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
                     }
                 }
 
