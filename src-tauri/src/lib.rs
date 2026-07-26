@@ -110,6 +110,7 @@ pub fn run() {
             db::unlink_session_tag,
             db::list_tags_for_session,
             db::get_sessions,
+            db::get_sessions_with_relations,
             db::edit_group,
             db::delete_group,
             db::edit_tag,

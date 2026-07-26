@@ -99,6 +99,16 @@ pub struct ExportSession {
     pub tag_ids: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SessionWithRelations {
+    #[serde(flatten)]
+    pub session: Session,
+    pub group_ids: Vec<String>,
+    pub groups: Vec<String>,
+    pub tag_ids: Vec<String>,
+    pub tags: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct ExportData {
     pub sessions: Vec<ExportSession>,
@@ -586,6 +596,93 @@ pub fn get_sessions(
         v.push(r.map_err(|e| e.to_string())?);
     }
     Ok(v)
+}
+
+#[tauri::command]
+pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String> {
+    with_db(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at FROM sessions",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Session {
+                    id: row.get(0)?,
+                    addr: row.get(1)?,
+                    port: row.get(2)?,
+                    server_name: row.get(3)?,
+                    username: row.get(4)?,
+                    auth_type: row.get(5)?,
+                    private_key_path: row.get(6)?,
+                    is_favorite: row.get::<_, i64>(7)? != 0,
+                    last_connected_at: row.get(8)?,
+                    created_at: row.get(9)?,
+                    updated_at: row.get(10)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        let mut sessions = Vec::new();
+        for r in rows {
+            sessions.push(r.map_err(|e| e.to_string())?);
+        }
+        drop(stmt);
+
+        if sessions.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut group_map: std::collections::HashMap<String, (Vec<String>, Vec<String>)> =
+            std::collections::HashMap::new();
+        let mut gstmt = conn
+            .prepare(
+                "SELECT sg.session_id, g.id, g.name FROM session_groups sg JOIN groups g ON g.id = sg.group_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let grows = gstmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .map_err(|e| e.to_string())?;
+        for r in grows {
+            let (sid, gid, gname) = r.map_err(|e| e.to_string())?;
+            let entry = group_map.entry(sid).or_default();
+            entry.0.push(gid);
+            entry.1.push(gname);
+        }
+        drop(gstmt);
+
+        let mut tag_map: std::collections::HashMap<String, (Vec<String>, Vec<String>)> =
+            std::collections::HashMap::new();
+        let mut tstmt = conn
+            .prepare(
+                "SELECT st.session_id, t.id, t.name FROM session_tags st JOIN tags t ON t.id = st.tag_id",
+            )
+            .map_err(|e| e.to_string())?;
+        let trows = tstmt
+            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .map_err(|e| e.to_string())?;
+        for r in trows {
+            let (sid, tid, tname) = r.map_err(|e| e.to_string())?;
+            let entry = tag_map.entry(sid).or_default();
+            entry.0.push(tid);
+            entry.1.push(tname);
+        }
+
+        Ok(sessions
+            .into_iter()
+            .map(|session| {
+                let (group_ids, groups) = group_map.remove(&session.id).unwrap_or_default();
+                let (tag_ids, tags) = tag_map.remove(&session.id).unwrap_or_default();
+                SessionWithRelations {
+                    session,
+                    group_ids,
+                    groups,
+                    tag_ids,
+                    tags,
+                }
+            })
+            .collect())
+    })
 }
 
 /// Edit an existing group. Only provided fields are updated.

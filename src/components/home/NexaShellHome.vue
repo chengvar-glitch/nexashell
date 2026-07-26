@@ -454,11 +454,11 @@ import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
 import { formatRelativeTime } from '@/core/utils/time-utils';
+import { createLogger } from '@/core/utils/logger';
 import { sessionApi } from '@/features/session';
-import type {
-  SavedSession,
-  SavedSessionDisplay,
-} from '@/features/session/types';
+import type { SavedSessionDisplay } from '@/features/session/types';
+
+const logger = createLogger('NexaShellHome');
 
 interface Group {
   id: string;
@@ -634,13 +634,12 @@ const toggleFavorite = async (session: SavedSessionDisplay) => {
     const newStatus = !session.is_favorite;
     await sessionApi.toggleFavorite(session.id, newStatus);
     session.is_favorite = newStatus;
-    console.log(
-      'Toggled favorite for session:',
-      session.server_name,
-      newStatus
-    );
+    logger.info('Toggled favorite', {
+      session: session.server_name,
+      isFavorite: newStatus,
+    });
   } catch (error) {
-    console.error('Failed to toggle favorite:', error);
+    logger.error('Failed to toggle favorite', error);
   }
 };
 
@@ -672,40 +671,32 @@ const { t, locale } = useI18n();
 
 // Create wrapper functions for event handlers that can be properly removed
 const handleSessionSaved = async () => {
-  console.log('SESSION_SAVED event received, isMounted:', isMounted.value);
   if (isMounted.value) {
-    console.log('Component is mounted, reloading sessions...');
     await loadSessions();
-  } else {
-    console.log('Component not yet mounted, will load on mount');
   }
 };
 
 const handleGroupsUpdated = async () => {
-  console.log('GROUPS_UPDATED event received');
   if (!isMounted.value) return;
   try {
     const fetchedGroups = await invoke<Group[]>('list_groups');
     groups.value = fetchedGroups || [];
-    console.log('Refreshed groups:', fetchedGroups);
     // Reload sessions when groups change
     await loadSessions();
   } catch (error) {
-    console.error('Failed to refresh groups:', error);
+    logger.error('Failed to refresh groups', error);
   }
 };
 
 const handleTagsUpdated = async () => {
-  console.log('TAGS_UPDATED event received');
   if (!isMounted.value) return;
   try {
     const fetchedTags = await invoke<Tag[]>('list_tags');
     tags.value = fetchedTags || [];
-    console.log('Refreshed tags:', fetchedTags);
     // Reload sessions when tags change
     await loadSessions();
   } catch (error) {
-    console.error('Failed to refresh tags:', error);
+    logger.error('Failed to refresh tags', error);
   }
 };
 
@@ -730,67 +721,22 @@ const toggleSelectAllGlobal = (event: Event) => {
   }
 };
 
-// Fetch all sessions from the database
+// Fetch all sessions from the database in a single IPC round-trip.
 const loadSessions = async () => {
   try {
-    const dbSessions = await invoke<SavedSession[]>('list_sessions');
-
-    if (!dbSessions || dbSessions.length === 0) {
-      sessions.value = [];
-      return;
-    }
-
-    // Transform database sessions to UI format and fetch associated groups/tags
-    const transformedSessions: SavedSessionDisplay[] = await Promise.all(
-      dbSessions.map(async dbSession => {
-        try {
-          // Fetch groups for this session
-          const sessionGroups = await invoke<
-            Array<{ id: string; name: string }>
-          >('list_groups_for_session', {
-            sessionId: dbSession.id,
-          });
-
-          // Fetch tags for this session
-          const sessionTags = await invoke<Array<{ id: string; name: string }>>(
-            'list_tags_for_session',
-            {
-              sessionId: dbSession.id,
-            }
-          );
-
-          return {
-            ...dbSession,
-            groups: sessionGroups?.map(g => g.name) || [],
-            group_ids: sessionGroups?.map(g => g.id) || [],
-            tags: sessionTags?.map(t => t.name) || [],
-            tag_ids: sessionTags?.map(t => t.id) || [],
-          } as SavedSessionDisplay;
-        } catch (error) {
-          console.error(
-            `Failed to fetch groups/tags for session ${dbSession.id}:`,
-            error
-          );
-          return {
-            ...dbSession,
-            groups: [],
-            tags: [],
-          } as SavedSessionDisplay;
-        }
-      })
+    const fetched = await invoke<SavedSessionDisplay[]>(
+      'get_sessions_with_relations'
     );
-
-    sessions.value = transformedSessions;
-    console.log('Loaded sessions from database:', transformedSessions);
+    sessions.value = fetched || [];
+    logger.info('Loaded sessions', { count: sessions.value.length });
   } catch (error) {
-    console.error('Failed to load sessions:', error);
+    logger.error('Failed to load sessions', error);
     sessions.value = [];
   }
 };
 
 // Fetch groups and tags from backend on mount
 onMounted(async () => {
-  console.log('NexaShellHome mounted');
   isMounted.value = true;
 
   // Load sessions first
@@ -799,30 +745,25 @@ onMounted(async () => {
   try {
     const fetchedGroups = await invoke<Group[]>('list_groups');
     groups.value = fetchedGroups || [];
-    console.log('Loaded groups:', fetchedGroups);
   } catch (error) {
-    console.error('Failed to fetch groups:', error);
+    logger.error('Failed to fetch groups', error);
   }
 
   try {
     const fetchedTags = await invoke<Tag[]>('list_tags');
     tags.value = fetchedTags || [];
-    console.log('Loaded tags:', fetchedTags);
   } catch (error) {
-    console.error('Failed to fetch tags:', error);
+    logger.error('Failed to fetch tags', error);
   }
 
   // Listen for group and tag updates from other components
-  console.log('Registering event listeners...');
   eventBus.on(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
   eventBus.on(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
   // Reload sessions when a new session is saved
   eventBus.on(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
-  console.log('Event listeners registered');
 });
 
 onUnmounted(() => {
-  console.log('NexaShellHome unmounting');
   isMounted.value = false;
   // Clean up event listeners
   eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
@@ -836,11 +777,11 @@ const handleNewConnection = () => {
 
 const handleConnect = (session: SavedSessionDisplay) => {
   // Single click to select, double click to connect
-  console.log('Session selected:', session.server_name);
+  logger.debug('Session selected', { session: session.server_name });
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
-  console.log('Quick connect initiated for session:', session.server_name);
+  logger.info('Quick connect initiated', { session: session.server_name });
   eventBus.emit(APP_EVENTS.CONNECT_SESSION, session);
 };
 
@@ -850,7 +791,7 @@ const handleDeleteGroup = async (groupId: string) => {
     groups.value = groups.value.filter(g => g.id !== groupId);
     // The backend cascades deletion to session_groups, clearing SSH sessions' group association
   } catch (error) {
-    console.error('Failed to delete group:', error);
+    logger.error('Failed to delete group', error);
   }
 };
 
@@ -860,7 +801,7 @@ const handleDeleteTag = async (tagId: string) => {
     tags.value = tags.value.filter(t => t.id !== tagId);
     // The backend cascades deletion to session_tags, clearing SSH sessions' tag association
   } catch (error) {
-    console.error('Failed to delete tag:', error);
+    logger.error('Failed to delete tag', error);
   }
 };
 
@@ -874,7 +815,7 @@ const handleAddGroup = async () => {
     showAddGroupInput.value = false;
     // Event listener will handle refresh
   } catch (error) {
-    console.error('Failed to add group:', error);
+    logger.error('Failed to add group', error);
   }
 };
 
@@ -888,7 +829,7 @@ const handleAddTag = async () => {
     showAddTagInput.value = false;
     // Event listener will handle refresh
   } catch (error) {
-    console.error('Failed to add tag:', error);
+    logger.error('Failed to add tag', error);
   }
 };
 
@@ -936,7 +877,7 @@ const handleSaveGroupRename = async () => {
       // Also reload sessions since they might display group names
       await loadSessions();
     } catch (error) {
-      console.error('Failed to rename group:', error);
+      logger.error('Failed to rename group', error);
     }
   }
   editingGroupId.value = null;
@@ -967,7 +908,7 @@ const handleSaveTagRename = async () => {
       // Also reload sessions since they might display tag names/colors
       await loadSessions();
     } catch (error) {
-      console.error('Failed to update tag:', error);
+      logger.error('Failed to update tag', error);
     }
   }
   editingTagId.value = null;
@@ -1030,18 +971,13 @@ const handleSessionContextMenu = (
 };
 
 const handleContextMenuSelect = async (key: string) => {
-  console.log('Context menu item selected:', key);
-
   // Skip divider
   if (key === 'divider') {
-    console.log('Skipping divider');
     return;
   }
 
-  console.log('Selected session:', selectedSession.value);
-
   if (!selectedSession.value) {
-    console.warn('No session selected');
+    logger.warn('Context menu select with no session');
     return;
   }
 
@@ -1063,7 +999,7 @@ const handleContextMenuSelect = async (key: string) => {
       }
       await loadSessions();
     } catch (e) {
-      console.error('Failed to update session group:', e);
+      logger.error('Failed to update session group', e);
     }
     return;
   }
@@ -1085,27 +1021,24 @@ const handleContextMenuSelect = async (key: string) => {
       }
       await loadSessions();
     } catch (e) {
-      console.error('Failed to update session tag:', e);
+      logger.error('Failed to update session tag', e);
     }
     return;
   }
 
   switch (key) {
     case 'edit':
-      console.log('Handling edit for:', selectedSession.value.id);
       handleEditSession(selectedSession.value);
       break;
     case 'delete':
-      console.log('Handling delete for:', selectedSession.value.id);
       await handleDeleteSession(selectedSession.value);
       break;
     default:
-      console.log('Unknown menu action:', key);
+      logger.warn('Unknown context menu action', { key });
   }
 };
 
 const handleEditSession = (session: SavedSessionDisplay) => {
-  console.log('NexaShellHome: handleEditSession', session.id);
   // Emit event to trigger edit session in App.vue
   eventBus.emit(APP_EVENTS.EDIT_SESSION, session);
 };
@@ -1127,14 +1060,12 @@ const onConfirmDelete = async () => {
   pendingDeleteSession = null;
 
   try {
-    console.log('Invoking delete_session for session ID:', session.id);
-    const result = await invoke('delete_session', { id: session.id });
-    console.log('Delete result:', result);
+    await invoke('delete_session', { id: session.id });
 
     sessions.value = sessions.value.filter(s => s.id !== session.id);
     await loadSessions();
   } catch (error) {
-    console.error('Failed to delete session:', error);
+    logger.error('Failed to delete session', error);
   }
 };
 

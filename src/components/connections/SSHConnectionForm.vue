@@ -263,6 +263,9 @@ import TagsMultiSelect from '../common/TagsMultiSelect.vue';
 import type { MetadataItem } from '@/core/types/common';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('SSHConnectionForm');
 
 type ConnectionStatus = 'connecting' | 'success' | 'error';
 
@@ -408,17 +411,15 @@ onMounted(async () => {
   try {
     const groups = await invoke<MetadataItem[]>('list_groups');
     allGroups.value = groups || [];
-    console.log('Loaded groups:', allGroups.value);
   } catch (error) {
-    console.error('Failed to fetch groups:', error);
+    logger.error('Failed to fetch groups', error);
   }
 
   try {
     const tags = await invoke<MetadataItem[]>('list_tags');
     allTags.value = tags || [];
-    console.log('Loaded tags:', allTags.value);
   } catch (error) {
-    console.error('Failed to fetch tags:', error);
+    logger.error('Failed to fetch tags', error);
   }
 });
 
@@ -548,7 +549,7 @@ const onCancel = async () => {
       try {
         await invoke('delete_group', { id });
       } catch (error) {
-        console.error('Failed to rollback group:', id, error);
+        logger.error('Failed to rollback group', { id, error });
       }
     }
     eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
@@ -560,7 +561,7 @@ const onCancel = async () => {
       try {
         await invoke('delete_tag', { id });
       } catch (error) {
-        console.error('Failed to rollback tag:', id, error);
+        logger.error('Failed to rollback tag', { id, error });
       }
     }
     eventBus.emit(APP_EVENTS.TAGS_UPDATED);
