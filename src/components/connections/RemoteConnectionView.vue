@@ -11,6 +11,7 @@ import { createLogger } from '@/core/utils/logger';
 import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
+import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import ServerDashboard from './ServerDashboard.vue';
 
 const logger = createLogger('REMOTE_CONNECTION_VIEW');
@@ -105,6 +106,7 @@ const lastKnownAbsolutePath = ref('');
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
+let disposeIMEFix: (() => void) | null = null;
 
 // Upload task tracking
 interface UploadTask {
@@ -892,6 +894,11 @@ const cleanupResources = async (): Promise<void> => {
     await disconnectSession();
   }
 
+  if (disposeIMEFix) {
+    disposeIMEFix();
+    disposeIMEFix = null;
+  }
+
   terminal?.dispose();
 
   if (unlistenFn) {
@@ -1024,6 +1031,8 @@ onMounted(async () => {
   }
 
   terminal.open(terminalRef.value);
+
+  disposeIMEFix = attachMacWebKitIMESymbolFix(terminal);
 
   // Register OSC 7 handler for current working directory detection
   // OSC 7 ; file://hostname/path ST

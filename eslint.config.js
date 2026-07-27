@@ -65,6 +65,7 @@ export default [
         localStorage: 'readonly',
         CustomEvent: 'readonly',
         KeyboardEvent: 'readonly',
+        InputEvent: 'readonly',
         HTMLElement: 'readonly',
         navigator: 'readonly',
         MutationObserver: 'readonly',
