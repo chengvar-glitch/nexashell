@@ -1,10 +1,10 @@
 {
   "name": "nexashell",
   "private": true,
-  "version": "1.1.1",
+  "version": "1.1.2",
   "type": "module",
   "engines": {
-    "pnpm": ">=8.0.0"
+    "bun": ">=1.0.0"
   },
   "scripts": {
     "dev": "vite",

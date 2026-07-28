@@ -27,7 +27,7 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable)
 - [Node.js](https://nodejs.org/) (v18+)
-- [pnpm](https://pnpm.io/installation)
+- [bun](https://bun.sh/) (>=1.0)
 
 ### Build from Source
 
@@ -39,17 +39,17 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 
 2. **Install dependencies**
    ```bash
-   pnpm install
+   bun install
    ```
 
 3. **Run in development mode**
    ```bash
-   pnpm tauri dev
+   bun tauri dev
    ```
 
 4. **Build for production**
    ```bash
-   pnpm tauri build
+   bun tauri build
    ```
 
 ---
@@ -140,7 +140,7 @@ sequenceDiagram
 
 ### Prerequisites
 
-- **Node.js**: (recommended via nvm) and **pnpm**
+- **Node.js**: (recommended via nvm) and **bun**
 - **Rust toolchain**: (stable) and **cargo**
 - **Tauri CLI dependencies**: Platform-specific (see [Tauri documentation](https://tauri.app/v1/guides/getting-started/prerequisites))
 
@@ -148,25 +148,25 @@ sequenceDiagram
 
 ```bash
 # Install frontend dependencies
-pnpm install
+bun install
 
 # Run native development (opens the Tauri window)
-pnpm tauri dev
+bun tauri dev
 ```
 
 ### Development Commands
 
-- **Run Vite dev server** (Web only): `pnpm dev`
-- **Run full native app**: `pnpm tauri dev`
+- **Run Vite dev server** (Web only): `bun dev`
+- **Run full native app**: `bun tauri dev`
 - **Build production bundle**:
   ```bash
-  pnpm build
-  pnpm tauri build
+  bun build
+  bun tauri build
   ```
 - **Run Tests**:
   ```bash
-  pnpm test         # Unit tests (Vitest)
-  pnpm test:ui      # Vitest UI
+  bun test         # Unit tests (Vitest)
+  bun test:ui      # Vitest UI
   ```
 
 ---
