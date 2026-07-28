@@ -84,15 +84,20 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 ### 提交-构建 标准流程
 
 ```bash
-# Agent 执行：
+# 1. 修改版本号（仅需改一处）
+#    编辑 src-tauri/Cargo.toml 中的 version 字段
+#    prebuild 会自动同步到 package.json
+#    tauri.conf.json 的 version 设为 null，自动从 Cargo.toml 读取
+
+# 2. 提交
 git add -A
 git commit -m "type: 描述"
 
-# 检查版本并打 tag
+# 3. 检查版本并打 tag
 git tag v<new-version>
 git push origin main --tags
 
-# 构建 MacBook 版本
+# 4. 构建 MacBook 版本
 bun tauri build
 ```
 
