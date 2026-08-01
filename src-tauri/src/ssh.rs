@@ -146,6 +146,13 @@ pub struct SshChannelInfo {
 
     /// Session handle for opening new channels
     pub sess_arc: Arc<tokio::sync::Mutex<Session>>,
+
+    /// Event handler IDs for cleanup on disconnect
+    pub input_listener_id: Option<tauri::EventId>,
+    pub resize_listener_id: Option<tauri::EventId>,
+
+    /// App handle for unlisten calls during cleanup
+    pub app_handle: Option<tauri::AppHandle>,
 }
 
 fn build_pty_modes() -> PtyModes {
@@ -324,6 +331,12 @@ impl SshManager {
 
             // Fallback to password authentication if key auth did not succeed
             if !authenticated {
+                if private_key_path_for_spawn.is_some() {
+                    eprintln!(
+                        "Warning: Public key authentication failed for '{}', falling back to password",
+                        username_for_spawn
+                    );
+                }
                 sess.userauth_password(&username_for_spawn, &password_for_spawn)
                     .map_err(|_| SshError::AuthenticationFailed("Invalid credentials".to_string()))?;
             }
@@ -371,10 +384,13 @@ impl SshManager {
         let sess_arc = Arc::new(tokio::sync::Mutex::new(sess));
 
         // 3. Register event listeners for user input and resize
-        if let Some(h) = &app_handle {
-            Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
-            Self::register_resize_listener(h, &session_id, &channel_arc, &stop_flag);
-        }
+        let (input_listener_id, resize_listener_id) = if let Some(h) = &app_handle {
+            let input_id = Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
+            let resize_id = Self::register_resize_listener(h, &session_id, &channel_arc, &stop_flag);
+            (Some(input_id), Some(resize_id))
+        } else {
+            (None, None)
+        };
 
         // 4. Spawn I/O task
         let handle = Self::spawn_io_task(
@@ -390,7 +406,7 @@ impl SshManager {
 
         // 5. Spawn monitoring task
         let status_handle = Self::spawn_monitoring_task(
-            app_handle,
+            app_handle.clone(),
             session_id.clone(),
             sess_arc.clone(),
             stop_flag.clone(),
@@ -418,6 +434,9 @@ impl SshManager {
                     initial_outputs,
                     refresh_interval,
                     sess_arc,
+                    input_listener_id,
+                    resize_listener_id,
+                    app_handle: app_handle.clone(),
                 },
             );
         }
@@ -425,13 +444,14 @@ impl SshManager {
         Ok(())
     }
 
-    /// Registers event listener for user input (keyboard)
+    /// Registers event listener for user input (keyboard).
+    /// Returns the event handler ID for later cleanup.
     fn register_input_listener(
         app_handle: &tauri::AppHandle,
         session_id: &SessionId,
         input_sender: &mpsc::UnboundedSender<String>,
         stop_flag: &Arc<AtomicBool>,
-    ) {
+    ) -> tauri::EventId {
         let event_name = format!("ssh-input-{}", session_id.0);
         let input_tx = input_sender.clone();
         let task_stop = stop_flag.clone();
@@ -449,16 +469,17 @@ impl SshManager {
             if let Ok(payload) = serde_json::from_str::<InputPayload>(event.payload()) {
                 let _ = input_tx.send(payload.input);
             }
-        });
+        })
     }
 
-    /// Registers event listener for terminal resize events
+    /// Registers event listener for terminal resize events.
+    /// Returns the event handler ID for later cleanup.
     fn register_resize_listener(
         app_handle: &tauri::AppHandle,
         session_id: &SessionId,
         channel_arc: &Arc<tokio::sync::Mutex<ssh2::Channel>>,
         stop_flag: &Arc<AtomicBool>,
-    ) {
+    ) -> tauri::EventId {
         let resize_event_name = format!("ssh-resize-{}", session_id.0);
         let task_channel = channel_arc.clone();
         let task_stop = stop_flag.clone();
@@ -481,7 +502,7 @@ impl SshManager {
                     let _ = ch.request_pty_size(payload.cols, payload.rows, None, None);
                 });
             }
-        });
+        })
     }
 
     /// Spawns the background I/O task that processes SSH input/output
@@ -513,7 +534,9 @@ impl SshManager {
                 while let Ok(input) = input_receiver.try_recv() {
                     let _sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
-                    let _ = ch.write_all(input.as_bytes()).and_then(|_| ch.flush());
+                    if let Err(e) = ch.write_all(input.as_bytes()).and_then(|_| ch.flush()) {
+                        eprintln!("[SSH I/O] write_all/flush failed: {}", e);
+                    }
                 }
 
                 // Attempt non-blocking read from SSH channel
@@ -688,24 +711,45 @@ impl SshManager {
                    LC_ALL=C cat /proc/loadavg 2>/dev/null | awk '{print $1,$2,$3}' || echo '0 0 0'; \
                    LC_ALL=C uptime -p 2>/dev/null || echo 'up unknown'";
 
+        // Retry exec with bounded attempts and backoff (max 10 retries, 50ms interval)
+        const MAX_EXEC_RETRIES: u8 = 10;
+        const EXEC_RETRY_DELAY_MS: u64 = 50;
+        let mut exec_retries: u8 = 0;
         loop {
             match channel.exec(cmd) {
                 Ok(_) => break,
                 Err(ref e) if e.code() == ssh2::ErrorCode::Session(-37) => {
-                    tokio::task::yield_now().await;
+                    exec_retries += 1;
+                    if exec_retries > MAX_EXEC_RETRIES {
+                        return Err(SshError::ChannelError(format!(
+                            "exec retry limit ({}) exceeded", MAX_EXEC_RETRIES
+                        )));
+                    }
+                    tokio::time::sleep(Duration::from_millis(EXEC_RETRY_DELAY_MS)).await;
                 }
                 Err(e) => return Err(SshError::ChannelError(e.to_string())),
             }
         }
 
+        // Read output with timeout on inactivity (5s between successful reads)
+        const READ_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(5);
+        let mut last_progress = std::time::Instant::now();
         let mut output = String::new();
         loop {
+            if last_progress.elapsed() > READ_INACTIVITY_TIMEOUT {
+                return Err(SshError::OperationFailed(
+                    "Status read timeout after 5s of inactivity".to_string()
+                ));
+            }
             let mut buf = [0u8; 1024];
             match channel.read(&mut buf) {
                 Ok(0) => break,
-                Ok(n) => output.push_str(&String::from_utf8_lossy(&buf[..n])),
+                Ok(n) => {
+                    output.push_str(&String::from_utf8_lossy(&buf[..n]));
+                    last_progress = std::time::Instant::now();
+                }
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    tokio::task::yield_now().await;
+                    tokio::time::sleep(Duration::from_millis(5)).await;
                 }
                 Err(e) => return Err(SshError::OperationFailed(e.to_string())),
             }
@@ -870,6 +914,8 @@ impl SshManager {
     /// Retrieves cached initial output (welcome banner, login prompts) for a session
     ///
     /// Useful for clients that connect after the session has started.
+    /// Uses `try_lock` to avoid blocking the runtime; returns an empty Vec
+    /// if the lock is held (which is safe — a late joiner just sees no history).
     pub fn get_buffered_ssh_output(
         &self,
         session_id: &SessionId,
@@ -880,7 +926,7 @@ impl SshManager {
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
 
         if let Some(channel_info) = channels.get(session_id) {
-            let outputs = channel_info.initial_outputs.blocking_lock().clone();
+            let outputs = channel_info.initial_outputs.try_lock().map(|g| g.clone()).unwrap_or_default();
             Ok(outputs)
         } else {
             Err(SshError::SessionNotFound(session_id.0.to_string()))
@@ -893,6 +939,17 @@ impl SshManager {
         if let Ok(mut channels) = self.channels.write() {
             if let Some(mut info) = channels.remove(session_id) {
                 info.stop_flag.store(true, Ordering::SeqCst);
+
+                // Unregister event listeners to prevent leaks
+                if let Some(ref app_handle) = info.app_handle {
+                    if let Some(input_id) = info.input_listener_id.take() {
+                        app_handle.unlisten(input_id);
+                    }
+                    if let Some(resize_id) = info.resize_listener_id.take() {
+                        app_handle.unlisten(resize_id);
+                    }
+                }
+
                 if let Some(handle) = info.handle.take() {
                     handle.abort();
                 }
@@ -947,7 +1004,7 @@ impl SshManager {
         local_path: String,
         remote_path: String,
     ) -> Result<(), SshError> {
-        let sess_arc = {
+        let (sess_arc, stop_flag) = {
             let channels = self
                 .channels
                 .read()
@@ -955,11 +1012,17 @@ impl SshManager {
             let info = channels
                 .get(&session_id)
                 .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
-            info.sess_arc.clone()
+            (info.sess_arc.clone(), info.stop_flag.clone())
         };
 
+        // Clone handles for the panic watcher BEFORE they're moved into spawn_blocking
+        let watcher_app = app_handle.clone();
+        let watcher_sid = session_id.as_ref().to_string();
+        let watcher_event_name = format!("ssh-upload-progress-{}", watcher_sid);
+        let watcher_task_id = task_id.clone();
+
         // Perform the upload in a blocking tokio task to avoid blocking the runtime
-        tokio::task::spawn_blocking(move || {
+        let upload_handle = tokio::task::spawn_blocking(move || {
             let sid = session_id.as_ref().to_string();
             let upload_start = std::time::Instant::now();
             let upload_event_name = format!("ssh-upload-progress-{}", sid);
@@ -977,6 +1040,12 @@ impl SshManager {
                 let mut is_first_chunk = true;
 
                 loop {
+                    // Abort upload if session is being disconnected
+                    if stop_flag.load(Ordering::SeqCst) {
+                        return Err(SshError::OperationFailed(
+                            "Upload aborted: session disconnected".to_string()
+                        ));
+                    }
                     // 1. Read a chunk from the local file
                     let n = local_file.read(&mut buffer).map_err(|e| {
                         SshError::OperationFailed(format!("Read local file failed: {}", e))
@@ -1093,6 +1162,27 @@ impl SshManager {
                         message: format!("Upload failed: {}", e),
                         speed: 0.0,
                         error: Some(e.to_string()),
+                    });
+                }
+            }
+        });
+
+        // Spawn a lightweight watcher to surface upload task panics
+        tokio::spawn(async move {
+            match upload_handle.await {
+                Ok(()) => {} // success — already emitted via events
+                Err(join_err) => {
+                    eprintln!("[SFTP upload] task panicked: {}", join_err);
+                    let _ = watcher_app.emit(&watcher_event_name, UploadProgress {
+                        task_id: watcher_task_id,
+                        session_id: watcher_sid,
+                        progress: 0.0,
+                        uploaded_bytes: 0,
+                        total_bytes: 0,
+                        status: "error".to_string(),
+                        message: "Upload aborted: internal task failure".to_string(),
+                        speed: 0.0,
+                        error: Some(join_err.to_string()),
                     });
                 }
             }
