@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue';
 import NexaShellHome from '@/components/home/NexaShellHome.vue';
-import RemoteConnectionView from '@/components/connections/RemoteConnectionView.vue';
+import PaneContainer from '@/components/layout/PaneContainer.vue';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
 
 // Emit createTab event to parent
@@ -35,17 +35,16 @@ const currentComponent = computed(() => {
   switch (activeTab.type) {
     case 'terminal':
     case 'ssh':
-      return RemoteConnectionView;
+      return PaneContainer;
     case 'home':
     default:
       return NexaShellHome;
   }
 });
 
-const currentTabType = computed(() => {
-  if (!activeTabId.value) return 'home';
-  const activeTab = tabs.value.find(tab => tab.id === activeTabId.value);
-  return activeTab?.type || 'home';
+const currentActiveTab = computed(() => {
+  if (!activeTabId.value) return null;
+  return tabs.value.find(tab => tab.id === activeTabId.value) || null;
 });
 
 // Handle createTab event from child components
@@ -62,12 +61,11 @@ const handleConnect = (data: any) => {
 <template>
   <div class="app-content">
     <Transition name="tab-switch" mode="out-in">
-      <KeepAlive :max="10">
+      <KeepAlive :max="16">
         <component
           :is="currentComponent"
           :key="activeTabId"
-          :session-id="activeTabId"
-          :tab-type="currentTabType"
+          :tab="currentActiveTab"
           @create-tab="handleCreateTab"
           @connect="handleConnect"
         />

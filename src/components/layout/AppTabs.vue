@@ -76,6 +76,7 @@ const handleAddTab = async () => {
     label: `${t('settings.newLocalTab')} ${currentCounter}`,
     type: 'terminal' as const,
     closable: true,
+    panes: [{ id: uuidv4(), type: 'terminal' as const }],
   };
   tabManagement.addTab(newTab);
 
@@ -117,6 +118,7 @@ const handleMenuSelect = async (key: string) => {
       label: `${t('settings.newLocalTab')} ${currentCounter}`,
       type: 'terminal' as const,
       closable: true,
+      panes: [{ id: uuidv4(), type: 'terminal' as const }],
     };
     tabManagement.addTab(newTab);
   } else if (key === 'ssh') {
@@ -133,9 +135,18 @@ const handleMenuSelect = async (key: string) => {
 
 const handleCloseTabShortcut = () => {
   const currentTab = tabs.value.find(tab => tab.id === activeTabId.value);
-  if (currentTab && currentTab.closable) {
-    handleTabClose(activeTabId.value);
+  if (!currentTab || !currentTab.closable) return;
+
+  // If tab has multiple panes, close the active pane first
+  if (currentTab.panes && currentTab.panes.length > 1) {
+    const paneId = tabManagement.activePaneId.value;
+    if (paneId) {
+      tabManagement.closePane(currentTab.id, paneId);
+      return;
+    }
   }
+
+  handleTabClose(activeTabId.value);
 };
 
 const handleNewLocalTab = async () => {
@@ -145,6 +156,7 @@ const handleNewLocalTab = async () => {
     label: `${t('settings.newLocalTab')} ${currentCounter}`,
     type: 'terminal' as const,
     closable: true,
+    panes: [{ id: uuidv4(), type: 'terminal' as const }],
   };
   tabManagement.addTab(newTab);
 

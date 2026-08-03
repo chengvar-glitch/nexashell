@@ -6,6 +6,8 @@ import { eventBus } from './event-bus';
 import { APP_EVENTS } from '@/core/constants';
 
 const focusSearch = () => eventBus.emit(APP_EVENTS.FOCUS_SEARCH);
+const splitVertical = () => eventBus.emit(APP_EVENTS.SPLIT_VERTICAL);
+const splitHorizontal = () => eventBus.emit(APP_EVENTS.SPLIT_HORIZONTAL);
 
 export interface ShortcutConfig {
   key: string;
@@ -91,7 +93,7 @@ export class ShortcutManager {
 
     // Global shortcuts that should trigger even in input fields
     const isGlobalShortcut =
-      (['p', 'w', 't', 'q', ','].includes(event.key.toLowerCase()) &&
+      (['p', 'w', 't', 'q', ',', 'd'].includes(event.key.toLowerCase()) &&
         (event.metaKey || event.ctrlKey)) ||
       event.key === 'Escape';
 
@@ -254,5 +256,23 @@ export const PredefinedShortcuts = {
     handler: () => {
       window.dispatchEvent(new CustomEvent(APP_EVENTS.CLOSE_TAB));
     },
+  },
+  SPLIT_VERTICAL: {
+    key: 'd',
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
+    shiftKey: false,
+    altKey: false,
+    description: 'Split pane vertically',
+    handler: splitVertical,
+  },
+  SPLIT_HORIZONTAL: {
+    key: 'd',
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
+    shiftKey: true,
+    altKey: false,
+    description: 'Split pane horizontally',
+    handler: splitHorizontal,
   },
 };

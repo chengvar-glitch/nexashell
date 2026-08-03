@@ -1156,6 +1156,17 @@ onMounted(async () => {
       return false;
     }
 
+    // 1b. Cmd+D (Mac) / Ctrl+Shift+D (Win) for split pane — let it bubble
+    // Pure Ctrl+D (no meta, no shift) must pass through to shell as EOF
+    if (key === 'd') {
+      if (isMac && event.metaKey) {
+        return false;
+      }
+      if (!isMac && event.ctrlKey && event.shiftKey) {
+        return false;
+      }
+    }
+
     // 2. Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
     // We let KeyC and KeyV bubble to the browser so it can handle native Copy/Paste
     // xterm.js manages a hidden textarea that receives these events correctly.

@@ -126,6 +126,8 @@ onMounted(async () => {
   shortcutManager.register(PredefinedShortcuts.CLOSE_CURRENT_TAB);
   shortcutManager.register(PredefinedShortcuts.FOCUS_SEARCH);
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
+  shortcutManager.register(PredefinedShortcuts.SPLIT_VERTICAL);
+  shortcutManager.register(PredefinedShortcuts.SPLIT_HORIZONTAL);
 
   eventBus.on(APP_EVENTS.OPEN_SETTINGS, (args: unknown) => {
     const payload = args as { section?: string } | undefined;
@@ -135,6 +137,14 @@ onMounted(async () => {
   eventBus.on(APP_EVENTS.CLOSE_DIALOG, () => {
     closeSettings();
     closeSSHForm();
+  });
+
+  eventBus.on(APP_EVENTS.SPLIT_VERTICAL, () => {
+    tabManagement.splitActivePane('vertical');
+  });
+
+  eventBus.on(APP_EVENTS.SPLIT_HORIZONTAL, () => {
+    tabManagement.splitActivePane('horizontal');
   });
 
   eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
@@ -465,12 +475,15 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       // 3. Create and add a new tab AFTER the form is closed
       // Use a small delay to allow the modal to disappear visually
       setTimeout(() => {
+        const tabId = uuidv4();
         tabManagement.addTab({
-          id: sessionId,
+          id: tabId,
           label: data.server_name || data.addr,
           type: TAB_TYPE.SSH,
           closable: true,
+          panes: [{ id: sessionId, type: 'ssh' }],
         });
+        tabManagement.setActivePane(sessionId);
       }, 100);
     }, 500);
   } catch (error) {

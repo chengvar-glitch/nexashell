@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { ref } from 'vue';
 import { Home, Terminal, Server } from 'lucide-vue-next';
 import { type TabType } from '@/features/tabs';
+import { useI18n } from 'vue-i18n';
+import DropdownMenu from '@/components/common/DropdownMenu.vue';
+import { eventBus } from '@/core/utils/event-bus';
+import { APP_EVENTS } from '@/core/constants';
+
+const { t } = useI18n({ useScope: 'global' });
 
 interface Props {
   id: string;
@@ -21,6 +28,10 @@ const emit = defineEmits<{
   close: [id: string];
 }>();
 
+const contextMenuVisible = ref(false);
+const contextMenuX = ref(0);
+const contextMenuY = ref(0);
+
 const handleClick = () => {
   emit('click', props.id);
 };
@@ -29,6 +40,29 @@ const handleClose = (e: Event) => {
   e.stopPropagation();
   if (props.closable) {
     emit('close', props.id);
+  }
+};
+
+const handleContextMenu = (e: MouseEvent) => {
+  if (props.type === 'home') return;
+  e.preventDefault();
+  e.stopPropagation();
+  contextMenuX.value = e.clientX;
+  contextMenuY.value = e.clientY;
+  contextMenuVisible.value = true;
+};
+
+const handleContextMenuSelect = (key: string) => {
+  contextMenuVisible.value = false;
+  if (key === 'split-horizontal' || key === 'split-vertical') {
+    // Activate this tab FIRST so splitActivePane operates on the
+    // right-clicked tab (setActiveTab syncs activePaneId to its first pane)
+    emit('click', props.id);
+    if (key === 'split-horizontal') {
+      eventBus.emit(APP_EVENTS.SPLIT_HORIZONTAL);
+    } else {
+      eventBus.emit(APP_EVENTS.SPLIT_VERTICAL);
+    }
   }
 };
 </script>
@@ -44,6 +78,7 @@ const handleClose = (e: Event) => {
     }"
     :data-id="id"
     @click="handleClick"
+    @contextmenu="handleContextMenu"
   >
     <Home v-if="type === 'home'" class="tab-icon home-icon" :size="14" />
     <Terminal
@@ -65,6 +100,18 @@ const handleClose = (e: Event) => {
         </svg>
       </button>
     </div>
+
+    <DropdownMenu
+      v-model:visible="contextMenuVisible"
+      :x="contextMenuX"
+      :y="contextMenuY"
+      :trigger="'contextmenu'"
+      :items="[
+        { key: 'split-vertical', label: t('pane.splitVertical') },
+        { key: 'split-horizontal', label: t('pane.splitHorizontal') },
+      ]"
+      @select="handleContextMenuSelect"
+    />
   </div>
 </template>
 

@@ -169,6 +169,10 @@ export default {
       initialize: '初始化终端',
     },
   },
+  pane: {
+    splitHorizontal: '水平拆分',
+    splitVertical: '垂直拆分',
+  },
   welcome: {
     title: '歡迎使用 NexaShell',
     subtitle:

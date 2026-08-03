@@ -170,6 +170,10 @@ export default {
       initialize: 'Initializing terminal',
     },
   },
+  pane: {
+    splitHorizontal: 'Split Horizontally',
+    splitVertical: 'Split Vertically',
+  },
   welcome: {
     title: 'Welcome to NexaShell',
     subtitle:

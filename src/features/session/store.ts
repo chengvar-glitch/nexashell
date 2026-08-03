@@ -26,6 +26,20 @@ export interface SessionState {
   };
 }
 
+/**
+ * Non-reactive credential cache — keeps plaintext credentials OUT of the
+ * reactive Pinia state (invisible to Vue DevTools / store consumers) while
+ * still letting split-pane reconnects reuse the source session's credentials.
+ * Entries live exactly as long as their session and are cleared on disconnect.
+ */
+export interface CachedCredentials {
+  password?: string;
+  privateKeyPath?: string | null;
+  keyPassphrase?: string | null;
+}
+
+const credentialCache = new Map<string, CachedCredentials>();
+
 export const useSessionStore = defineStore('session', () => {
   const sessions = ref<Record<string, SessionState>>({});
   const tabToSessionMap = ref<Record<string, string>>({});
@@ -93,6 +107,9 @@ export const useSessionStore = defineStore('session', () => {
           username,
         },
       };
+
+      // Credentials live in the non-reactive cache, not in session state
+      credentialCache.set(sessionId, { password, privateKeyPath, keyPassphrase });
 
       sessions.value[sessionId] = session;
       tabToSessionMap.value[tabId] = sessionId;
@@ -209,6 +226,7 @@ export const useSessionStore = defineStore('session', () => {
 
       delete sessions.value[sessionId];
       delete tabToSessionMap.value[session.tabId];
+      credentialCache.delete(sessionId);
 
       logger.info('disconnectSession: removed session state locally', {
         sessionId,
@@ -228,6 +246,23 @@ export const useSessionStore = defineStore('session', () => {
     await disconnectSession(sessionId);
   };
 
+  const disconnectSessions = async (ids: string[]): Promise<void> => {
+    const errors: Error[] = [];
+    for (const id of ids) {
+      try {
+        await disconnectSession(id);
+      } catch (error) {
+        logger.error('Error disconnecting session', { id, error });
+        if (error instanceof Error) {
+          errors.push(error);
+        }
+      }
+    }
+    if (errors.length > 0) {
+      logger.warn('Some sessions failed to disconnect', { count: errors.length });
+    }
+  };
+
   const updateSessionStatus = (sessionId: string, status: SessionStatus) => {
     const session = sessions.value[sessionId];
     if (session) {
@@ -241,6 +276,10 @@ export const useSessionStore = defineStore('session', () => {
       session.status = 'error';
       session.errorMessage = errorMessage;
     }
+  };
+
+  const getCachedCredentials = (sessionId: string): CachedCredentials | undefined => {
+    return credentialCache.get(sessionId);
   };
 
   const cleanupAllSessions = async (): Promise<void> => {
@@ -273,6 +312,8 @@ export const useSessionStore = defineStore('session', () => {
     createLocalSession,
     disconnectSession,
     disconnectByTabId,
+    disconnectSessions,
+    getCachedCredentials,
     updateSessionStatus,
     setSessionError,
     cleanupAllSessions,
