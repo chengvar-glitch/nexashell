@@ -86,6 +86,8 @@ interface Props {
   port?: number;
   username?: string;
   password?: string;
+  privateKeyPath?: string | null;
+  keyPassphrase?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -95,6 +97,8 @@ const props = withDefaults(defineProps<Props>(), {
   port: 22,
   username: '',
   password: '',
+  privateKeyPath: null,
+  keyPassphrase: null,
 });
 
 const terminalRef = ref<HTMLElement>();
@@ -804,6 +808,10 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
       const serverName =
         session?.connectionParams?.serverName || props.ip || 'Unknown';
 
+      // Split panes resolve credentials from the non-reactive cache
+      // (pre-seeded by splitActivePane keyed by pane/session id)
+      const cached = sessionStore.getCachedCredentials(props.sessionId);
+
       await sessionStore.createSSHSession(
         props.sessionId,
         props.sessionId,
@@ -811,9 +819,9 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
         props.ip || '',
         props.port || 22,
         props.username || '',
-        props.password || '',
-        null,
-        null,
+        props.password || cached?.password || '',
+        props.privateKeyPath || cached?.privateKeyPath || null,
+        props.keyPassphrase || cached?.keyPassphrase || null,
         cols,
         rows
       );

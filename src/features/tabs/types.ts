@@ -6,13 +6,28 @@ export type TabType = 'home' | 'terminal' | 'ssh';
 
 export type SplitDirection = 'horizontal' | 'vertical';
 
+/**
+ * Connection descriptor for a split pane — lets the freshly-mounted
+ * RemoteConnectionView run its own full connect flow (welcome banner
+ * replay, error handling) instead of attaching to an already-established
+ * session and missing the initial output. Only NON-sensitive fields live
+ * here (it's part of reactive tab state); credentials are resolved from the
+ * session store's non-reactive cache at connect time.
+ */
+export interface PaneConnect {
+  ip: string;
+  port: number;
+  username: string;
+}
+
 export type SplitNode =
-  | { kind: 'pane'; paneId: string }
+  | { kind: 'pane'; paneId: string; connect?: PaneConnect }
   | { kind: 'split'; direction: SplitDirection; children: SplitNode[]; sizes: number[] };
 
 export interface Pane {
   id: string;
   type: 'terminal' | 'ssh';
+  connect?: PaneConnect;
 }
 
 export interface Tab {

@@ -35,6 +35,17 @@ const isSinglePane = computed(() => {
 
 const firstPaneId = computed(() => props.tab.panes?.[0]?.id || '');
 
+const firstPaneConnect = computed(() => {
+  const connect = props.tab.panes?.[0]?.connect;
+  return connect
+    ? {
+        ip: connect.ip,
+        port: connect.port,
+        username: connect.username,
+      }
+    : {};
+});
+
 const handlePaneClick = (paneId: string) => {
   if (!paneId) return;
   setActivePane(paneId);
@@ -59,6 +70,7 @@ const getPaneClass = (paneId: string) => {
           v-if="firstPaneId"
           :session-id="firstPaneId"
           :tab-type="tab.type"
+          v-bind="firstPaneConnect"
         />
       </div>
     </template>
@@ -103,5 +115,13 @@ const getPaneClass = (paneId: string) => {
 
 .split-bar:hover {
   background-color: var(--color-primary, #facc15);
+}
+</style>
+
+<!-- Global (non-scoped): SplitRenderer's render-function vnodes don't carry
+     this component's scope id, so scoped rules can't reach them. -->
+<style>
+.split-bar:hover {
+  background-color: var(--color-primary, #facc15) !important;
 }
 </style>

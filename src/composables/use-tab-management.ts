@@ -7,7 +7,7 @@
 
 import { ref } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { type Tab, type Pane, type SplitNode, type SplitDirection, DEFAULT_TAB } from '@/features/tabs';
+import { type Tab, type Pane, type PaneConnect, type SplitNode, type SplitDirection, DEFAULT_TAB } from '@/features/tabs';
 import { useSessionStore } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
 
@@ -46,7 +46,7 @@ export function useTabManagement() {
     }
   };
 
-  const replacePaneNode = (node: SplitNode, paneId: string, direction: SplitDirection): SplitNode => {
+  const replacePaneNode = (node: SplitNode, paneId: string, direction: SplitDirection, newConnect?: PaneConnect): SplitNode => {
     if (node.kind === 'pane' && node.paneId === paneId) {
       const newPaneId = uuidv4();
       return {
@@ -54,7 +54,7 @@ export function useTabManagement() {
         direction,
         children: [
           { kind: 'pane', paneId: node.paneId },
-          { kind: 'pane', paneId: newPaneId },
+          { kind: 'pane', paneId: newPaneId, connect: newConnect },
         ],
         sizes: [50, 50],
       };
@@ -62,7 +62,7 @@ export function useTabManagement() {
     if (node.kind === 'split') {
       return {
         ...node,
-        children: node.children.map(child => replacePaneNode(child, paneId, direction)),
+        children: node.children.map(child => replacePaneNode(child, paneId, direction, newConnect)),
       };
     }
     return node;
@@ -105,19 +105,38 @@ export function useTabManagement() {
 
     const sessionStore = useSessionStore();
     const newPaneId = uuidv4();
-    const newPane: Pane = { id: newPaneId, type: tab.type === 'ssh' ? 'ssh' : 'terminal' };
 
-    // Resolve credentials BEFORE mutating any state — if they're missing we
-    // bail out cleanly instead of leaving a dangling pane behind.
-    const creds = sessionStore.getCachedCredentials(sourcePaneId);
-    if (tab.type === 'ssh' && !creds) {
-      logger.warn('No cached credentials for splitting SSH pane', { paneId: sourcePaneId });
-      return;
+    // Build a connect descriptor for SSH splits. We deliberately do NOT
+    // create the session here — the freshly mounted RemoteConnectionView
+    // runs its own connect flow (welcome-banner replay, error handling),
+    // matching the main connection path. Credentials are stashed in the
+    // session store's NON-reactive cache (keyed by the new pane id); the
+    // pane itself only carries non-sensitive fields (reactive tab state).
+    let connect: PaneConnect | undefined;
+    if (tab.type === 'ssh') {
+      const cp = sessionStore.getSession(sourcePaneId)?.connectionParams;
+      const creds = sessionStore.getCachedCredentials(sourcePaneId);
+      if (!cp || !creds) {
+        logger.warn('No connection info for splitting SSH pane', { paneId: sourcePaneId });
+        return;
+      }
+      sessionStore.cacheCredentials(newPaneId, {
+        password: creds.password,
+        privateKeyPath: creds.privateKeyPath,
+        keyPassphrase: creds.keyPassphrase,
+      });
+      connect = {
+        ip: cp.ip,
+        port: cp.port,
+        username: cp.username,
+      };
     }
 
-    const prevSplitTree = tab.splitTree;
-    const prevPaneCount = tab.panes.length;
-    const prevActivePane = activePaneId.value;
+    const newPane: Pane = {
+      id: newPaneId,
+      type: tab.type === 'ssh' ? 'ssh' : 'terminal',
+      connect,
+    };
 
     if (!tab.splitTree) {
       tab.splitTree = {
@@ -125,43 +144,14 @@ export function useTabManagement() {
         direction,
         children: [
           { kind: 'pane', paneId: tab.panes[0].id },
-          { kind: 'pane', paneId: newPaneId },
+          { kind: 'pane', paneId: newPaneId, connect },
         ],
         sizes: [50, 50],
       };
     } else {
-      tab.splitTree = replacePaneNode(tab.splitTree, sourcePaneId, direction);
+      tab.splitTree = replacePaneNode(tab.splitTree, sourcePaneId, direction, connect);
     }
     tab.panes.push(newPane);
-
-    try {
-      if (tab.type === 'ssh') {
-        const cp = sessionStore.getSession(sourcePaneId)?.connectionParams;
-        if (!cp) throw new Error('Source session connection params missing');
-        await sessionStore.createSSHSession(
-          newPaneId,
-          newPaneId,
-          cp.serverName,
-          cp.ip,
-          cp.port,
-          cp.username,
-          creds!.password || '',
-          creds!.privateKeyPath || null,
-          creds!.keyPassphrase || null,
-          80,
-          24
-        );
-      } else {
-        await sessionStore.createLocalSession(newPaneId, newPaneId, 80, 24);
-      }
-    } catch (error) {
-      // Roll back the tree mutation so a failed split leaves no orphan pane
-      logger.error('Failed to create split pane session, rolling back', error);
-      tab.panes.length = prevPaneCount;
-      tab.splitTree = prevSplitTree;
-      activePaneId.value = prevActivePane;
-      return;
-    }
 
     activePaneId.value = newPaneId;
   };

@@ -104,16 +104,39 @@ const SplitRenderer = defineComponent({
 
     const renderPane = (node: SplitNode): VNode | null => {
       if (node.kind === 'pane') {
+        const isActive = props.activePaneId === node.paneId;
         return h('div', {
           class: {
             'pane-container': true,
-            'pane-active': props.activePaneId === node.paneId,
+            'pane-active': isActive,
+          },
+          // Inline styles required — the .pane-container CSS lives in
+          // PaneContainer.vue's scoped block, which does NOT apply to vnodes
+          // created inside this recursive render function (no scope id).
+          style: {
+            width: '100%',
+            height: '100%',
+            position: 'relative',
+            outline: 'none',
+            boxShadow: isActive
+              ? 'inset 0 0 0 1.5px var(--color-primary, #facc15)'
+              : undefined,
+            zIndex: isActive ? 1 : undefined,
           },
           onClick: () => emit('pane-click', node.paneId),
         }, [
           h(RemoteConnectionView, {
             'session-id': node.paneId,
             'tab-type': props.tabType,
+            // Only non-sensitive connection fields — credentials are
+            // resolved by the component from the store's non-reactive cache
+            ...(node.connect
+              ? {
+                  ip: node.connect.ip,
+                  port: node.connect.port,
+                  username: node.connect.username,
+                }
+              : {}),
           }),
         ]);
       }
@@ -156,7 +179,15 @@ const SplitRenderer = defineComponent({
           children.push(h('div', {
             key: `bar-${index}`,
             class: 'split-bar',
-            style: barStyle,
+            style: {
+              ...barStyle,
+              // Inline background — scoped .split-bar CSS doesn't reach
+              // vnodes from this render function
+              background: 'var(--color-border-secondary, #333)',
+              flexShrink: 0,
+              position: 'relative',
+              zIndex: 2,
+            },
             onPointerdown: (e: MouseEvent) => handlePointerDown(e, index),
           }));
         }

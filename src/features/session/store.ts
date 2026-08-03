@@ -282,6 +282,15 @@ export const useSessionStore = defineStore('session', () => {
     return credentialCache.get(sessionId);
   };
 
+  /**
+   * Pre-seeds credentials for a session that hasn't been created yet —
+   * used by split-pane flow so the freshly mounted terminal can resolve
+   * credentials at connect time without them ever entering reactive state.
+   */
+  const cacheCredentials = (sessionId: string, creds: CachedCredentials): void => {
+    credentialCache.set(sessionId, creds);
+  };
+
   const cleanupAllSessions = async (): Promise<void> => {
     const sessionIds = Object.keys(sessions.value);
     for (const sessionId of sessionIds) {
@@ -314,6 +323,7 @@ export const useSessionStore = defineStore('session', () => {
     disconnectByTabId,
     disconnectSessions,
     getCachedCredentials,
+    cacheCredentials,
     updateSessionStatus,
     setSessionError,
     cleanupAllSessions,
