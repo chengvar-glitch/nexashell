@@ -841,8 +841,14 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
           chunks: bufferedOutput.length,
         });
         for (const chunk of bufferedOutput) {
-          terminal.write(chunk.output);
-          lastSeq = Math.max(lastSeq, chunk.seq);
+          // Dedupe against the live event stream — the output task emits
+          // chunks in real time while the connection comes up, so the same
+          // seq can arrive both live AND in the buffer. Without this check
+          // the welcome banner is written twice.
+          if (chunk.seq > lastSeq) {
+            terminal.write(chunk.output);
+            lastSeq = Math.max(lastSeq, chunk.seq);
+          }
         }
 
         // Scan initial output for home directory (usually shown in first prompt)
@@ -881,27 +887,15 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
 };
 
 /**
- * Disconnect session
- */
-const disconnectSession = async (): Promise<void> => {
-  if (!props.sessionId) return;
-
-  try {
-    // Session store handles the specific disconnect logic based on session type
-    await sessionStore.disconnectSession(props.sessionId);
-  } catch (error) {
-    logger.error('Disconnect failed', error);
-  }
-};
-
-/**
  * Cleanup terminal resources
+ *
+ * NOTE: does NOT disconnect the session — session lifecycle is owned by the
+ * tab layer (closeTab / closePane / cleanupAllSessions). Disconnecting here
+ * would kill the session whenever this component unmounts for layout reasons
+ * (e.g. a split re-renders the single-pane branch into a SplitRenderer tree,
+ * unmounting the original pane's component).
  */
 const cleanupResources = async (): Promise<void> => {
-  if (props.sessionId) {
-    await disconnectSession();
-  }
-
   if (disposeIMEFix) {
     disposeIMEFix();
     disposeIMEFix = null;
