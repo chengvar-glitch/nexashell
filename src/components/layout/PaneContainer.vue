@@ -23,7 +23,7 @@ const setActivePane = tabManagement.setActivePane;
  * persists the layout without touching any props directly.
  */
 provide(PANE_SIZES_COMMIT_KEY, (node: SplitNode, sizes: number[]) => {
-  if (node.kind === 'split') {
+  if (node.kind === 'split' && sizes.length === node.children.length) {
     node.sizes = [...sizes];
   }
 });
@@ -71,7 +71,7 @@ const handlePaneClick = (paneId: string) => {
 <!-- Global (non-scoped): SplitRenderer's render-function vnodes don't carry
      this component's scope id, so scoped rules can't reach them. -->
 <style>
-.split-bar:hover {
+.pane-root .split-bar:hover {
   background-color: var(--color-primary, #facc15) !important;
 }
 </style>

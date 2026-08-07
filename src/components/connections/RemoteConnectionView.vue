@@ -583,16 +583,17 @@ const handleFileDrop = (paths: string[]) => {
     try {
       // Detect current path
       await detectRemotePath();
+      const detectedPath = currentRemotePath.value;
 
       logger.info('Files dropped', {
         paths,
-        targetPath: currentRemotePath.value,
+        targetPath: detectedPath,
         home: remoteHomeDir.value,
       });
 
       // Process all files asynchronously without blocking
       paths.forEach(path => {
-        processFileUpload(path);
+        processFileUpload(path, detectedPath);
       });
     } catch (err) {
       logger.error('Failed to process dropped files', err);
@@ -601,13 +602,10 @@ const handleFileDrop = (paths: string[]) => {
 };
 
 /**
- * Process a single file upload asynchronously
- */
-/**
  * Process a single file upload asynchronously without blocking
  * Fire-and-forget pattern: start upload in background and return immediately
  */
-const processFileUpload = async (path: string) => {
+const processFileUpload = async (path: string, targetDirOverride?: string) => {
   const fileName = path.split('/').pop() || path;
   const taskId = addUploadTask(fileName);
 
@@ -615,7 +613,7 @@ const processFileUpload = async (path: string) => {
   // But do NOT await the actual upload - let it run in background
 
   try {
-    let targetDir = currentRemotePath.value || '';
+    let targetDir = targetDirOverride ?? (currentRemotePath.value || '');
     let pathSource = 'unknown';
 
     // 1. Handle home expansion
@@ -664,9 +662,8 @@ const processFileUpload = async (path: string) => {
     if (targetDir === '.') {
       remoteFilePath = fileName;
     } else {
-      remoteFilePath = targetDir.endsWith('/')
-        ? `${targetDir}${fileName}`
-        : `${targetDir}/${fileName}`;
+      const base = normalizeRemotePath(targetDir);
+      remoteFilePath = base.endsWith('/') ? `${base}${fileName}` : `${base}/${fileName}`;
     }
 
     updateUploadTask(taskId, {
@@ -1323,11 +1320,12 @@ onMounted(async () => {
 
             // Re-sync after a short delay to ensure backend is ready and listener is active
             setTimeout(() => {
+              if (!terminal) return;
               if (fitAddon && props.sessionId === newSessionId) {
                 fitAddon.fit();
                 emit(`ssh-resize-${newSessionId}`, {
-                  cols: terminal!.cols,
-                  rows: terminal!.rows,
+                  cols: terminal.cols,
+                  rows: terminal.rows,
                 });
               }
             }, 500);

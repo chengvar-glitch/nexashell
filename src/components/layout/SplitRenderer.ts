@@ -32,9 +32,9 @@ const SplitRenderer = defineComponent({
       props.node.kind === 'split' ? [...props.node.sizes] : []
     );
     watch(
-      () => (props.node.kind === 'split' ? props.node.sizes : null),
+      () => (props.node.kind === 'split' ? [...props.node.sizes] : null),
       sizes => {
-        if (sizes) localSizes.value = [...sizes];
+        if (sizes) localSizes.value = sizes;
       }
     );
 
@@ -78,12 +78,12 @@ const SplitRenderer = defineComponent({
       const leftIdx = ds.index;
       const rightIdx = ds.index + 1;
       if (leftIdx >= newSizes.length || rightIdx >= newSizes.length) return;
-      const newLeft = Math.max(10, Math.min(90, ds.startSizes[leftIdx] + deltaPercent));
-      const newRight = Math.max(10, Math.min(90, ds.startSizes[rightIdx] - deltaPercent));
+      const pairSum = ds.startSizes[leftIdx] + ds.startSizes[rightIdx];
+      const newLeft = Math.max(10, Math.min(pairSum - 10, ds.startSizes[leftIdx] + deltaPercent));
+      const newRight = pairSum - newLeft;
       newSizes[leftIdx] = newLeft;
       newSizes[rightIdx] = newRight;
-      const total = newSizes.reduce((a, b) => a + b, 0);
-      localSizes.value = newSizes.map(s => (s / total) * 100);
+      localSizes.value = newSizes;
     };
 
     const handlePointerUp = () => {

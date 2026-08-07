@@ -97,9 +97,9 @@ export function useTabManagement() {
     };
   };
 
-  const splitActivePane = async (direction: SplitDirection) => {
+  const splitActivePane = (direction: SplitDirection) => {
     const tab = tabs.value.find(t => t.id === activeTabId.value);
-    if (!tab || !tab.panes || tab.type === 'home') return;
+    if (!tab || !tab.panes || tab.panes.length === 0 || tab.type === 'home') return;
     const sourcePaneId = activePaneId.value;
     if (!sourcePaneId) return;
 
@@ -143,7 +143,7 @@ export function useTabManagement() {
         kind: 'split',
         direction,
         children: [
-          { kind: 'pane', paneId: tab.panes[0].id },
+          { kind: 'pane', paneId: sourcePaneId },
           { kind: 'pane', paneId: newPaneId, connect },
         ],
         sizes: [50, 50],
@@ -156,9 +156,18 @@ export function useTabManagement() {
     activePaneId.value = newPaneId;
   };
 
+  // Re-entrancy guard: rapid repeated closes (e.g. double-click) would
+  // otherwise run the async disconnect twice on the same pane.
+  const closingPaneIds = new Set<string>();
   const closePane = async (tabId: string, paneId: string): Promise<void> => {
+    if (closingPaneIds.has(paneId)) return;
+    closingPaneIds.add(paneId);
+
     const tab = tabs.value.find(t => t.id === tabId);
-    if (!tab || !tab.panes) return;
+    if (!tab || !tab.panes) {
+      closingPaneIds.delete(paneId);
+      return;
+    }
 
     const sessionStore = useSessionStore();
     try {
@@ -173,6 +182,7 @@ export function useTabManagement() {
     }
 
     if (tab.panes.length === 0) {
+      closingPaneIds.delete(paneId);
       await closeTab(tabId);
       return;
     }
@@ -193,6 +203,8 @@ export function useTabManagement() {
     if (activePaneId.value === paneId) {
       activePaneId.value = tab.panes[0]?.id || '';
     }
+
+    closingPaneIds.delete(paneId);
   };
 
   /**

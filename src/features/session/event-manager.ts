@@ -11,6 +11,7 @@ class SSHEventManager {
   private eventListeners: Map<string, ((data: string) => void)[]> = new Map();
   private eventBuffer: Map<string, string[]> = new Map();
   private unlistenFns: Map<string, UnlistenFn> = new Map();
+  private pendingListeners: Map<string, Promise<UnlistenFn>> = new Map();
   private static readonly MAX_BUFFER_SIZE = 1000;
 
   private constructor() {}
@@ -25,8 +26,18 @@ class SSHEventManager {
   private async ensureSessionListener(sessionId: string) {
     if (this.unlistenFns.has(sessionId)) return;
 
+    const existing = this.pendingListeners.get(sessionId);
+    if (existing) {
+      try {
+        await existing;
+      } catch {
+        // First caller already logged the setup failure
+      }
+      return;
+    }
+
     const eventName = `ssh-output-${sessionId}`;
-    try {
+    const pending = (async () => {
       const unlisten = await listen<OutputPayload>(eventName, (event) => {
         const payload = event.payload;
         const outputStr = String(payload.output ?? '');
@@ -55,12 +66,19 @@ class SSHEventManager {
         }
       });
       this.unlistenFns.set(sessionId, unlisten);
+      return unlisten;
+    })();
+    this.pendingListeners.set(sessionId, pending);
+    try {
+      await pending;
     } catch (error) {
       console.error(
         '[SSH_EVENT_MGR] Failed to set up listener for session:',
         sessionId,
         error
       );
+    } finally {
+      this.pendingListeners.delete(sessionId);
     }
   }
 
@@ -97,7 +115,7 @@ class SSHEventManager {
 
       if (listeners.length === 0) {
         this.eventListeners.delete(sessionId);
-        this.eventBuffer.set(sessionId, []);
+        this.eventBuffer.delete(sessionId);
 
         const unlisten = this.unlistenFns.get(sessionId);
         if (unlisten) {

@@ -93,6 +93,10 @@ export const useSessionStore = defineStore('session', () => {
     cols: number = 80,
     rows: number = 24
   ): Promise<void> => {
+    if (hasSession(sessionId) || hasSessionForTab(tabId)) {
+      logger.warn('Session already exists, refusing to overwrite', { sessionId, tabId });
+      return;
+    }
     try {
       const session: SessionState = {
         id: sessionId,
@@ -142,6 +146,8 @@ export const useSessionStore = defineStore('session', () => {
       logger.info('SSH session connected', { sessionId });
     } catch (error) {
       logger.error('Failed to create SSH session', error);
+
+      credentialCache.delete(sessionId);
 
       const sess = sessions.value[sessionId];
       if (sess) {
@@ -305,6 +311,7 @@ export const useSessionStore = defineStore('session', () => {
   const reset = () => {
     sessions.value = {};
     tabToSessionMap.value = {};
+    credentialCache.clear();
   };
 
   return {
