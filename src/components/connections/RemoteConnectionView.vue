@@ -854,6 +854,207 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
 };
 
 /**
+ * Window resize handler (managed via onActivated/onDeactivated for KeepAlive).
+ * Defined at setup top-level so the lifecycle hooks can reference it.
+ */
+const handleResize = (): void => {
+  if (fitAddon) {
+    fitAddon.fit();
+  }
+};
+
+let resizeObserver: ResizeObserver | null = null;
+
+/**
+ * Setup SSH output event listener before connection
+ */
+const setupSSHOutputListener = async (sessionId: string): Promise<void> => {
+  if (unlistenFn) {
+    await unlistenFn();
+  }
+
+  unlistenFn = await listen(`ssh-output-${sessionId}`, (event: {
+    payload?: unknown;
+  }) => {
+    try {
+      const payload = event.payload as
+        | { seq?: number; output?: string; ts?: number }
+        | undefined;
+
+      if (
+        payload?.seq !== undefined &&
+        payload.output !== undefined &&
+        terminal
+      ) {
+        if (payload.seq > lastSeq) {
+          terminal.write(String(payload.output));
+          lastSeq = payload.seq;
+
+          // Monitor high latency
+          if (payload.ts && Date.now() - payload.ts > LATENCY_THRESHOLD_MS) {
+            logger.debug('High latency in SSH output', {
+              latency: Date.now() - payload.ts,
+            });
+          }
+        }
+      }
+    } catch (e) {
+      logger.error('Terminal write failed', e);
+    }
+  });
+};
+
+/**
+ * Connect (or reconnect) to the session identified by `sessionId`.
+ * Called on mount and whenever the sessionId prop changes.
+ */
+const connectToSession = async (sessionId: string): Promise<void> => {
+  if (!sessionId) return;
+  lastSeq = 0;
+
+  try {
+    // Register listener BEFORE connection to catch welcome message
+    await setupSSHOutputListener(sessionId);
+
+    if (terminal) {
+      // First, ensure we have the correct size before connecting
+      if (fitAddon) {
+        fitAddon.fit();
+      }
+
+      await connectSession(terminal.cols, terminal.rows);
+
+      // Re-sync after a short delay to ensure backend is ready and listener is active
+      if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+      pendingResizeTimer = setTimeout(() => {
+        if (!terminal) return;
+        if (fitAddon && props.sessionId === sessionId) {
+          fitAddon.fit();
+          emit(`ssh-resize-${sessionId}`, {
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        }
+      }, 500);
+    }
+  } catch (error) {
+    logger.error('Connection failed', error);
+  }
+};
+
+// Watch sessionId changes and connect/disconnect accordingly
+watch(
+  () => props.sessionId,
+  (newSessionId, oldSessionId) => {
+    if (newSessionId && newSessionId !== oldSessionId) {
+      void connectToSession(newSessionId);
+    }
+  }
+);
+
+// Watch for cursor style changes
+watch(
+  () => settingsStore.terminal.cursorStyle,
+  newStyle => {
+    if (terminal) {
+      terminal.options.cursorStyle = newStyle;
+    }
+  }
+);
+
+// Watch for cursor blink changes
+watch(
+  () => settingsStore.terminal.cursorBlink,
+  newBlink => {
+    if (terminal) {
+      terminal.options.cursorBlink = newBlink;
+    }
+  }
+);
+
+// Watch for font size changes
+watch(
+  () => settingsStore.terminal.fontSize,
+  newSize => {
+    if (terminal) {
+      terminal.options.fontSize = newSize;
+      fitAddon?.fit();
+    }
+  }
+);
+
+/**
+ * Adaptive monitoring refresh rate
+ * 700ms when dashboard is open and Performance tab is active, 3s otherwise.
+ */
+watch(
+  [showDashboard, activeDashboardTab, () => props.sessionId],
+  async ([show, tab, sid]) => {
+    if (!sid) return;
+    const interval = show && tab === 'system' ? 700 : 3000;
+    try {
+      await invoke('set_ssh_status_refresh_rate', {
+        sessionId: sid,
+        intervalMs: interval,
+      });
+      logger.debug('Refreshed rate updated', { sid, interval });
+    } catch (error) {
+      logger.warn('Failed to update refresh rate', error);
+    }
+  },
+  { immediate: true }
+);
+
+// Handle activation when switching back to this tab (KeepAlive support)
+onActivated(() => {
+  nextTick(() => {
+    if (fitAddon) {
+      fitAddon.fit();
+      terminal?.focus();
+
+      // Re-sync terminal dimensions with the backend after activation
+      if (terminal && props.sessionId) {
+        emit(`ssh-resize-${props.sessionId}`, {
+          cols: terminal.cols,
+          rows: terminal.rows,
+        });
+      }
+    }
+  });
+  window.addEventListener('resize', handleResize);
+});
+
+// Handle deactivation (KeepAlive) — stop listening to resize
+onDeactivated(() => {
+  window.removeEventListener('resize', handleResize);
+});
+
+/**
+ * Cleanup on unmount.
+ * With KeepAlive, this only fires when the tab is truly closed or the cache
+ * is purged. NOTE: does NOT disconnect the session — session lifecycle is
+ * owned by the tab layer.
+ */
+onUnmounted(async () => {
+  window.removeEventListener('resize', handleResize);
+  if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+  if (terminalRef.value && handleTerminalContextMenu) {
+    terminalRef.value.removeEventListener(
+      'contextmenu',
+      handleTerminalContextMenu
+    );
+    handleTerminalContextMenu = null;
+  }
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+  if (statusUnlisten) {
+    statusUnlisten();
+    statusUnlisten = null;
+  }
+  await cleanupResources();
+});
+
+/**
  * Cleanup terminal resources
  *
  * NOTE: does NOT disconnect the session — session lifecycle is owned by the
@@ -894,8 +1095,17 @@ defineExpose({
 
 /**
  * Component lifecycle
+ *
+ * IMPORTANT: all watch/onActivated/onDeactivated/onUnmounted hooks are
+ * registered at setup top-level (above). Registering them inside this async
+ * function after `await` would silently no-op — Vue has no active instance
+ * in async continuations, so the cleanup hooks would never run.
  */
-onMounted(async () => {
+onMounted(() => {
+  void initialize();
+});
+
+const initialize = async (): Promise<void> => {
   logger.info('Terminal component mounted', { sessionId: props.sessionId });
   await setupStatusListener();
 
@@ -954,37 +1164,6 @@ onMounted(async () => {
     cursorStyle: settingsStore.terminal.cursorStyle,
     theme: TERMINAL_CONFIG.THEME,
   });
-
-  // Watch for cursor style changes
-  watch(
-    () => settingsStore.terminal.cursorStyle,
-    newStyle => {
-      if (terminal) {
-        terminal.options.cursorStyle = newStyle;
-      }
-    }
-  );
-
-  // Watch for cursor blink changes
-  watch(
-    () => settingsStore.terminal.cursorBlink,
-    newBlink => {
-      if (terminal) {
-        terminal.options.cursorBlink = newBlink;
-      }
-    }
-  );
-
-  // Watch for font size changes
-  watch(
-    () => settingsStore.terminal.fontSize,
-    newSize => {
-      if (terminal) {
-        terminal.options.fontSize = newSize;
-        fitAddon?.fit();
-      }
-    }
-  );
 
   fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
@@ -1181,7 +1360,7 @@ onMounted(async () => {
   });
 
   // Use ResizeObserver for robust layout management
-  const resizeObserver = new ResizeObserver(() => {
+  resizeObserver = new ResizeObserver(() => {
     if (fitAddon) {
       try {
         fitAddon.fit();
@@ -1206,126 +1385,8 @@ onMounted(async () => {
     }
   });
 
-  // Initial connection is handled when a valid `sessionId` is provided
-
-  // Handle activation when switching back to this tab (KeepAlive support)
-  onActivated(() => {
-    nextTick(() => {
-      if (fitAddon) {
-        fitAddon.fit();
-        terminal?.focus();
-
-        // Re-sync terminal dimensions with the backend after activation
-        if (terminal && props.sessionId) {
-          emit(`ssh-resize-${props.sessionId}`, {
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
-        }
-      }
-    });
-    window.addEventListener('resize', handleResize);
-  });
-
-  // Handle deactivation (KeepAlive) — stop listening to resize
-  onDeactivated(() => {
-    window.removeEventListener('resize', handleResize);
-  });
-
-  // Handle window resize (managed via onActivated/onDeactivated for KeepAlive)
-  const handleResize = (): void => {
-    if (fitAddon) {
-      fitAddon.fit();
-    }
-  };
-
-  /**
-   * Setup SSH output event listener before connection
-   */
-  const setupSSHOutputListener = async (sessionId: string): Promise<void> => {
-    if (unlistenFn) {
-      await unlistenFn();
-    }
-
-    unlistenFn = await listen(`ssh-output-${sessionId}`, (event: {
-      payload?: unknown;
-    }) => {
-      try {
-        const payload = event.payload as
-          | { seq?: number; output?: string; ts?: number }
-          | undefined;
-
-        if (
-          payload?.seq !== undefined &&
-          payload.output !== undefined &&
-          terminal
-        ) {
-          if (payload.seq > lastSeq) {
-            terminal.write(String(payload.output));
-            lastSeq = payload.seq;
-
-            // Monitor high latency
-            if (payload.ts && Date.now() - payload.ts > LATENCY_THRESHOLD_MS) {
-              logger.debug('High latency in SSH output', {
-                latency: Date.now() - payload.ts,
-              });
-            }
-          }
-        }
-      } catch (e) {
-        logger.error('Terminal write failed', e);
-      }
-    });
-  };
-
-  /**
-   * Watch sessionId changes and connect/disconnect accordingly
-   */
-  watch(
-    () => props.sessionId,
-    async (newSessionId, oldSessionId) => {
-      if (newSessionId && newSessionId !== oldSessionId) {
-        lastSeq = 0;
-
-        try {
-          // ✅ Register listener BEFORE connection to catch welcome message
-          await setupSSHOutputListener(newSessionId);
-
-          if (terminal) {
-            // First, ensure we have the correct size before connecting
-            if (fitAddon) {
-              fitAddon.fit();
-            }
-
-            await connectSession(terminal.cols, terminal.rows);
-
-            // Re-sync after a short delay to ensure backend is ready and listener is active
-            if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
-            pendingResizeTimer = setTimeout(() => {
-              if (!terminal) return;
-              if (fitAddon && props.sessionId === newSessionId) {
-                fitAddon.fit();
-                emit(`ssh-resize-${newSessionId}`, {
-                  cols: terminal.cols,
-                  rows: terminal.rows,
-                });
-              }
-            }, 500);
-          }
-        } catch (error) {
-          logger.error('Connection failed', error);
-        }
-      }
-    },
-    { immediate: true }
-  );
-
   /**
    * Handle terminal input
-   */
-  // Key sequence mapping for terminal input
-  /**
-   * Terminal input handling
    * Using onData instead of onKey to properly handle IME (Chinese input)
    */
   terminal.onData(async (data: string) => {
@@ -1346,47 +1407,9 @@ onMounted(async () => {
     }
   });
 
-  /**
-   * Adaptive monitoring refresh rate
-   * 700ms when dashboard is open and Performance tab is active, 3s otherwise.
-   */
-  watch(
-    [showDashboard, activeDashboardTab, () => props.sessionId],
-    async ([show, tab, sid]) => {
-      if (!sid) return;
-      const interval = show && tab === 'system' ? 700 : 3000;
-      try {
-        await invoke('set_ssh_status_refresh_rate', {
-          sessionId: sid,
-          intervalMs: interval,
-        });
-        logger.debug('Refreshed rate updated', { sid, interval });
-      } catch (error) {
-        logger.warn('Failed to update refresh rate', error);
-      }
-    },
-    { immediate: true }
-  );
-
-  /**
-   * Cleanup on unmount
-   * With KeepAlive, this only fires when the tab is truly closed or the cache is purged.
-   */
-  onUnmounted(async () => {
-    window.removeEventListener('resize', handleResize);
-    if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
-    if (terminalRef.value && handleTerminalContextMenu) {
-      terminalRef.value.removeEventListener('contextmenu', handleTerminalContextMenu);
-      handleTerminalContextMenu = null;
-    }
-    resizeObserver.disconnect();
-    if (statusUnlisten) {
-      statusUnlisten();
-      statusUnlisten = null;
-    }
-    await cleanupResources();
-  });
-});
+  // Initial connection is handled when a valid `sessionId` is provided
+  await connectToSession(props.sessionId);
+};
 </script>
 
 <template>

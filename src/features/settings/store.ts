@@ -62,15 +62,10 @@ export const useSettingsStore = defineStore('settings', () => {
     persistSettings({ ...terminal });
   }
 
-  function saveSettings() {
-    persistSettings({ ...terminal });
-  }
-
   return {
     terminal,
     setCursorStyle,
     setCursorBlink,
     setFontSize,
-    saveSettings,
   };
 });

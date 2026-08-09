@@ -76,15 +76,32 @@ const editingSessionId = ref<string | null>(null);
 // Save form data for restoration on cancel
 const savedSSHFormData = ref<SSHConnectionFormData | null>(null);
 
+// In-flight connection tracking so Cancel can abort a connecting session
+let activeConnectionId: string | null = null;
+let connectionCancelled = false;
+
 // Connection progress state
 const showConnectionProgress = ref(false);
 const connectionTime = ref(0);
 let connectionTimerInterval: ReturnType<typeof setInterval> | null = null;
+
+// Two timer pools so the two purposes never interfere:
+//  - pendingTimeouts: simulated step timers during connection — cleared on
+//    failure and on unmount.
+//  - successTimeouts: post-success actions (close form, open tab) — must
+//    survive a failure of a LATER connection attempt, and are cleared when
+//    they fire or the component unmounts.
 const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+const successTimeouts: ReturnType<typeof setTimeout>[] = [];
 
 const clearPendingTimeouts = () => {
   pendingTimeouts.forEach(t => clearTimeout(t));
   pendingTimeouts.length = 0;
+};
+
+const clearSuccessTimeouts = () => {
+  successTimeouts.forEach(t => clearTimeout(t));
+  successTimeouts.length = 0;
 };
 const connectionProgress = ref(0);
 const connectionCurrentStep = ref(0);
@@ -325,6 +342,7 @@ onBeforeUnmount(() => {
 
   // Cancel any pending connection timers before the component is destroyed
   clearPendingTimeouts();
+  clearSuccessTimeouts();
 
   // Clean up all sessions using Pinia store
   sessionStore.cleanupAllSessions().catch(error => {
@@ -406,6 +424,8 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
   // 1. Generate a unique session ID for the RUNTIME terminal session
   const sessionId = uuidv4();
+  activeConnectionId = sessionId;
+  connectionCancelled = false;
 
   // 2. Initiate backend connection via Pinia store
   try {
@@ -432,6 +452,16 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       24 // Default rows
     );
     logger.info('SSH session created successfully', { sessionId });
+
+    // User cancelled while the backend was connecting — tear down immediately
+    if (connectionCancelled) {
+      activeConnectionId = null;
+      await sessionStore
+        .disconnectSession(sessionId)
+        .catch(e => logger.error('Failed to disconnect cancelled session', e));
+      throw new Error('cancelled');
+    }
+    activeConnectionId = null;
 
     // 1.5. Save or update session in database AFTER successful connection
     if (data.id || (data.save_session && sshFormMode.value === 'create')) {
@@ -490,6 +520,10 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       }
     }
 
+    // Connection succeeded — cancel any remaining simulated step timers so a
+    // fast connection can't be overwritten by the "authenticating" step.
+    clearPendingTimeouts();
+
     connectionCurrentStep.value = 2;
     connectionProgress.value = 70;
     connectionMessage.value = t('connection.initializingTerminal');
@@ -500,8 +534,10 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     connectionStatus.value = 'success';
     connectionMessage.value = t('connection.connectionEstablished');
 
-    // Keep progress bar visible for a brief moment before closing and opening the tab
-    pendingTimeouts.push(
+    // Keep progress bar visible for a brief moment before closing and opening
+    // the tab. These timers live in successTimeouts so they are NOT cleared by
+    // a failure of a later connection attempt.
+    successTimeouts.push(
       setTimeout(() => {
         // Close the SSH form entirely (including progress bar)
         closeSSHForm();
@@ -513,7 +549,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
         // 3. Create and add a new tab AFTER the form is closed
         // Use a small delay to allow the modal to disappear visually
-        pendingTimeouts.push(
+        successTimeouts.push(
           setTimeout(() => {
             const tabId = uuidv4();
             tabManagement.addTab({
@@ -529,6 +565,11 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       }, 500)
     );
   } catch (error) {
+    // User-cancelled connections must not show an error UI
+    if (connectionCancelled || String(error) === 'Error: cancelled') {
+      connectionCancelled = false;
+      return;
+    }
     logger.error('Failed to create SSH session', error);
 
     // Set error state in progress bar
@@ -659,7 +700,7 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
 
 // Handle connection progress bar close
 const handleConnectionProgressClose = () => {
-  showConnectionProgress.value = false;
+  cancelInFlightConnection();
 
   // Show SSH form again with saved data
   openSSHForm();
@@ -667,14 +708,42 @@ const handleConnectionProgressClose = () => {
 
 // Handle connection progress bar retry
 const handleConnectionProgressRetry = () => {
+  cancelInFlightConnection();
+
   // Close progress bar and reopen SSH form
-  showConnectionProgress.value = false;
   openSSHForm();
 };
 
 // Handle SSH connection cancellation
 const handleSSHCancel = () => {
+  if (isConnecting.value) {
+    cancelInFlightConnection();
+  }
   closeSSHForm();
+};
+
+/**
+ * Aborts an in-flight SSH connection: flags the flow to stop, disconnects the
+ * backend session (best effort — it may not exist yet), and resets progress UI.
+ */
+const cancelInFlightConnection = () => {
+  connectionCancelled = true;
+  clearPendingTimeouts();
+
+  if (activeConnectionId) {
+    const id = activeConnectionId;
+    activeConnectionId = null;
+    sessionStore
+      .disconnectSession(id)
+      .catch(e => logger.error('Failed to cancel in-flight connection', e));
+  }
+
+  isConnecting.value = false;
+  showConnectionProgress.value = false;
+  if (connectionTimerInterval) {
+    clearInterval(connectionTimerInterval);
+    connectionTimerInterval = null;
+  }
 };
 
 // Handle settings panel events

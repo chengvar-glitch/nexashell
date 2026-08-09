@@ -65,7 +65,17 @@ impl EncryptionManager {
                             key.copy_from_slice(&bytes);
                             return Ok(key);
                         }
-                        log::warn!("Stored master key has invalid length, regenerating");
+                        // Corrupt keychain entry. Refuse to fall through to
+                        // "create a fresh key": that would silently overwrite
+                        // the entry and permanently orphan every credential
+                        // encrypted with the old key.
+                        return Err(format!(
+                            "Master key in keychain has invalid length ({} bytes, \
+                             expected {}). Refusing to regenerate — saved credentials \
+                             cannot be recovered.",
+                            bytes.len(),
+                            KEY_LEN
+                        ));
                     }
                     Err(keyring::Error::NoEntry) => {
                         // Not found, create a new one below

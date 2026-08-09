@@ -34,14 +34,29 @@ class EventBus {
    * Creates and stores wrapper to enable proper removal later.
    * Returns an unsubscribe function so callers can clean up without keeping
    * a reference to the handler.
+   *
+   * Registering the same handler twice for the same event replaces the old
+   * registration and unregisters the previous window listener first, so no
+   * listener is leaked.
    */
   on(event: AppEventType, handler: EventHandler): () => void {
     // Create wrapped handler that extracts CustomEvent details
     const wrappedHandler: WrappedHandler = (e: Event) => {
       if (e instanceof CustomEvent) {
-        handler(...(e.detail || []));
+        try {
+          handler(...(e.detail || []));
+        } catch (err) {
+          // A failing subscriber must not break dispatchEvent for others.
+          console.error('[EventBus] handler error', err);
+        }
       }
     };
+
+    // If this handler was already registered, remove the old listener first
+    const existing = this.listeners.get(event)?.get(handler);
+    if (existing) {
+      window.removeEventListener(event, existing);
+    }
 
     // Track wrapped handler for this event
     if (!this.listeners.has(event)) {

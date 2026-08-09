@@ -2,7 +2,7 @@
 
 Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri desktop application.
 
-[![Version](https://img.shields.io/badge/Version-1.0.0-blue.svg)](https://github.com/chengvar/nexashell)
+[![Version](https://img.shields.io/badge/Version-1.3.1-blue.svg)](https://github.com/chengvar-glitch/nexashell)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 NexaShell combines the safety and performance of Rust with a modern, high-productivity web-based UI to provide a seamless server management experience.
@@ -142,7 +142,7 @@ sequenceDiagram
 
 - **Node.js**: (recommended via nvm) and **bun**
 - **Rust toolchain**: (stable) and **cargo**
-- **Tauri CLI dependencies**: Platform-specific (see [Tauri documentation](https://tauri.app/v1/guides/getting-started/prerequisites))
+- **Tauri CLI dependencies**: Platform-specific (see [Tauri documentation](https://tauri.app/start/prerequisites))
 
 ### Quick Setup
 
@@ -192,7 +192,7 @@ The backend exposes these Tauri commands and events (implemented in `src-tauri/s
 - `src/` — Frontend renderer (Vue 3 + TypeScript)
   - `src/components/` — UI components (SSH form, Terminal, Dashboards)
   - `src/features/` — Feature modules (session, settings, tabs)
-  - `src/core/` — Core utilities (i18n, shortcut manager, themes)
+  - `src/core/` — Core utilities (i18n, theme, logger, event bus)
 - `src-tauri/` — Rust backend
   - `src-tauri/src/ssh.rs` — SSH manager and channel implementation
   - `src-tauri/src/db.rs` — SQLite database manager

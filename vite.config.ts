@@ -19,7 +19,7 @@ export default defineConfig({
           vue: ['vue', 'pinia', 'vue-i18n'],
           xterm: ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-search', '@xterm/addon-webgl'],
           ui: ['lucide-vue-next'],
-          tauri: ['@tauri-apps/api', '@tauri-apps/plugin-opener'],
+          tauri: ['@tauri-apps/api'],
         },
       },
     },

@@ -31,16 +31,6 @@ where
     f(conn)
 }
 
-#[allow(dead_code)]
-fn with_db_mut<F, T>(f: F) -> Result<T, String>
-where
-    F: FnOnce(&mut Connection) -> Result<T, String>,
-{
-    let mut guard = DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
-    f(conn)
-}
-
 fn db_conn() -> Result<std::sync::MutexGuard<'static, Option<Connection>>, String> {
     DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))
 }
@@ -341,7 +331,10 @@ pub fn save_session_with_credentials(
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     if is_update {
-        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, encrypted_credentials = ?7, updated_at = CURRENT_TIMESTAMP".to_string();
+        // Only overwrite encrypted_credentials when a new password/passphrase
+        // was provided. Otherwise a save where the caller omitted the fields
+        // (e.g. credential fetch failed) would silently wipe stored secrets.
+        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, updated_at = CURRENT_TIMESTAMP".to_string();
         let mut params_vec: Vec<Box<dyn ToSql>> = vec![
             Box::new(addr),
             Box::new(port),
@@ -349,8 +342,13 @@ pub fn save_session_with_credentials(
             Box::new(username),
             Box::new(auth_type),
             Box::new(private_key_path),
-            Box::new(encrypted_credentials),
         ];
+
+        if encrypted_credentials.is_some() {
+            sql.push_str(", encrypted_credentials = ?");
+            sql.push_str(&(params_vec.len() + 1).to_string());
+            params_vec.push(Box::new(encrypted_credentials));
+        }
 
         if let Some(fav) = is_favorite {
             sql.push_str(", is_favorite = ?");
@@ -442,7 +440,6 @@ pub fn get_session_credentials(
 }
 
 #[tauri::command]
-#[allow(dead_code)]
 pub fn save_session(
     addr: String,
     port: i64,
@@ -1135,6 +1132,20 @@ pub fn export_sessions(password: String) -> Result<String, String> {
 pub fn import_sessions(json_data: String, password: String) -> Result<(), String> {
     let export_data: ExportData = serde_json::from_str(&json_data).map_err(|e| e.to_string())?;
 
+    // Decrypt/re-encrypt all credentials BEFORE taking the DB lock — PBKDF2
+    // (390k iterations per session) must not block every other DB call.
+    let mut prepared_sessions = Vec::with_capacity(export_data.sessions.len());
+    for mut session in export_data.sessions {
+        let re_encrypted = if let Some(creds) = session.encrypted_credentials.take() {
+            let sensitive =
+                crate::encryption::EncryptionManager::decrypt_with_key(&creds, &password)?;
+            Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
+        } else {
+            None
+        };
+        prepared_sessions.push((session, re_encrypted));
+    }
+
     let mut guard = db_conn()?;
     let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
@@ -1153,15 +1164,8 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
         ).map_err(|e| e.to_string())?;
     }
 
-    for session in export_data.sessions {
+    for (session, re_encrypted) in prepared_sessions {
         let metadata = session.metadata;
-        let re_encrypted = if let Some(creds) = session.encrypted_credentials {
-            let sensitive =
-                crate::encryption::EncryptionManager::decrypt_with_key(&creds, &password)?;
-            Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
-        } else {
-            None
-        };
 
         tx.execute(
             "INSERT OR REPLACE INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at)

@@ -516,8 +516,11 @@ impl SshManager {
         // Helper session (blocking, for SFTP/monitoring/probing)
         let helper_tcp = open_tcp()?;
         let helper_sess = make_session(helper_tcp)?;
-        // Host key already verified on the main session; both connections go
-        // to the same host, so trust is already established.
+        // Verify the host key on the helper connection too: each connection is
+        // resolved independently (DNS rotation could pin them to different
+        // endpoints), so skipping verification here would let an attacker MITM
+        // SFTP uploads / monitoring / probing traffic.
+        verify_host_key(&helper_sess, host_for_err)?;
         authenticate(&helper_sess)?;
         // helper_sess stays in blocking mode (default)
 
@@ -607,11 +610,49 @@ impl SshManager {
                     break;
                 }
 
+                // Process user input FIRST for low-latency IME response.
+                // The main session is non-blocking, so a full channel/TCP
+                // buffer surfaces as WouldBlock — retry with backoff instead of
+                // dropping the remainder of the input.
                 while let Ok(input) = input_receiver.try_recv() {
-                    let _sess_lock = sess_arc.lock().await;
+                    let mut sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
-                    if let Err(e) = ch.write_all(input.as_bytes()).and_then(|_| ch.flush()) {
-                        log::error!("[SSH I/O] write/flush failed: {}", e);
+                    let bytes = input.as_bytes();
+                    let mut written = 0usize;
+                    let mut backoff = Duration::from_millis(1);
+
+                    while written < bytes.len() {
+                        if stop_flag.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        match ch.write(&bytes[written..]) {
+                            Ok(n) => {
+                                written += n;
+                                backoff = Duration::from_millis(1);
+                            }
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                // Buffer full — release the locks while waiting
+                                // so reads/resizes can proceed, then retry.
+                                drop(ch);
+                                drop(sess_lock);
+                                tokio::time::sleep(backoff).await;
+                                sess_lock = sess_arc.lock().await;
+                                ch = channel_arc.lock().await;
+                                if backoff < Duration::from_millis(50) {
+                                    backoff *= 2;
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("[SSH I/O] write failed: {}", e);
+                                break;
+                            }
+                        }
+                    }
+
+                    if let Err(e) = ch.flush() {
+                        if e.kind() != std::io::ErrorKind::WouldBlock {
+                            log::error!("[SSH I/O] flush failed: {}", e);
+                        }
                     }
                 }
 

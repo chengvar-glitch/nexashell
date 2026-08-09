@@ -50,6 +50,20 @@ const tsRules = {
 };
 
 export default [
+  {
+    ignores: [
+      'node_modules/',
+      'dist/',
+      'coverage/',
+      '*.min.js',
+      'public/',
+      'src-tauri/',
+      'src-tauri/target/',
+      'eslint.config.js',
+      'vite.config.ts',
+      'scripts/',
+    ],
+  },
   js.configs.recommended,
   ...vue.configs['flat/recommended'],
   {
@@ -85,17 +99,6 @@ export default [
   },
   {
     files: ['src/**/*.{js,jsx,ts,tsx,vue}'],
-    ignores: [
-      'node_modules/',
-      'dist/',
-      'coverage/',
-      '*.min.js',
-      'public/',
-      'src-tauri/',
-      'src-tauri/target/',
-      'eslint.config.js',
-      'vite.config.ts',
-    ],
   },
   {
     // Custom rule to disallow Chinese characters except in i18n locale files
