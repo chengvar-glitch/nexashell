@@ -13,8 +13,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import ServerDashboard from './ServerDashboard.vue';
+import { useI18n } from 'vue-i18n';
 
 const logger = createLogger('REMOTE_CONNECTION_VIEW');
+const { t } = useI18n();
 
 const sessionStore = useSessionStore();
 const settingsStore = useSettingsStore();
@@ -22,25 +24,7 @@ const settingsStore = useSettingsStore();
 const showDashboard = ref(false);
 const activeDashboardTab = ref<'system' | 'uploads' | null>('system');
 
-interface ServerStatus {
-  cpuUsage: number;
-  memUsage: number;
-  memTotal: number;
-  memUsed: number;
-  memAvail: number;
-  swapUsage: number;
-  swapTotal: number;
-  swapUsed: number;
-  diskUsage: number;
-  diskTotal: number;
-  diskUsed: number;
-  diskAvail: number;
-  netUp: number;
-  netDown: number;
-  latency: number;
-  loadAvg: [number, number, number];
-  uptime: string;
-}
+import type { ServerStatus, UploadTask } from '@/core/types';
 
 const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -113,22 +97,6 @@ let searchAddon: SearchAddon | null = null;
 let disposeIMEFix: (() => void) | null = null;
 
 // Upload task tracking
-interface UploadTask {
-  id: string;
-  fileName: string;
-  remotePath?: string;
-  status: 'pending' | 'uploading' | 'success' | 'error';
-  progress: number;
-  message: string;
-  timestamp: number;
-  error?: string;
-  // Speed tracking
-  fileSize?: number;
-  uploadedBytes?: number;
-  startTime?: number;
-  speed?: number; // bytes per second
-  eta?: number; // seconds remaining
-}
 
 const uploadTasks = shallowRef<UploadTask[]>([]);
 
@@ -166,6 +134,8 @@ let unlistenDrag: UnlistenFn | null = null;
 let unlistenDragEnter: UnlistenFn | null = null;
 let unlistenDragLeave: UnlistenFn | null = null;
 let unlistenUpload: UnlistenFn | null = null;
+let pendingResizeTimer: ReturnType<typeof setTimeout> | null = null;
+let handleTerminalContextMenu: ((e: MouseEvent) => void) | null = null;
 
 interface UploadProgressPayload {
   taskId: string;
@@ -1118,25 +1088,34 @@ onMounted(async () => {
   });
 
   // Handle right-click for direct paste or copy-on-selection
-  terminalRef.value?.addEventListener('contextmenu', async (e: MouseEvent) => {
+  handleTerminalContextMenu = (e: MouseEvent) => {
     e.preventDefault();
     if (terminal?.hasSelection()) {
       const selection = terminal.getSelection();
       if (selection) {
-        await navigator.clipboard.writeText(selection);
+        navigator.clipboard.writeText(selection).catch(err => {
+          logger.error('Copy selection failed', err);
+        });
         terminal.clearSelection();
       }
     } else {
       try {
-        const text = await navigator.clipboard.readText();
-        if (text && terminal) {
-          terminal.paste(text);
-        }
+        navigator.clipboard
+          .readText()
+          .then(text => {
+            if (text && terminal) {
+              terminal.paste(text);
+            }
+          })
+          .catch(err => {
+            logger.error('Right-click paste failed', err);
+          });
       } catch (err) {
         logger.error('Right-click paste failed', err);
       }
     }
-  });
+  };
+  terminalRef.value?.addEventListener('contextmenu', handleTerminalContextMenu);
 
   // Handle keyboard shortcuts and allow global app shortcuts to bubble up
   terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
@@ -1268,7 +1247,9 @@ onMounted(async () => {
       await unlistenFn();
     }
 
-    unlistenFn = await listen(`ssh-output-${sessionId}`, (event: any) => {
+    unlistenFn = await listen(`ssh-output-${sessionId}`, (event: {
+      payload?: unknown;
+    }) => {
       try {
         const payload = event.payload as
           | { seq?: number; output?: string; ts?: number }
@@ -1319,7 +1300,8 @@ onMounted(async () => {
             await connectSession(terminal.cols, terminal.rows);
 
             // Re-sync after a short delay to ensure backend is ready and listener is active
-            setTimeout(() => {
+            if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+            pendingResizeTimer = setTimeout(() => {
               if (!terminal) return;
               if (fitAddon && props.sessionId === newSessionId) {
                 fitAddon.fit();
@@ -1392,6 +1374,11 @@ onMounted(async () => {
    */
   onUnmounted(async () => {
     window.removeEventListener('resize', handleResize);
+    if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+    if (terminalRef.value && handleTerminalContextMenu) {
+      terminalRef.value.removeEventListener('contextmenu', handleTerminalContextMenu);
+      handleTerminalContextMenu = null;
+    }
     resizeObserver.disconnect();
     if (statusUnlisten) {
       statusUnlisten();
@@ -1420,31 +1407,31 @@ onMounted(async () => {
     <div v-if="isDragging" class="drag-drop-overlay">
       <div class="overlay-content">
         <span class="icon">📂</span>
-        <p>Drop files here to upload</p>
+        <p>{{ t('ssh.dropFilesHere') }}</p>
         <div class="target-path-display">
-          <div class="path-label">Target Directory:</div>
+          <div class="path-label">{{ t('ssh.targetDirectory') }}</div>
           <input
             v-model="currentRemotePath"
-            class="bg-black/40 border border-white/20 rounded px-3 py-1 text-yellow-400 font-mono text-sm focus:border-yellow-400 outline-none w-72 text-center pointer-events-auto"
-            placeholder="(auto-detected path)"
+            class="drop-path-input"
+            :placeholder="t('ssh.autoDetectedPath')"
             @click.stop
             @mousedown.stop
           />
           <div v-if="!currentRemotePath" class="path-status warning">
-            ⚠️ No path detected - will use home directory
+            ⚠️ {{ t('ssh.noPathDetected') }}
           </div>
           <div
             v-else-if="currentRemotePath.startsWith('/')"
             class="path-status success"
           >
-            ✓ Absolute path
+            ✓ {{ t('ssh.absolutePath') }}
           </div>
           <div v-else class="path-status info">
-            ℹ️ Relative path - will upload to home + path
+            ℹ️ {{ t('ssh.relativePath') }}
           </div>
         </div>
         <div class="overlay-tip">
-          💡 Edit path above if needed before dropping files
+          💡 {{ t('ssh.editPathBeforeDrop') }}
         </div>
       </div>
     </div>
@@ -1454,7 +1441,7 @@ onMounted(async () => {
         ref="searchInputRef"
         v-model="searchQuery"
         type="text"
-        placeholder="Search..."
+        :placeholder="t('ssh.searchPlaceholder')"
         @input="handleSearch"
         @keydown.enter.exact.stop.prevent="handleSearchNext"
         @keydown.shift.enter.stop.prevent="handleSearchPrev"
@@ -1556,6 +1543,24 @@ onMounted(async () => {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 6px;
+}
+
+.drop-path-input {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 6px 12px;
+  color: #facc15;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  width: 288px;
+  text-align: center;
+  outline: none;
+  pointer-events: auto;
+}
+
+.drop-path-input:focus {
+  border-color: #facc15;
 }
 
 .path-status {

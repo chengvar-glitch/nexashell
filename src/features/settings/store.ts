@@ -1,6 +1,9 @@
 import { defineStore } from 'pinia';
 import { reactive } from 'vue';
+import { createLogger } from '@/core/utils/logger';
 import type { CursorStyle, TerminalSettings } from './types';
+
+const logger = createLogger('SETTINGS_STORE');
 
 const STORAGE_KEY = 'nexashell-settings';
 
@@ -27,17 +30,18 @@ function loadTerminal(): TerminalSettings {
       }
       return { ...DEFAULT_TERMINAL, ...terminal };
     } catch (e) {
-      console.error('Failed to parse settings from localStorage', e);
+      logger.error('Failed to parse settings from localStorage', e);
     }
   }
   return { ...DEFAULT_TERMINAL };
 }
 
 function persistSettings(terminal: TerminalSettings) {
-  localStorage.setItem(
-    STORAGE_KEY,
-    JSON.stringify({ terminal })
-  );
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ terminal }));
+  } catch (e) {
+    logger.error('Failed to persist settings', e);
+  }
 }
 
 export const useSettingsStore = defineStore('settings', () => {

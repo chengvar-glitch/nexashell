@@ -135,8 +135,11 @@
 </template>
 
 <script setup lang="ts" generic="T extends MetadataItem">
-import { ref, computed, nextTick, watch } from 'vue';
+import { ref, computed, nextTick, watch, onBeforeUnmount } from 'vue';
 import type { MetadataItem } from '@/core/types/common';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('MULTI_SELECT');
 
 interface Props {
   modelValue?: string[];
@@ -164,6 +167,7 @@ const props = withDefaults(defineProps<Props>(), {
   emptyText: 'No items available',
   allowCreate: true,
   itemType: 'item',
+  onCreateItem: undefined,
 });
 
 const emit = defineEmits<{
@@ -186,7 +190,22 @@ watch(
   newItems => {
     allItems.value = [...(newItems || [])];
   },
-  { immediate: true, deep: true }
+  { immediate: true }
+);
+
+// Sync external v-model changes (parent reset/programmatic updates) back into
+// local state. Prevents stale selection after the parent replaces the array.
+let internalUpdate = false;
+watch(
+  () => props.modelValue,
+  newVal => {
+    if (internalUpdate) {
+      internalUpdate = false;
+      return;
+    }
+    selectedItems.value = [...(newVal || [])];
+  },
+  { immediate: true }
 );
 
 // Computed: filter items based on search query
@@ -210,16 +229,16 @@ watch([filteredItems, searchQuery], () => {
 });
 
 // Computed: combine filtered items and "create new" option for keyboard navigation
-const navigationItems = computed(() => {
-  const items = [...filteredItems.value] as any[];
+const navigationItems = computed<T[]>((() => {
+  const items = [...filteredItems.value] as T[];
   if (searchQuery.value.trim() && props.allowCreate) {
     items.push({
       id: 'create_new_item_action',
       name: searchQuery.value.trim(),
-    });
+    } as T);
   }
   return items;
-});
+}) as () => T[]);
 
 const dropdownMaxHeight = computed(() => {
   // Each item is approximately 32px now with better padding
@@ -242,16 +261,18 @@ const toggleItem = (itemId: string) => {
   if (selectedItems.value.includes(itemId)) {
     removeItem(itemId);
   } else {
+    internalUpdate = true;
     selectedItems.value.push(itemId);
-    emit('update:modelValue', selectedItems.value);
+    emit('update:modelValue', [...selectedItems.value]);
     searchQuery.value = '';
     highlightedIndex.value = -1;
   }
 };
 
 const removeItem = (itemId: string) => {
+  internalUpdate = true;
   selectedItems.value = selectedItems.value.filter(id => id !== itemId);
-  emit('update:modelValue', selectedItems.value);
+  emit('update:modelValue', [...selectedItems.value]);
 };
 
 const getItemName = (itemId: string): string => {
@@ -318,8 +339,9 @@ const addNewItem = async () => {
 
   if (existingItem) {
     if (!selectedItems.value.includes(existingItem.id)) {
+      internalUpdate = true;
       selectedItems.value.push(existingItem.id);
-      emit('update:modelValue', selectedItems.value);
+      emit('update:modelValue', [...selectedItems.value]);
     }
     searchQuery.value = '';
     isOpen.value = false;
@@ -333,15 +355,16 @@ const addNewItem = async () => {
 
       // Add to local items list and select it
       (allItems.value as T[]).push(newItem);
+      internalUpdate = true;
       selectedItems.value.push(newItem.id);
 
-      emit('update:modelValue', selectedItems.value);
+      emit('update:modelValue', [...selectedItems.value]);
       emit('item-added', newItem as T);
 
       searchQuery.value = '';
       isOpen.value = false;
     } catch (error) {
-      console.error('Failed to create item:', error);
+      logger.error('Failed to create item:', error);
     } finally {
       isCreating.value = false;
     }
@@ -357,9 +380,10 @@ const addNewItem = async () => {
     } as T;
 
     (allItems.value as unknown[]).push(newItem);
+    internalUpdate = true;
     selectedItems.value.push(tempId);
 
-    emit('update:modelValue', selectedItems.value);
+    emit('update:modelValue', [...selectedItems.value]);
     emit('item-added', newItem as T);
 
     searchQuery.value = '';
@@ -367,14 +391,22 @@ const addNewItem = async () => {
   }
 };
 
-const handleInputBlur = async () => {
+const handleInputBlur = () => {
   // Delay closing to allow click events on dropdown items to register
-  await nextTick();
-  setTimeout(() => {
-    if (!isOpen.value) return;
-    isOpen.value = false;
-  }, 120);
+  nextTick().then(() => {
+    if (blurTimer) clearTimeout(blurTimer);
+    blurTimer = setTimeout(() => {
+      if (!isOpen.value) return;
+      isOpen.value = false;
+    }, 120);
+  });
 };
+
+let blurTimer: ReturnType<typeof setTimeout> | null = null;
+
+onBeforeUnmount(() => {
+  if (blurTimer) clearTimeout(blurTimer);
+});
 
 const checkDropdownPosition = async () => {
   await nextTick();

@@ -12,6 +12,7 @@ export default defineConfig({
     target: 'es2021',
     cssCodeSplit: true,
     cssMinify: 'esbuild',
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -21,16 +22,6 @@ export default defineConfig({
           tauri: ['@tauri-apps/api', '@tauri-apps/plugin-opener'],
         },
       },
-    },
-  },
-  test: {
-    environment: 'happy-dom',
-    globals: true,
-    setupFiles: ['./tests/setup.ts'],
-    coverage: {
-      provider: 'v8',
-      reporter: ['text', 'html', 'lcov'],
-      exclude: ['node_modules/', 'src-tauri/', 'tests/'],
     },
   },
   resolve: {

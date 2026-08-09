@@ -1,11 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import {
-  isMacOSBrowser,
-  isWindowsBrowser,
-  formatShortcut,
-} from '@/core/utils/platform/platform-detection';
+import { formatShortcut } from '@/core/utils/platform/platform-detection';
 
 /**
  * SearchBox Component
@@ -23,6 +19,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: '',
+  placeholder: '',
 });
 
 const emit = defineEmits<{
@@ -38,8 +35,6 @@ const emit = defineEmits<{
 
 const { t } = useI18n({ useScope: 'global' });
 const searchInputRef = ref<HTMLInputElement | null>(null);
-const isMacOS_OS = ref(false);
-const isWindowsOS = ref(false);
 const isFocused = ref(false);
 
 /**
@@ -94,17 +89,6 @@ const handleKeyDown = (event: KeyboardEvent) => {
 const handleKeyUp = (event: KeyboardEvent) => {
   emit('keyup', event);
 };
-
-onMounted(async () => {
-  try {
-    isMacOS_OS.value = await isMacOSBrowser();
-    isWindowsOS.value = await isWindowsBrowser();
-  } catch (error) {
-    console.error('Failed to detect platform:', error);
-    isMacOS_OS.value = false;
-    isWindowsOS.value = false;
-  }
-});
 
 /**
  * Computes platform-aware shortcut text for the placeholder.

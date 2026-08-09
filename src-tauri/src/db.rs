@@ -31,6 +31,7 @@ where
     f(conn)
 }
 
+#[allow(dead_code)]
 fn with_db_mut<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&mut Connection) -> Result<T, String>,
@@ -59,35 +60,22 @@ pub struct Session {
     pub updated_at: String,
 }
 
-/// Represents a persisted group for organizing sessions.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Group {
-    /// UUID primary key (string)
     pub id: String,
-    /// Group name (default: "默认分组")
     pub name: String,
-    /// Sort order (default: 1)
     pub sort: i64,
-    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
     pub created_at: String,
-    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
     pub updated_at: String,
 }
 
-/// Represents a persisted tag.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Tag {
-    /// UUID primary key (string)
     pub id: String,
-    /// Tag name (default: empty string)
     pub name: String,
-    /// Tag color (hex string, e.g., "#FF0000")
     pub color: Option<String>,
-    /// Sort order (default: 1)
     pub sort: i64,
-    /// Creation timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
     pub created_at: String,
-    /// Last update timestamp (set by SQLite DEFAULT CURRENT_TIMESTAMP)
     pub updated_at: String,
 }
 
@@ -116,7 +104,6 @@ pub struct ExportData {
     pub tags: Vec<Tag>,
 }
 
-/// Add a column to a table only if it doesn't already exist
 fn add_column_if_not_exists(
     conn: &Connection,
     table: &str,
@@ -131,6 +118,18 @@ fn add_column_if_not_exists(
         )
         .map_err(|e| e.to_string())?;
     if count == 0 {
+        if !table
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            || !column
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(format!(
+                "Invalid table/column identifier: {}.{}",
+                table, column
+            ));
+        }
         conn.execute(
             &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, definition),
             [],
@@ -140,18 +139,78 @@ fn add_column_if_not_exists(
     Ok(())
 }
 
+fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT 'Default Group',
+            sort INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            color TEXT,
+            sort INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let _ = add_column_if_not_exists(conn, "tags", "color", "TEXT");
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS session_groups (
+            session_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            UNIQUE(session_id, group_id)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS session_tags (
+            session_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            UNIQUE(session_id, tag_id)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn init_db() -> Result<String, String> {
     let db_path = db_path()?;
     let existed = db_path.exists();
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
-    // Ensure sessions table exists.
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA foreign_keys = ON;
+         PRAGMA busy_timeout = 5000;
+         PRAGMA synchronous = NORMAL;",
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "CREATE TABLE IF NOT EXISTS sessions (
             id TEXT PRIMARY KEY,
             addr TEXT NOT NULL,
-            port INTEGER NOT NULL,
+            port INTEGER NOT NULL CHECK (port >= 0 AND port <= 65535),
             server_name TEXT NOT NULL,
             username TEXT NOT NULL,
             auth_type TEXT NOT NULL,
@@ -163,8 +222,7 @@ pub fn init_db() -> Result<String, String> {
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )",
         [],
-    )
-        .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
 
     add_column_if_not_exists(&conn, "sessions", "is_favorite", "INTEGER NOT NULL DEFAULT 0")?;
     add_column_if_not_exists(&conn, "sessions", "encrypted_credentials", "TEXT")?;
@@ -177,38 +235,28 @@ pub fn init_db() -> Result<String, String> {
 
     ensure_groups_and_tags(&conn)?;
 
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)", []).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sessions_server_name ON sessions(server_name)",
         [],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_groups_group_id ON session_groups(group_id)",
         [],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_groups_session_id ON session_groups(session_id)",
         [],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_tags_tag_id ON session_tags(tag_id)",
         [],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_tags_session_id ON session_tags(session_id)",
         [],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
 
-    // Store connection in singleton for reuse
     {
         let mut guard = DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))?;
         *guard = Some(conn);
@@ -220,6 +268,25 @@ pub fn init_db() -> Result<String, String> {
         Ok("ok".into())
     }
 }
+
+fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
+    Ok(Session {
+        id: row.get(0)?,
+        addr: row.get(1)?,
+        port: row.get(2)?,
+        server_name: row.get(3)?,
+        username: row.get(4)?,
+        auth_type: row.get(5)?,
+        private_key_path: row.get(6)?,
+        is_favorite: row.get::<_, i64>(7)? != 0,
+        last_connected_at: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+    })
+}
+
+const SESSION_COLUMNS: &str =
+    "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
 
 #[tauri::command]
 pub fn add_session(
@@ -241,22 +308,6 @@ pub fn add_session(
     Ok(id)
 }
 
-/// Save a new SSH session with groups and tags associations.
-/// This command saves session metadata without storing sensitive data (passwords, passphrases).
-///
-/// # Arguments
-/// * `addr` - SSH server address (host or IP)
-/// * `port` - SSH server port
-/// * `server_name` - Human-friendly session name
-/// * `username` - SSH username
-/// * `auth_type` - Authentication type ('password' or 'key')
-/// * `private_key_path` - Path to private key file (optional)
-/// * `is_favorite` - Whether the session is favorited (optional)
-/// * `group_ids` - List of group IDs to associate with this session (optional)
-/// * `tag_ids` - List of tag IDs to associate with this session (optional)
-///
-/// # Returns
-/// The UUID of the newly created session
 #[tauri::command]
 pub fn save_session_with_credentials(
     id: Option<String>,
@@ -277,8 +328,8 @@ pub fn save_session_with_credentials(
 
     let encrypted_credentials = if password.is_some() || key_passphrase.is_some() {
         let sensitive = crate::encryption::SensitiveData {
-            password: password.clone(),
-            key_passphrase: key_passphrase.clone(),
+            password,
+            key_passphrase,
         };
         Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
     } else {
@@ -287,6 +338,7 @@ pub fn save_session_with_credentials(
 
     let mut guard = db_conn()?;
     let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     if is_update {
         let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, encrypted_credentials = ?7, updated_at = CURRENT_TIMESTAMP".to_string();
@@ -311,101 +363,84 @@ pub fn save_session_with_credentials(
         params_vec.push(Box::new(session_id.clone()));
 
         let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-        conn.execute(&sql, param_refs.as_slice())
-            .map_err(|e| e.to_string())?;
+        tx.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
 
-        conn.execute(
+        tx.execute(
             "DELETE FROM session_groups WHERE session_id = ?1",
             params![session_id],
-        )
-        .map_err(|e| e.to_string())?;
-        conn.execute(
+        ).map_err(|e| e.to_string())?;
+        tx.execute(
             "DELETE FROM session_tags WHERE session_id = ?1",
             params![session_id],
-        )
-        .map_err(|e| e.to_string())?;
+        ).map_err(|e| e.to_string())?;
     } else {
-        conn.execute(
+        tx.execute(
             "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![session_id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }, encrypted_credentials],
+            params![
+                session_id,
+                addr,
+                port,
+                server_name,
+                username,
+                auth_type,
+                private_key_path,
+                if is_favorite.unwrap_or(false) { 1 } else { 0 },
+                encrypted_credentials
+            ],
         ).map_err(|e| e.to_string())?;
     }
 
     if let Some(groups) = group_ids {
         for group_id in groups {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
                 params![session_id, group_id],
             )
-            .ok();
+            .map_err(|e| format!("Failed to link group: {}", e))?;
         }
     }
 
     if let Some(tags) = tag_ids {
         for tag_id in tags {
-            conn.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
                 params![session_id, tag_id],
             )
-            .ok();
+            .map_err(|e| format!("Failed to link tag: {}", e))?;
         }
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(session_id)
 }
 
-/// Retrieve sensitive credentials (password and key passphrase) from database (decrypted)
-///
-/// # Arguments
-/// * `session_id` - Session UUID
-///
-/// # Returns
-/// Tuple of (session_id, password_option, key_passphrase_option)
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn get_session_credentials(
     sessionId: String,
 ) -> Result<(String, Option<String>, Option<String>), String> {
-    if sessionId.len() < 32 || sessionId.len() > 40 {
-        return Err("Invalid session ID format".to_string());
-    }
-
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
-
-    let encrypted_credentials: Option<String> = conn
-        .query_row(
+    let encrypted: Option<String> = with_db(|conn| {
+        conn.query_row(
             "SELECT encrypted_credentials FROM sessions WHERE id = ?1",
             params![sessionId],
             |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())
+    })?;
 
-    if let Some(encrypted) = encrypted_credentials {
-        let credentials = crate::encryption::EncryptionManager::decrypt(&encrypted)?;
-        Ok((sessionId, credentials.password, credentials.key_passphrase))
+    if let Some(enc) = encrypted {
+        let creds = crate::encryption::EncryptionManager::decrypt(&enc)?;
+        Ok((
+            sessionId,
+            creds.password.clone(),
+            creds.key_passphrase.clone(),
+        ))
     } else {
         Ok((sessionId, None, None))
     }
 }
 
-/// Save a new SSH session with groups and tags associations.
-/// This command saves session metadata without storing sensitive data (passwords, passphrases).
-///
-/// # Arguments
-/// * `addr` - SSH server address (host or IP)
-/// * `port` - SSH server port
-/// * `server_name` - Human-friendly session name
-/// * `username` - SSH username
-/// * `auth_type` - Authentication type ('password' or 'key')
-/// * `private_key_path` - Path to private key file (optional)
-/// * `is_favorite` - Whether the session is favorited (optional)
-/// * `group_ids` - List of group IDs to associate with this session (optional)
-/// * `tag_ids` - List of tag IDs to associate with this session (optional)
-///
-/// # Returns
-/// The UUID of the newly created session
 #[tauri::command]
 #[allow(dead_code)]
 pub fn save_session(
@@ -419,42 +454,47 @@ pub fn save_session(
     group_ids: Option<Vec<String>>,
     tag_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
+    let id = Uuid::new_v4().to_string();
     let mut guard = db_conn()?;
     let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
-    ensure_groups_and_tags(conn)?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    let id = Uuid::new_v4().to_string();
-
-    // Insert the session
-    conn.execute(
+    tx.execute(
         "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![id, addr, port, server_name, username, auth_type, private_key_path, if is_favorite.unwrap_or(false) { 1 } else { 0 }],
+        params![
+            id,
+            addr,
+            port,
+            server_name,
+            username,
+            auth_type,
+            private_key_path,
+            if is_favorite.unwrap_or(false) { 1 } else { 0 }
+        ],
     )
     .map_err(|e| e.to_string())?;
 
-    // Associate with groups
     if let Some(groups) = group_ids {
-        for group_id in groups {
-            conn.execute(
+        for gid in groups {
+            tx.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
-                params![id, group_id],
+                params![id, gid],
             )
             .map_err(|e| e.to_string())?;
         }
     }
-
-    // Associate with tags
     if let Some(tags) = tag_ids {
-        for tag_id in tags {
-            conn.execute(
+        for tid in tags {
+            tx.execute(
                 "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-                params![id, tag_id],
+                params![id, tid],
             )
             .map_err(|e| e.to_string())?;
         }
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -464,7 +504,8 @@ pub fn toggle_favorite(id: String, is_favorite: bool) -> Result<(), String> {
         conn.execute(
             "UPDATE sessions SET is_favorite = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
             params![if is_favorite { 1 } else { 0 }, id],
-        ).map_err(|e| e.to_string())
+        )
+        .map_err(|e| e.to_string())
     })?;
     Ok(())
 }
@@ -475,7 +516,8 @@ pub fn update_session_timestamp(id: String) -> Result<(), String> {
         conn.execute(
             "UPDATE sessions SET last_connected_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?1",
             params![id],
-        ).map_err(|e| e.to_string())
+        )
+        .map_err(|e| e.to_string())
     })?;
     Ok(())
 }
@@ -483,45 +525,16 @@ pub fn update_session_timestamp(id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn list_sessions() -> Result<Vec<Session>, String> {
     with_db(|conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at FROM sessions",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!("SELECT {} FROM sessions", SESSION_COLUMNS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok(Session {
-                    id: row.get(0)?,
-                    addr: row.get(1)?,
-                    port: row.get(2)?,
-                    server_name: row.get(3)?,
-                    username: row.get(4)?,
-                    auth_type: row.get(5)?,
-                    private_key_path: row.get(6)?,
-                    is_favorite: row.get::<_, i64>(7)? != 0,
-                    last_connected_at: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                })
-            })
+            .query_map([], row_to_session)
             .map_err(|e| e.to_string())?;
-        let mut v = Vec::new();
-        for r in rows {
-            v.push(r.map_err(|e| e.to_string())?);
-        }
-        Ok(v)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
 }
 
-/// Retrieve sessions with optional filters.
-///
-/// All parameters are optional; when none are provided the full table is
-/// returned. Filters:
-/// - `group_id`: returns sessions belonging to the specified group
-/// - `tag_id`: returns sessions tagged with the specified tag
-/// - `id`: filter by primary key
-/// - `server_name`: partial match on `server_name` (LIKE)
-/// - `host_addr`: partial match on `addr` (LIKE)
 #[tauri::command]
 pub fn get_sessions(
     group_id: Option<String>,
@@ -530,7 +543,10 @@ pub fn get_sessions(
     server_name: Option<String>,
     host_addr: Option<String>,
 ) -> Result<Vec<Session>, String> {
-    let mut sql = String::from("SELECT DISTINCT s.id, s.addr, s.port, s.server_name, s.username, s.auth_type, s.private_key_path, s.is_favorite, s.last_connected_at, s.created_at, s.updated_at FROM sessions s");
+    let mut sql = format!(
+        "SELECT DISTINCT s.{} FROM sessions s",
+        SESSION_COLUMNS.replace(", ", ", s.")
+    );
     if group_id.is_some() {
         sql.push_str(" JOIN session_groups sg ON s.id = sg.session_id");
     }
@@ -538,90 +554,49 @@ pub fn get_sessions(
         sql.push_str(" JOIN session_tags st ON s.id = st.session_id");
     }
 
-    let mut where_clauses: Vec<String> = Vec::new();
+    let mut wheres = Vec::new();
     let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
-
     if let Some(gid) = group_id {
-        where_clauses.push("sg.group_id = ?".to_string());
+        wheres.push("sg.group_id = ?".to_string());
         params_vec.push(Box::new(gid));
     }
     if let Some(tid) = tag_id {
-        where_clauses.push("st.tag_id = ?".to_string());
+        wheres.push("st.tag_id = ?".to_string());
         params_vec.push(Box::new(tid));
     }
     if let Some(pid) = id {
-        where_clauses.push("s.id = ?".to_string());
+        wheres.push("s.id = ?".to_string());
         params_vec.push(Box::new(pid));
     }
-    if let Some(name) = server_name {
-        where_clauses.push("s.server_name LIKE ?".to_string());
-        params_vec.push(Box::new(format!("%{}%", name)));
+    if let Some(n) = server_name {
+        wheres.push("s.server_name LIKE ?".to_string());
+        params_vec.push(Box::new(format!("%{}%", n)));
     }
-    if let Some(addr) = host_addr {
-        where_clauses.push("s.addr LIKE ?".to_string());
-        params_vec.push(Box::new(format!("%{}%", addr)));
+    if let Some(a) = host_addr {
+        wheres.push("s.addr LIKE ?".to_string());
+        params_vec.push(Box::new(format!("%{}%", a)));
     }
 
-    if !where_clauses.is_empty() {
+    if !wheres.is_empty() {
         sql.push_str(" WHERE ");
-        sql.push_str(&where_clauses.join(" AND "));
+        sql.push_str(&wheres.join(" AND "));
     }
 
     let guard = db_conn()?;
     let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-
-    // Convert boxed params to &[&dyn ToSql]
-    let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    let rows = stmt
-        .query_map(param_refs.as_slice(), |row| {
-            Ok(Session {
-                id: row.get(0)?,
-                addr: row.get(1)?,
-                port: row.get(2)?,
-                server_name: row.get(3)?,
-                username: row.get(4)?,
-                auth_type: row.get(5)?,
-                private_key_path: row.get(6)?,
-                is_favorite: row.get::<_, i64>(7)? != 0,
-                last_connected_at: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-            })
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut v = Vec::new();
-    for r in rows {
-        v.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(v)
+    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+    let rows = stmt.query_map(p.as_slice(), row_to_session).map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String> {
     with_db(|conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at FROM sessions",
-            )
-            .map_err(|e| e.to_string())?;
+        let sql = format!("SELECT {} FROM sessions", SESSION_COLUMNS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
         let rows = stmt
-            .query_map([], |row| {
-                Ok(Session {
-                    id: row.get(0)?,
-                    addr: row.get(1)?,
-                    port: row.get(2)?,
-                    server_name: row.get(3)?,
-                    username: row.get(4)?,
-                    auth_type: row.get(5)?,
-                    private_key_path: row.get(6)?,
-                    is_favorite: row.get::<_, i64>(7)? != 0,
-                    last_connected_at: row.get(8)?,
-                    created_at: row.get(9)?,
-                    updated_at: row.get(10)?,
-                })
-            })
+            .query_map([], row_to_session)
             .map_err(|e| e.to_string())?;
         let mut sessions = Vec::new();
         for r in rows {
@@ -641,7 +616,13 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
             )
             .map_err(|e| e.to_string())?;
         let grows = gstmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
             .map_err(|e| e.to_string())?;
         for r in grows {
             let (sid, gid, gname) = r.map_err(|e| e.to_string())?;
@@ -659,7 +640,13 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
             )
             .map_err(|e| e.to_string())?;
         let trows = tstmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
             .map_err(|e| e.to_string())?;
         for r in trows {
             let (sid, tid, tname) = r.map_err(|e| e.to_string())?;
@@ -670,65 +657,57 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
 
         Ok(sessions
             .into_iter()
-            .map(|session| {
-                let (group_ids, groups) = group_map.remove(&session.id).unwrap_or_default();
-                let (tag_ids, tags) = tag_map.remove(&session.id).unwrap_or_default();
+            .map(|s| {
+                let (gids, gnames) = group_map.remove(&s.id).unwrap_or_default();
+                let (tids, tnames) = tag_map.remove(&s.id).unwrap_or_default();
                 SessionWithRelations {
-                    session,
-                    group_ids,
-                    groups,
-                    tag_ids,
-                    tags,
+                    session: s,
+                    group_ids: gids,
+                    groups: gnames,
+                    tag_ids: tids,
+                    tags: tnames,
                 }
             })
             .collect())
     })
 }
 
-/// Edit an existing group. Only provided fields are updated.
 #[tauri::command]
 pub fn edit_group(id: String, name: Option<String>, sort: Option<i64>) -> Result<(), String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
-    let mut sets: Vec<String> = Vec::new();
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let mut sets = Vec::new();
     let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(n) = name {
-        sets.push("name = ?".to_string());
+        sets.push("name = ?");
         params_vec.push(Box::new(n));
     }
     if let Some(s) = sort {
-        sets.push("sort = ?".to_string());
+        sets.push("sort = ?");
         params_vec.push(Box::new(s));
     }
     if sets.is_empty() {
         return Ok(());
     }
-    // always update updated_at
-    sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
+    sets.push("updated_at = CURRENT_TIMESTAMP");
     let sql = format!("UPDATE groups SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
-    let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, param_refs.as_slice())
-        .map_err(|e| e.to_string())?;
+    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Delete a group and its logical associations.
 #[tauri::command]
 pub fn delete_group(id: String) -> Result<(), String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
-    conn.execute(
-        "DELETE FROM session_groups WHERE group_id = ?1",
-        params![id.clone()],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM groups WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM session_groups WHERE group_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM groups WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Edit an existing tag. Only provided fields are updated.
 #[tauri::command]
 pub fn edit_tag(
     id: String,
@@ -736,50 +715,44 @@ pub fn edit_tag(
     color: Option<String>,
     sort: Option<i64>,
 ) -> Result<(), String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
-    let mut sets: Vec<String> = Vec::new();
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let mut sets = Vec::new();
     let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(n) = name {
-        sets.push("name = ?".to_string());
+        sets.push("name = ?");
         params_vec.push(Box::new(n));
     }
     if let Some(c) = color {
-        sets.push("color = ?".to_string());
+        sets.push("color = ?");
         params_vec.push(Box::new(c));
     }
     if let Some(s) = sort {
-        sets.push("sort = ?".to_string());
+        sets.push("sort = ?");
         params_vec.push(Box::new(s));
     }
     if sets.is_empty() {
         return Ok(());
     }
-    sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
+    sets.push("updated_at = CURRENT_TIMESTAMP");
     let sql = format!("UPDATE tags SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
-    let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, param_refs.as_slice())
-        .map_err(|e| e.to_string())?;
+    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Delete a tag and its logical associations.
 #[tauri::command]
 pub fn delete_tag(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
-    conn.execute(
-        "DELETE FROM session_tags WHERE tag_id = ?1",
-        params![id.clone()],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute("DELETE FROM tags WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM session_tags WHERE tag_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM tags WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Edit an existing session record. Only provided fields are updated.
 #[tauri::command]
 pub fn edit_session(
     id: String,
@@ -791,187 +764,97 @@ pub fn edit_session(
     private_key_path: Option<Option<String>>,
     is_favorite: Option<bool>,
 ) -> Result<(), String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
-    let mut sets: Vec<String> = Vec::new();
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let mut sets = Vec::new();
     let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(a) = addr {
-        sets.push("addr = ?".to_string());
+        sets.push("addr = ?");
         params_vec.push(Box::new(a));
     }
     if let Some(p) = port {
-        sets.push("port = ?".to_string());
+        sets.push("port = ?");
         params_vec.push(Box::new(p));
     }
     if let Some(s) = server_name {
-        sets.push("server_name = ?".to_string());
+        sets.push("server_name = ?");
         params_vec.push(Box::new(s));
     }
     if let Some(u) = username {
-        sets.push("username = ?".to_string());
+        sets.push("username = ?");
         params_vec.push(Box::new(u));
     }
     if let Some(at) = auth_type {
-        sets.push("auth_type = ?".to_string());
+        sets.push("auth_type = ?");
         params_vec.push(Box::new(at));
     }
-    if let Some(pk_opt) = private_key_path {
-        sets.push("private_key_path = ?".to_string());
-        params_vec.push(Box::new(pk_opt));
+    if let Some(pk) = private_key_path {
+        sets.push("private_key_path = ?");
+        params_vec.push(Box::new(pk));
     }
     if let Some(fav) = is_favorite {
-        sets.push("is_favorite = ?".to_string());
+        sets.push("is_favorite = ?");
         params_vec.push(Box::new(if fav { 1 } else { 0 }));
     }
     if sets.is_empty() {
         return Ok(());
     }
-    sets.push("updated_at = CURRENT_TIMESTAMP".to_string());
+    sets.push("updated_at = CURRENT_TIMESTAMP");
     let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
     params_vec.push(Box::new(id));
-    let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, param_refs.as_slice())
-        .map_err(|e| e.to_string())?;
+    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
-/// Delete a session and its logical associations.
 #[tauri::command]
 pub fn delete_session(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
-
-    // Delete session_groups
-    let rows1 = conn
-        .execute(
-            "DELETE FROM session_groups WHERE session_id = ?1",
-            params![id.clone()],
-        )
-        .map_err(|e| e.to_string())?;
-    println!("Deleted {} rows from session_groups", rows1);
-
-    // Delete session_tags
-    let rows2 = conn
-        .execute(
-            "DELETE FROM session_tags WHERE session_id = ?1",
-            params![id.clone()],
-        )
-        .map_err(|e| e.to_string())?;
-    println!("Deleted {} rows from session_tags", rows2);
-
-    // Delete session
-    let rows3 = conn
-        .execute("DELETE FROM sessions WHERE id = ?1", params![id.clone()])
-        .map_err(|e| e.to_string())?;
-    println!("Deleted {} rows from sessions table", rows3);
-
-    println!("Session {} deleted successfully", id);
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM session_groups WHERE session_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM session_tags WHERE session_id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sessions WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    log::debug!("Deleted session {}", id);
     Ok(())
 }
 
-/// Create the `groups` and `tags` tables if they do not exist.
-fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS groups (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL DEFAULT '默认分组',
-            sort INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS tags (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL DEFAULT '',
-            color TEXT,
-            sort INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Try to add color column if it doesn't exist (for existing databases)
-    let _ = add_column_if_not_exists(conn, "tags", "color", "TEXT");
-
-    // Junction table for sessions <-> groups (logical association only)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS session_groups (
-            session_id TEXT NOT NULL,
-            group_id TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            UNIQUE(session_id, group_id)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // Junction table for sessions <-> tags (logical association only)
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS session_tags (
-            session_id TEXT NOT NULL,
-            tag_id TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            UNIQUE(session_id, tag_id)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
-/// Create a new group and return its UUID.
 #[tauri::command]
 pub fn add_group(name: Option<String>, sort: Option<i64>) -> Result<String, String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     let id = Uuid::new_v4().to_string();
-    let name = name.unwrap_or_else(|| "默认分组".to_string());
+    let name = name.unwrap_or_else(|| "Default Group".to_string());
     let sort = sort.unwrap_or(1);
     conn.execute(
         "INSERT INTO groups (id, name, sort) VALUES (?1, ?2, ?3)",
         params![id, name, sort],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     Ok(id)
 }
 
-/// Return all groups ordered by `sort` then `created_at`.
 #[tauri::command]
 pub fn list_groups() -> Result<Vec<Group>, String> {
     with_db(|conn| {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, sort, created_at, updated_at FROM groups ORDER BY sort, created_at",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Group {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+        let mut stmt = conn
+            .prepare("SELECT id, name, sort, created_at, updated_at FROM groups ORDER BY sort, created_at")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Group {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut v = Vec::new();
-    for r in rows {
-        v.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(v)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     })
 }
 
-/// Associate a session with a group (logical join). Duplicate associations
-/// are ignored.
 #[tauri::command]
 pub fn link_session_group(session_id: String, group_id: String) -> Result<(), String> {
     with_db(|conn| {
@@ -984,7 +867,6 @@ pub fn link_session_group(session_id: String, group_id: String) -> Result<(), St
     })
 }
 
-/// Remove the association between a session and a group.
 #[tauri::command]
 pub fn unlink_session_group(session_id: String, group_id: String) -> Result<(), String> {
     with_db(|conn| {
@@ -997,87 +879,73 @@ pub fn unlink_session_group(session_id: String, group_id: String) -> Result<(), 
     })
 }
 
-/// List groups associated with a given session.
 #[tauri::command]
 pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String> {
     with_db(|conn| {
-    let mut stmt = conn
-        .prepare(
-            "SELECT g.id, g.name, g.sort, g.created_at, g.updated_at
-             FROM groups g
-             JOIN session_groups sg ON g.id = sg.group_id
-             WHERE sg.session_id = ?1
-             ORDER BY g.sort, g.created_at",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![session_id], |row| {
-            Ok(Group {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
+        let mut stmt = conn
+            .prepare(
+                "SELECT g.id, g.name, g.sort, g.created_at, g.updated_at
+                 FROM groups g
+                 JOIN session_groups sg ON g.id = sg.group_id
+                 WHERE sg.session_id = ?1
+                 ORDER BY g.sort, g.created_at",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(Group {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut v = Vec::new();
-    for r in rows {
-        v.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(v)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     })
 }
 
-/// Create a new tag and return its UUID.
 #[tauri::command]
 pub fn add_tag(
     name: Option<String>,
     color: Option<String>,
     sort: Option<i64>,
 ) -> Result<String, String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     let id = Uuid::new_v4().to_string();
     let name = name.unwrap_or_default();
     let sort = sort.unwrap_or(1);
     conn.execute(
         "INSERT INTO tags (id, name, color, sort) VALUES (?1, ?2, ?3, ?4)",
         params![id, name, color, sort],
-    )
-    .map_err(|e| e.to_string())?;
+    ).map_err(|e| e.to_string())?;
     Ok(id)
 }
 
-/// Return all tags ordered by `sort` then `created_at`.
 #[tauri::command]
 pub fn list_tags() -> Result<Vec<Tag>, String> {
     with_db(|conn| {
-    let mut stmt = conn
-        .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags ORDER BY sort, created_at")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(Tag {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                sort: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+        let mut stmt = conn
+            .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags ORDER BY sort, created_at")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    sort: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut v = Vec::new();
-    for r in rows {
-        v.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(v)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     })
 }
 
-/// Associate a session with a tag (logical join). Duplicate associations
-/// are ignored.
 #[tauri::command]
 pub fn link_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
     with_db(|conn| {
@@ -1090,7 +958,6 @@ pub fn link_session_tag(session_id: String, tag_id: String) -> Result<(), String
     })
 }
 
-/// Remove the association between a session and a tag.
 #[tauri::command]
 pub fn unlink_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
     with_db(|conn| {
@@ -1103,116 +970,142 @@ pub fn unlink_session_tag(session_id: String, tag_id: String) -> Result<(), Stri
     })
 }
 
-/// List tags associated with a given session.
 #[tauri::command]
 pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
     with_db(|conn| {
-    let mut stmt = conn
-        .prepare(
-            "SELECT t.id, t.name, t.color, t.sort, t.created_at, t.updated_at
-             FROM tags t
-             JOIN session_tags st ON t.id = st.tag_id
-             WHERE st.session_id = ?1
-             ORDER BY t.sort, t.created_at",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![session_id], |row| {
-            Ok(Tag {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                sort: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.name, t.color, t.sort, t.created_at, t.updated_at
+                 FROM tags t
+                 JOIN session_tags st ON t.id = st.tag_id
+                 WHERE st.session_id = ?1
+                 ORDER BY t.sort, t.created_at",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    sort: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
             })
-        })
-        .map_err(|e| e.to_string())?;
-    let mut v = Vec::new();
-    for r in rows {
-        v.push(r.map_err(|e| e.to_string())?);
-    }
-    Ok(v)
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     })
 }
 
 #[tauri::command]
 pub fn export_sessions(password: String) -> Result<String, String> {
-    let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
+    // Read all raw data under the lock, then release it before doing the
+    // expensive PBKDF2 key derivation (hundreds of ms per session).
+    struct RawData {
+        sessions: Vec<(Session, Option<String>)>,
+        group_map: std::collections::HashMap<String, Vec<String>>,
+        tag_map: std::collections::HashMap<String, Vec<String>>,
+        groups: Vec<Group>,
+        tags: Vec<Tag>,
+    }
 
-    // 1. Get all sessions
-    let mut stmt = conn.prepare("SELECT id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, last_connected_at, created_at, updated_at FROM sessions")
-        .map_err(|e| e.to_string())?;
+    let raw = with_db(|conn| {
+        let sql = format!(
+            "SELECT {}, encrypted_credentials FROM sessions",
+            SESSION_COLUMNS
+        );
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let session_rows = stmt
+            .query_map([], |row| {
+                let mut s = row_to_session(row)?;
+                // When using SELECT with extra column at end, indices shift:
+                // encrypted_credentials is column 11.
+                let _ = &mut s;
+                let encrypted: Option<String> = row.get(11)?;
+                Ok((s, encrypted))
+            })
+            .map_err(|e| e.to_string())?;
+        let sessions = session_rows
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        drop(stmt);
 
-    let session_rows = stmt
-        .query_map([], |row| {
-            let id: String = row.get(0)?;
-            let metadata = Session {
-                id: id.clone(),
-                addr: row.get(1)?,
-                port: row.get(2)?,
-                server_name: row.get(3)?,
-                username: row.get(4)?,
-                auth_type: row.get(5)?,
-                private_key_path: row.get(6)?,
-                is_favorite: row.get::<_, i64>(7)? != 0,
-                last_connected_at: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
-            };
-            let encrypted_creds: Option<String> = row.get(8)?;
-            Ok((metadata, encrypted_creds))
+        let mut group_map = std::collections::HashMap::new();
+        let mut g = conn
+            .prepare("SELECT session_id, group_id FROM session_groups").map_err(|e| e.to_string())?;
+        let rows = g.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        for r in rows {
+            let (sid, gid): (String, String) = r.map_err(|e| e.to_string())?;
+            group_map
+                .entry(sid)
+                .or_insert_with(Vec::new)
+                .push(gid);
+        }
+        drop(g);
+
+        let mut tag_map = std::collections::HashMap::new();
+        let mut t = conn
+            .prepare("SELECT session_id, tag_id FROM session_tags").map_err(|e| e.to_string())?;
+        let rows = t.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(|e| e.to_string())?;
+        for r in rows {
+            let (sid, tid): (String, String) = r.map_err(|e| e.to_string())?;
+            tag_map.entry(sid).or_insert_with(Vec::new).push(tid);
+        }
+        drop(t);
+
+        let groups = {
+            let mut s = conn.prepare(
+                "SELECT id, name, sort, created_at, updated_at FROM groups",
+            ).map_err(|e| e.to_string())?;
+            let rows = s.query_map([], |row| {
+                Ok(Group {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    sort: row.get(2)?,
+                    created_at: row.get(3)?,
+                    updated_at: row.get(4)?,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
+
+        let tags = {
+            let mut s = conn.prepare(
+                "SELECT id, name, color, sort, created_at, updated_at FROM tags",
+            ).map_err(|e| e.to_string())?;
+            let rows = s.query_map([], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    color: row.get(2)?,
+                    sort: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            }).map_err(|e| e.to_string())?;
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?
+        };
+
+        Ok(RawData {
+            sessions,
+            group_map,
+            tag_map,
+            groups,
+            tags,
         })
-        .map_err(|e| e.to_string())?;
+    })?;
 
-    let sessions: Vec<(Session, Option<String>)> = session_rows
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    // 2. Batch-fetch all group associations (single query)
-    let mut group_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    {
-        let mut g_stmt = conn
-            .prepare("SELECT session_id, group_id FROM session_groups")
-            .map_err(|e| e.to_string())?;
-        let rows = g_stmt
-            .query_map([], |row| {
-                let sid: String = row.get(0)?;
-                let gid: String = row.get(1)?;
-                Ok((sid, gid))
-            })
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            let (sid, gid) = row.map_err(|e| e.to_string())?;
-            group_map.entry(sid).or_default().push(gid);
-        }
-    }
-
-    // 3. Batch-fetch all tag associations (single query)
-    let mut tag_map: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    {
-        let mut t_stmt = conn
-            .prepare("SELECT session_id, tag_id FROM session_tags")
-            .map_err(|e| e.to_string())?;
-        let rows = t_stmt
-            .query_map([], |row| {
-                let sid: String = row.get(0)?;
-                let tid: String = row.get(1)?;
-                Ok((sid, tid))
-            })
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            let (sid, tid) = row.map_err(|e| e.to_string())?;
-            tag_map.entry(sid).or_default().push(tid);
-        }
-    }
-
-    // 4. Assemble sessions
-    let mut export_sessions = Vec::new();
-    for (metadata, encrypted_creds) in sessions {
+    let mut group_map = raw.group_map;
+    let mut tag_map = raw.tag_map;
+    let mut export_sessions = Vec::with_capacity(raw.sessions.len());
+    for (metadata, encrypted_creds) in raw.sessions {
         let re_encrypted = if let Some(creds) = encrypted_creds {
             let sensitive = crate::encryption::EncryptionManager::decrypt(&creds)?;
             Some(crate::encryption::EncryptionManager::encrypt_with_key(
@@ -1230,61 +1123,22 @@ pub fn export_sessions(password: String) -> Result<String, String> {
         });
     }
 
-    // 5. Get all groups
-    let mut g_stmt = conn
-        .prepare("SELECT id, name, sort, created_at, updated_at FROM groups")
-        .map_err(|e| e.to_string())?;
-    let groups = g_stmt
-        .query_map([], |row| {
-            Ok(Group {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                sort: row.get(2)?,
-                created_at: row.get(3)?,
-                updated_at: row.get(4)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<Group>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    // 6. Get all tags
-    let mut t_stmt = conn
-        .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags")
-        .map_err(|e| e.to_string())?;
-    let tags = t_stmt
-        .query_map([], |row| {
-            Ok(Tag {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                color: row.get(2)?,
-                sort: row.get(3)?,
-                created_at: row.get(4)?,
-                updated_at: row.get(5)?,
-            })
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<Tag>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let export_data = ExportData {
+    let data = ExportData {
         sessions: export_sessions,
-        groups,
-        tags,
+        groups: raw.groups,
+        tags: raw.tags,
     };
-
-    serde_json::to_string(&export_data).map_err(|e| e.to_string())
+    serde_json::to_string(&data).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub fn import_sessions(json_data: String, password: String) -> Result<(), String> {
-    let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     let export_data: ExportData = serde_json::from_str(&json_data).map_err(|e| e.to_string())?;
 
+    let mut guard = db_conn()?;
+    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
-    // 1. Import Groups
     for group in export_data.groups {
         tx.execute(
             "INSERT OR IGNORE INTO groups (id, name, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -1292,7 +1146,6 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
         ).map_err(|e| e.to_string())?;
     }
 
-    // 2. Import Tags
     for tag in export_data.tags {
         tx.execute(
             "INSERT OR IGNORE INTO tags (id, name, color, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1300,11 +1153,8 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
         ).map_err(|e| e.to_string())?;
     }
 
-    // 3. Import Sessions
     for session in export_data.sessions {
         let metadata = session.metadata;
-
-        // Decrypt from export password and re-encrypt with machine ID
         let re_encrypted = if let Some(creds) = session.encrypted_credentials {
             let sensitive =
                 crate::encryption::EncryptionManager::decrypt_with_key(&creds, &password)?;
@@ -1319,36 +1169,31 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
             params![
                 metadata.id, metadata.addr, metadata.port, metadata.server_name,
                 metadata.username, metadata.auth_type, metadata.private_key_path,
-                if metadata.is_favorite { 1 } else { 0 }, re_encrypted, metadata.created_at, metadata.updated_at
+                if metadata.is_favorite { 1 } else { 0 }, re_encrypted,
+                metadata.created_at, metadata.updated_at
             ],
         ).map_err(|e| e.to_string())?;
 
-        // Restore group associations
-        tx.execute(
+        let _ = tx.execute(
             "DELETE FROM session_groups WHERE session_id = ?1",
             params![metadata.id],
-        )
-        .ok();
+        );
         for gid in session.group_ids {
-            tx.execute(
+            let _ = tx.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
                 params![metadata.id, gid],
-            )
-            .ok();
+            );
         }
 
-        // Restore tag associations
-        tx.execute(
+        let _ = tx.execute(
             "DELETE FROM session_tags WHERE session_id = ?1",
             params![metadata.id],
-        )
-        .ok();
+        );
         for tid in session.tag_ids {
-            tx.execute(
+            let _ = tx.execute(
                 "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
                 params![metadata.id, tid],
-            )
-            .ok();
+            );
         }
     }
 

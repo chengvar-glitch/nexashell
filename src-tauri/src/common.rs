@@ -31,7 +31,7 @@ impl std::fmt::Display for SessionId {
 pub struct OutputChunk {
     pub seq: u64,
     pub output: String,
-    pub ts: u128,
+    pub ts: u64,
 }
 
 impl OutputChunk {
@@ -39,7 +39,7 @@ impl OutputChunk {
         let ts = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis();
+            .as_millis() as u64;
         Self { seq, output, ts }
     }
 }

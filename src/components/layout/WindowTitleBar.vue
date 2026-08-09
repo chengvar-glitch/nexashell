@@ -9,6 +9,9 @@ import SearchBox from '@/components/search/SearchBox.vue';
 import SearchDropdown from '@/components/search/SearchDropdown.vue';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('WINDOW_TITLE_BAR');
 
 /**
  * WindowTitleBar Component
@@ -48,7 +51,7 @@ const onSearchBoxFocus = () => {
         searchBoxElement.value = searchBoxRef.value.$el;
       }
       if (searchDropdownRef.value) {
-        (searchDropdownRef.value as any).updatePosition?.();
+        searchDropdownRef.value.updatePosition();
       }
     }
   });
@@ -57,9 +60,11 @@ const onSearchBoxFocus = () => {
 /**
  * Handles search box blur with a delay to allow interaction with dropdown items.
  */
+let blurTimer: ReturnType<typeof setTimeout> | null = null;
 const onSearchBoxBlur = () => {
   // Delay closing to allow user to click dropdown options
-  setTimeout(() => {
+  if (blurTimer) clearTimeout(blurTimer);
+  blurTimer = setTimeout(() => {
     const activeElement = document.activeElement;
     const dropdownElement = document.querySelector('.search-dropdown');
     // Prevent closing if focus moved into the dropdown itself
@@ -77,7 +82,7 @@ const onSearchBoxKeyDown = (event: KeyboardEvent) => {
   if (!showSearchDropdown.value || !searchDropdownRef.value) {
     return;
   }
-  (searchDropdownRef.value as any).handleKeyDown(event);
+  searchDropdownRef.value?.handleKeyDown(event);
 };
 
 /**
@@ -92,11 +97,11 @@ const onSearchBoxInput = () => {
 /**
  * Forwards KeyUp events to the SearchDropdown component.
  */
-const onSearchBoxKeyUp = (event: KeyboardEvent) => {
+const onSearchBoxKeyUp = () => {
   if (!showSearchDropdown.value || !searchDropdownRef.value) {
     return;
   }
-  (searchDropdownRef.value as any).handleKeyUp(event);
+  searchDropdownRef.value.handleKeyUp();
 };
 
 onMounted(async () => {
@@ -117,9 +122,10 @@ onMounted(async () => {
       isMaximized.value = await appWindow.isMaximized();
     });
 
-    (window as any).__unlistenResize = unlistenResize;
+    (window as unknown as { __unlistenResize?: unknown }).__unlistenResize =
+      unlistenResize;
   } catch (error) {
-    console.error('Failed to detect platform:', error);
+    logger.error('Failed to detect platform:', error);
     const isMac = isMacOSBrowser();
     const isWin = isWindowsBrowser();
     isMacOS_OS.value = isMac;
@@ -133,9 +139,12 @@ onMounted(async () => {
 
 onUnmounted(() => {
   eventBus.off(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
+  if (blurTimer) clearTimeout(blurTimer);
 
-  if ((window as any).__unlistenResize) {
-    (window as any).__unlistenResize();
+  const unlisten = (window as unknown as { __unlistenResize?: () => void })
+    .__unlistenResize;
+  if (unlisten) {
+    unlisten();
   }
 });
 
@@ -158,7 +167,7 @@ const handleClose = async () => {
   try {
     await appWindow.close();
   } catch (error) {
-    console.error('Failed to close window:', error);
+    logger.error('Failed to close window:', error);
   }
 };
 
@@ -169,7 +178,7 @@ const handleMinimize = async () => {
   try {
     await appWindow.minimize();
   } catch (error) {
-    console.error('Failed to minimize window:', error);
+    logger.error('Failed to minimize window:', error);
   }
 };
 
@@ -185,7 +194,7 @@ const handleMaximize = async () => {
       await appWindow.toggleMaximize();
     }
   } catch (error) {
-    console.error('Failed to maximize window:', error);
+    logger.error('Failed to maximize window:', error);
   }
 };
 </script>

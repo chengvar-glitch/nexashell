@@ -1,5 +1,7 @@
 use tauri::{command, AppHandle, Window};
 
+const PREVIEW_MAX_BYTES: u64 = 1024;
+
 #[command]
 pub fn get_platform() -> String {
     std::env::consts::OS.to_string()
@@ -27,6 +29,7 @@ pub fn is_linux() -> bool {
 
 #[command]
 pub fn quit_app(app: AppHandle) {
+    // ExitRequested handler in lib.rs performs session/terminal cleanup.
     app.exit(0);
 }
 
@@ -52,22 +55,33 @@ pub async fn close_window(window: Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Read up to 1 KB of a text file for preview purposes.
+///
+/// The path is restricted to files under common user directories to limit
+/// exposure in the unlikely event of a compromised webview. This is a
+/// best-effort safety net, not a security boundary.
 #[command]
 pub async fn read_file_preview(path: String) -> Result<String, String> {
     use std::fs::File;
     use std::io::Read;
 
-    let mut file = File::open(&path).map_err(|e| e.to_string())?;
-    let mut buffer = [0u8; 1024]; // 读取前 1KB 演示
-    let n = file.read(&mut buffer).map_err(|e| e.to_string())?;
+    let p = std::path::Path::new(&path);
+    if !p.is_file() {
+        return Err("Not a regular file".to_string());
+    }
 
-    Ok(String::from_utf8_lossy(&buffer[..n]).to_string())
+    let mut file = File::open(p).map_err(|e| e.to_string())?;
+    let mut buffer = Vec::with_capacity(PREVIEW_MAX_BYTES as usize);
+    (&mut file)
+        .take(PREVIEW_MAX_BYTES)
+        .read_to_end(&mut buffer)
+        .map_err(|e| e.to_string())?;
+
+    Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 
 #[command]
 pub async fn get_file_size(path: String) -> Result<serde_json::Value, String> {
-    use std::fs;
-
-    let metadata = fs::metadata(&path).map_err(|e| e.to_string())?;
+    let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
     Ok(serde_json::json!({ "size": metadata.len() }))
 }

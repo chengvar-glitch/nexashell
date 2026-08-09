@@ -57,6 +57,14 @@ const i18n = createI18n({
 
 export { i18n };
 
+/**
+ * Typed accessor for the current locale ref — avoids `(i18n as any).global`
+ * casts scattered across components.
+ */
+export function currentLocaleRef(): import('vue').Ref<string> {
+  return i18n.global.locale;
+}
+
 export async function setLocale(locale: string) {
   if (!AVAILABLE_LOCALES.includes(locale as 'en' | 'zh')) {
     locale = 'en';
@@ -65,7 +73,7 @@ export async function setLocale(locale: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (i18n as any).global.setLocaleMessage(locale, msg);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  i18n.global.locale.value = locale as any;
+  (i18n.global.locale as any).value = locale;
   localStorage.setItem('language', locale);
 }
 

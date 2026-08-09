@@ -31,9 +31,11 @@ class EventBus {
 
   /**
    * Listen to event
-   * Creates and stores wrapper to enable proper removal later
+   * Creates and stores wrapper to enable proper removal later.
+   * Returns an unsubscribe function so callers can clean up without keeping
+   * a reference to the handler.
    */
-  on(event: AppEventType, handler: EventHandler): void {
+  on(event: AppEventType, handler: EventHandler): () => void {
     // Create wrapped handler that extracts CustomEvent details
     const wrappedHandler: WrappedHandler = (e: Event) => {
       if (e instanceof CustomEvent) {
@@ -49,6 +51,8 @@ class EventBus {
 
     // Register the actual listener
     window.addEventListener(event, wrappedHandler);
+
+    return () => this.off(event, handler);
   }
 
   /**

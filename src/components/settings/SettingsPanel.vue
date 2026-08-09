@@ -1,12 +1,17 @@
 <template>
-  <Teleport v-if="useTeleport" to="body">
+  <component :is="useTeleport ? Teleport : 'div'" v-bind="useTeleport ? { to: 'body' } : {}">
     <Transition name="settings-fade">
       <div
         v-if="visible"
-        class="settings-overlay flex-center"
+        class="settings-overlay"
+        :class="{ 'modal-system-overlay': !useTeleport }"
         @click="handleClose"
       >
-        <div class="settings-panel panel" @click.stop>
+        <div
+          class="settings-panel panel"
+          :class="{ 'modal-system-panel': !useTeleport }"
+          @click.stop
+        >
           <div class="settings-header border-bottom draggable">
             <div class="macos-controls no-drag">
               <button
@@ -36,7 +41,10 @@
               </nav>
             </div>
 
-            <div ref="contentRef" class="settings-content">
+            <div
+              :ref="setContentRef"
+              class="settings-content"
+            >
               <div
                 :ref="el => setSectionRef(el, 'appearance')"
                 class="content-section"
@@ -193,6 +201,7 @@
                         <a
                           href="https://github.com/chengvar-glitch/nexashell"
                           target="_blank"
+                          rel="noopener noreferrer"
                           class="meta-link"
                         >
                           github.com/chengvar-glitch/nexashell
@@ -207,213 +216,21 @@
         </div>
       </div>
     </Transition>
-  </Teleport>
-  <!-- Render without teleport when useTeleport is false -->
-  <Transition v-else name="settings-fade">
-    <div v-if="visible" class="modal-system-overlay" @click="handleClose">
-      <div class="settings-panel modal-system-panel" @click.stop>
-        <div class="settings-header border-bottom draggable">
-          <div class="macos-controls no-drag">
-            <button
-              class="control-btn close"
-              aria-label="Close"
-              @click="handleClose"
-            />
-          </div>
-          <h2 class="settings-title">
-            {{ $t('settings.title') }}
-          </h2>
-        </div>
-
-        <div class="settings-body">
-          <div class="settings-sidebar border-right">
-            <nav class="settings-menu">
-              <button
-                v-for="item in menuItems"
-                :key="item.key"
-                class="menu-item"
-                :class="{ active: activeMenu === item.key }"
-                @click="handleMenuClick(item.key)"
-              >
-                <component :is="item.icon" :size="16" class="menu-icon" />
-                <span class="menu-label">{{ item.label }}</span>
-              </button>
-            </nav>
-          </div>
-
-          <div ref="contentRefFallback" class="settings-content">
-            <div
-              :ref="el => setSectionRef(el, 'appearance')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.appearance') }}
-              </h3>
-              <div class="setting-item">
-                <label class="setting-label">{{ $t('settings.theme') }}</label>
-                <select
-                  class="setting-select modal-input"
-                  :value="selectedTheme"
-                  @change="handleThemeChange"
-                >
-                  <option value="auto">{{ $t('settings.themeAuto') }}</option>
-                  <option value="light">{{ $t('settings.themeLight') }}</option>
-                  <option value="dark">{{ $t('settings.themeDark') }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div
-              :ref="el => setSectionRef(el, 'language')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.language') }}
-              </h3>
-              <div class="setting-item">
-                <label class="setting-label">{{
-                  $t('settings.language')
-                }}</label>
-                <select
-                  class="setting-select modal-input"
-                  :value="locale"
-                  @change="handleLanguageChange"
-                >
-                  <option
-                    v-for="lang in languages"
-                    :key="lang.value"
-                    :value="lang.value"
-                  >
-                    {{ lang.label }}
-                  </option>
-                </select>
-              </div>
-            </div>
-
-            <div
-              :ref="el => setSectionRef(el, 'terminal')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.terminal') }}
-              </h3>
-              <div class="setting-item">
-                <label class="setting-label">{{
-                  $t('settings.cursorStyle')
-                }}</label>
-                <select
-                  class="setting-select modal-input"
-                  :value="settingsStore.terminal.cursorStyle"
-                  @change="handleCursorStyleChange"
-                >
-                  <option value="block">
-                    {{ $t('settings.cursorBlock') }}
-                  </option>
-                  <option value="underline">
-                    {{ $t('settings.cursorUnderline') }}
-                  </option>
-                  <option value="bar">{{ $t('settings.cursorBar') }}</option>
-                </select>
-              </div>
-            </div>
-
-            <div
-              :ref="el => setSectionRef(el, 'shortcuts')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.shortcuts') }}
-              </h3>
-              <div
-                v-for="shortcut in shortcutList"
-                :key="shortcut.label"
-                class="setting-item"
-              >
-                <label class="setting-label">{{ shortcut.label }}</label>
-                <kbd class="shortcut-key">{{ shortcut.value }}</kbd>
-              </div>
-            </div>
-
-            <div
-              :ref="el => setSectionRef(el, 'terminalShortcuts')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.terminalShortcuts') }}
-              </h3>
-              <div
-                v-for="shortcut in terminalShortcutList"
-                :key="shortcut.label"
-                class="setting-item"
-              >
-                <label class="setting-label">{{ shortcut.label }}</label>
-                <kbd class="shortcut-key">{{ shortcut.value }}</kbd>
-              </div>
-            </div>
-
-            <div
-              :ref="el => setSectionRef(el, 'about')"
-              class="content-section"
-            >
-              <h3 class="section-title">
-                {{ $t('settings.about') }}
-              </h3>
-              <div class="about-info">
-                <div class="about-header">
-                  <div class="about-logo">
-                    <img
-                      src="/welcome-image.png"
-                      alt="NexaShell Logo"
-                      class="logo-image"
-                    />
-                  </div>
-                  <div class="about-title-group">
-                    <h4 class="about-app-name">NexaShell</h4>
-                    <p class="about-version">
-                      {{ $t('settings.version') }} {{ appVersion }}
-                    </p>
-                  </div>
-                </div>
-
-                <div class="about-content">
-                  <p class="about-desc">
-                    {{ $t('settings.description') }}
-                  </p>
-
-                  <div class="about-meta">
-                    <div class="meta-item">
-                      <span class="meta-label">{{
-                        $t('settings.license')
-                      }}</span>
-                      <span class="meta-value">MIT</span>
-                    </div>
-                    <div class="meta-item">
-                      <span class="meta-label">{{
-                        $t('settings.github')
-                      }}</span>
-                      <a
-                        href="https://github.com/chengvar-glitch/nexashell"
-                        target="_blank"
-                        class="meta-link"
-                      >
-                        github.com/chengvar-glitch/nexashell
-                      </a>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </Transition>
+  </component>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, onUnmounted, watch, nextTick } from 'vue';
+import {
+  ref,
+  onMounted,
+  computed,
+  onUnmounted,
+  watch,
+  nextTick,
+  Teleport,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
-import { i18n, setLocale } from '@/core/i18n';
+import { setLocale, currentLocaleRef } from '@/core/i18n';
 import { getVersion } from '@tauri-apps/api/app';
 import {
   Palette,
@@ -426,6 +243,9 @@ import {
 import { themeManager, type ThemeMode } from '@/core/utils/theme-manager';
 import { useSettingsStore, type CursorStyle } from '@/features/settings';
 import { isMacOSBrowser } from '@/core/utils/platform/platform-detection';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('SETTINGS_PANEL');
 
 interface Props {
   visible?: boolean;
@@ -433,7 +253,7 @@ interface Props {
   initialSection?: string;
 }
 
-const locale = (i18n as any).global.locale as import('vue').Ref<string>;
+const locale = currentLocaleRef();
 const { t } = useI18n({ useScope: 'global' });
 const settingsStore = useSettingsStore();
 
@@ -453,9 +273,17 @@ const appVersion = ref('0.1.0');
 
 const contentRef = ref<HTMLElement | null>(null);
 const contentRefFallback = ref<HTMLElement | null>(null);
+const setContentRef = (el: unknown) => {
+  if (props.useTeleport) {
+    contentRef.value = (el as HTMLElement) || null;
+  } else {
+    contentRefFallback.value = (el as HTMLElement) || null;
+  }
+};
 const sectionRefs = ref<Record<string, HTMLElement>>({});
 let observer: IntersectionObserver | null = null;
 let isManualScrolling = false;
+let scrollResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 const setSectionRef = (el: unknown, key: string) => {
   if (el) sectionRefs.value[key] = el as HTMLElement;
@@ -512,7 +340,8 @@ const handleMenuClick = (key: string) => {
   if (target) {
     target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     // Reset manual scroll flag after animation
-    setTimeout(() => {
+    if (scrollResetTimer) clearTimeout(scrollResetTimer);
+    scrollResetTimer = setTimeout(() => {
       isManualScrolling = false;
     }, 1000);
   }
@@ -571,7 +400,8 @@ watch(
 
       initObserver();
       // Short delay to allow initial intersection events to pass
-      setTimeout(() => {
+      if (scrollResetTimer) clearTimeout(scrollResetTimer);
+      scrollResetTimer = setTimeout(() => {
         isManualScrolling = false;
       }, 150);
     }
@@ -604,12 +434,13 @@ onMounted(async () => {
   try {
     appVersion.value = await getVersion();
   } catch (err) {
-    console.warn('Failed to get app version:', err);
+    logger.warn('Failed to get app version:', err);
   }
 });
 
 onUnmounted(() => {
   if (observer) observer.disconnect();
+  if (scrollResetTimer) clearTimeout(scrollResetTimer);
 });
 </script>
 

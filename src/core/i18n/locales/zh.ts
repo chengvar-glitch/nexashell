@@ -128,6 +128,14 @@ export default {
     hidePassword: '隐藏密码',
     showKeyPassphrase: '显示私钥口令',
     hideKeyPassphrase: '隐藏私钥口令',
+    dropFilesHere: '拖放文件到此上传',
+    targetDirectory: '目标目录:',
+    autoDetectedPath: '(自动检测路径)',
+    noPathDetected: '未检测到路径 - 将使用主目录',
+    absolutePath: '绝对路径',
+    relativePath: '相对路径 - 将上传到主目录 + 路径',
+    editPathBeforeDrop: '如需可先编辑上方路径再拖放文件',
+    searchPlaceholder: '搜索...',
   },
   dashboard: {
     statusCenter: '状态中心',
@@ -174,7 +182,7 @@ export default {
     splitVertical: '垂直拆分',
   },
   welcome: {
-    title: '歡迎使用 NexaShell',
+    title: '欢迎使用 NexaShell',
     subtitle:
       '一个为下一代开发人员和运营专业人员设计的现代跨平台终端模拟器。快速、美观，为提高生产力而构建。',
     language: '语言',

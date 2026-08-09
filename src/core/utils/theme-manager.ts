@@ -28,16 +28,16 @@ class ThemeManager {
       if (saved && ['auto', 'light', 'dark'].includes(saved)) {
         this.currentTheme = saved as ThemeMode;
       }
-    } catch (error) {
-      console.error('Failed to load theme:', error);
+    } catch {
+      // Errors are non-fatal: fall back to defaults silently
     }
   }
 
   private saveTheme(theme: ThemeMode) {
     try {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch (error) {
-      console.error('Failed to save theme:', error);
+    } catch {
+      // Errors are non-fatal: theme just won't persist
     }
   }
 

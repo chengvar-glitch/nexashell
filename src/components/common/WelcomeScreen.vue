@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { themeManager } from '@/core/utils/theme-manager';
-import { i18n, setLocale, AVAILABLE_LOCALES } from '@/core/i18n';
+import { setLocale, AVAILABLE_LOCALES, currentLocaleRef } from '@/core/i18n';
 
 const emit = defineEmits(['complete']);
 
-const locale = (i18n as any).global.locale as import('vue').Ref<string>;
+const locale = currentLocaleRef();
 const availableLocales = AVAILABLE_LOCALES;
 
 const showContent = ref(true);
@@ -40,6 +40,8 @@ const detectLanguage = async () => {
   return 'en';
 };
 
+let showOptionsTimer: ReturnType<typeof setTimeout> | null = null;
+
 onMounted(async () => {
   // 1. Initial logo centered (handled by CSS)
 
@@ -48,9 +50,13 @@ onMounted(async () => {
   selectedLanguage.value = detected;
 
   // 3. After 1.2s, animate logo to left and show options
-  setTimeout(() => {
+  showOptionsTimer = setTimeout(() => {
     showOptions.value = true;
   }, 1200);
+});
+
+onUnmounted(() => {
+  if (showOptionsTimer) clearTimeout(showOptionsTimer);
 });
 
 const handleThemeSelect = (theme: 'auto' | 'light' | 'dark') => {

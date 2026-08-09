@@ -43,14 +43,13 @@ export async function getArch(): Promise<string> {
  * Detect if it's a macOS system (browser environment)
  */
 export function isMacOSBrowser(): boolean {
-  if (typeof window !== 'undefined') {
-    // Check if in Tauri environment
-    if ((window as any).__TAURI__) {
-      try {
-        return (window as any).__TAURI__.os.platform() === 'darwin';
-      } catch {
-        return navigator.userAgent.includes('Mac');
-      }
+  const tauri = (window as unknown as { __TAURI__?: { os?: { platform(): string } } })
+    .__TAURI__;
+  if (typeof window !== 'undefined' && tauri?.os) {
+    try {
+      return tauri.os.platform() === 'darwin';
+    } catch {
+      return navigator.userAgent.includes('Mac');
     }
   }
   return (
@@ -62,14 +61,13 @@ export function isMacOSBrowser(): boolean {
  * Detect if it's a Windows system (browser environment)
  */
 export function isWindowsBrowser(): boolean {
-  if (typeof window !== 'undefined') {
-    // Check if in Tauri environment
-    if ((window as any).__TAURI__) {
-      try {
-        return (window as any).__TAURI__.os.platform() === 'windows';
-      } catch {
-        return navigator.userAgent.includes('Windows');
-      }
+  const tauri = (window as unknown as { __TAURI__?: { os?: { platform(): string } } })
+    .__TAURI__;
+  if (typeof window !== 'undefined' && tauri?.os) {
+    try {
+      return tauri.os.platform() === 'windows';
+    } catch {
+      return navigator.userAgent.includes('Windows');
     }
   }
   return (

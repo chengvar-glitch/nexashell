@@ -36,7 +36,7 @@
                 @mouseenter="activeIndex = index"
               >
                 <div class="item-icon">
-                  <component :is="item.icon" :size="14" />
+                  <component :is="item.icon" v-if="item.icon" :size="14" />
                 </div>
                 <div class="item-content">
                   <div class="item-title">
@@ -72,7 +72,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, type Component } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Settings,
@@ -90,16 +90,22 @@ import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
+import { createLogger } from '@/core/utils/logger';
 
-interface SearchItem {
+const logger = createLogger('SEARCH_DROPDOWN');
+
+/** Result row in the filtered dropdown (may be a section header). */
+type SearchResultItem = {
   id: string;
   title: string;
-  description: string;
-  icon: any;
+  description?: string;
+  icon?: Component;
   shortcut?: string;
-  category: string;
-  action: () => void;
-}
+  category?: string;
+  action?: () => void;
+  isHeader?: boolean;
+  isRecent?: boolean;
+};
 
 const props = defineProps<{
   visible: boolean;
@@ -131,7 +137,7 @@ const fetchSavedSessions = async () => {
     const sessions = await sessionApi.listSessions();
     savedSessions.value = sessions;
   } catch (error) {
-    console.error('Failed to fetch saved sessions for search:', error);
+    logger.error('Failed to fetch saved sessions for search:', error);
   }
 };
 
@@ -186,7 +192,7 @@ const handleResize = () => {
   }
 };
 
-const searchItems = computed(() => [
+const searchItems = computed<SearchResultItem[]>(() => [
   {
     id: 'settings',
     title: t('settings.openSettings'),
@@ -262,7 +268,7 @@ const searchItems = computed(() => [
 
 const filteredItems = computed(() => {
   const query = searchQuery.value.toLowerCase();
-  const results: any[] = [];
+  const results: SearchResultItem[] = [];
 
   // 1. Process Sessions (Recent or Filtered)
   const sessions = [...savedSessions.value]
@@ -292,7 +298,7 @@ const filteredItems = computed(() => {
       description: `${s.username}@${s.addr}`,
       icon: Server,
       category: 'session',
-      isRecent: !query && s.updated_at,
+      isRecent: !query && !!s.updated_at,
       action: () => eventBus.emit(APP_EVENTS.CONNECT_SESSION, s),
     }));
 
@@ -304,8 +310,8 @@ const filteredItems = computed(() => {
     item =>
       !query ||
       item.title.toLowerCase().includes(query) ||
-      item.description.toLowerCase().includes(query) ||
-      item.category.toLowerCase().includes(query)
+      (item.description || '').toLowerCase().includes(query) ||
+      (item.category || '').toLowerCase().includes(query)
   );
 
   if (commands.length > 0) {
@@ -332,7 +338,7 @@ const filteredItems = computed(() => {
   if (contentItems.length > 10) {
     // Re-calculating to strictly limit to 10 content items
     // If we have sessions, they take priority
-    const finalResults: any[] = [];
+    const finalResults: SearchResultItem[] = [];
     let contentCount = 0;
 
     for (const item of results) {
@@ -419,7 +425,7 @@ const scrollToActiveItem = () => {
   });
 };
 
-const selectItem = (item: SearchItem) => {
+const selectItem = (item: SearchResultItem) => {
   if (item.action) {
     item.action();
   }

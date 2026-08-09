@@ -24,6 +24,9 @@ import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
+import { createLogger } from '@/core/utils/logger';
+
+const logger = createLogger('APP_TABS');
 
 // Inject tab management functionality
 const tabManagement = inject(TAB_MANAGEMENT_KEY);
@@ -36,7 +39,7 @@ const activeTabId = tabManagement.activeTabId;
 // Inject SSH form control method
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 if (!openSSHForm) {
-  console.warn('[AppTabs] openSSHForm not provided by parent component');
+  logger.warn('openSSHForm not provided by parent component');
 }
 
 const { t } = useI18n({ useScope: 'global' });

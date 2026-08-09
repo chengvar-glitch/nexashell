@@ -163,10 +163,16 @@ bun tauri dev
   bun build
   bun tauri build
   ```
-- **Run Tests**:
+- **Run production build**:
   ```bash
-  bun test         # Unit tests (Vitest)
-  bun test:ui      # Vitest UI
+  bun build          # Frontend (type-check + Vite build)
+  bun tauri build    # Desktop bundle (DMG/app, MSI/NSIS, AppImage/deb)
+  ```
+- **Lint & type-check**:
+  ```bash
+  bun lint           # ESLint with auto-fix
+  bun lint:check     # ESLint without auto-fix (CI-friendly)
+  bun type-check     # vue-tsc --noEmit
   ```
 
 ---

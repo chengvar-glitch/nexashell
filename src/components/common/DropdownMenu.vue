@@ -8,7 +8,7 @@ import {
   CSSProperties,
   nextTick,
 } from 'vue';
-import { ChevronRight } from 'lucide-vue-next';
+import { ChevronRight, type LucideIcon } from 'lucide-vue-next';
 
 interface MenuItem {
   key: string;
@@ -18,7 +18,7 @@ interface MenuItem {
   disabled?: boolean;
   divider?: boolean;
   shortcut?: string;
-  icon?: any;
+  icon?: LucideIcon;
   children?: MenuItem[];
 }
 
@@ -145,12 +145,19 @@ const handleClickOutside = (event: MouseEvent) => {
   }
 };
 
+// Module-level hide timeout (not stored on window to avoid global pollution)
+let hideTimeout: ReturnType<typeof setTimeout> | null = null;
+
 const handleMouseEnterMenu = () => {
-  clearTimeout((window as any).dropdownHideTimeout);
+  if (hideTimeout) {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
+  }
 };
 
 const handleMouseLeaveMenu = () => {
-  (window as any).dropdownHideTimeout = setTimeout(() => {
+  if (hideTimeout) clearTimeout(hideTimeout);
+  hideTimeout = setTimeout(() => {
     emit('update:visible', false);
     activeSubMenu.value = null;
   }, 500);
@@ -170,8 +177,9 @@ const handleVisibleChange = (newVal: boolean) => {
     document.removeEventListener('click', handleClickOutside);
     activeSubMenu.value = null;
     isPositioned.value = false;
-    if ((window as any).dropdownHideTimeout) {
-      clearTimeout((window as any).dropdownHideTimeout);
+    if (hideTimeout) {
+      clearTimeout(hideTimeout);
+      hideTimeout = null;
     }
   }
 };
@@ -192,8 +200,9 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
-  if ((window as any).dropdownHideTimeout) {
-    clearTimeout((window as any).dropdownHideTimeout);
+  if (hideTimeout) {
+    clearTimeout(hideTimeout);
+    hideTimeout = null;
   }
 });
 </script>

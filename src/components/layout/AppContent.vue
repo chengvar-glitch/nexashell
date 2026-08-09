@@ -48,12 +48,12 @@ const currentActiveTab = computed(() => {
 });
 
 // Handle createTab event from child components
-const handleCreateTab = (tab: any) => {
+const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   emit('createTab', tab);
 };
 
-// Handle connect event from child components
-const handleConnect = (data: any) => {
+// Handle connect event from child components (SSH form data payload)
+const handleConnect = (data: Record<string, unknown>) => {
   emit('connect', data);
 };
 </script>

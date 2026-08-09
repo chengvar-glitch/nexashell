@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
-// i18n not used in this file for progress messages (messages are plain English)
 import { v4 as uuidv4 } from 'uuid';
 import { invoke } from '@tauri-apps/api/core';
+import { useI18n } from 'vue-i18n';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
@@ -16,7 +16,7 @@ import {
 import { themeManager } from '@/core/utils/theme-manager';
 import { useModal, useTabManagement } from '@/composables';
 import { useSessionStore } from '@/features/session';
-import type { SavedSession } from '@/features/session/types';
+import type { SavedSession, SavedSessionDisplay } from '@/features/session/types';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
@@ -45,12 +45,16 @@ import { TAB_TYPE } from '@/features/tabs';
 import { isWindows } from '@/core/utils/platform/platform-detection';
 
 const logger = createLogger('APP');
+const { t } = useI18n();
 
 // Platform state
 const isWindowsState = ref(false);
 
 // Global contextmenu handler reference so we can remove it on unmount
 let __globalContextMenuHandler: ((e: MouseEvent) => void) | null = null;
+
+// EventBus handlers registered in onMounted, removed in onBeforeUnmount
+const __eventOffFns: Array<() => void> = [];
 
 // Welcome screen state
 const showWelcome = ref(localStorage.getItem('hasLaunched') !== 'true');
@@ -76,6 +80,12 @@ const savedSSHFormData = ref<SSHConnectionFormData | null>(null);
 const showConnectionProgress = ref(false);
 const connectionTime = ref(0);
 let connectionTimerInterval: ReturnType<typeof setInterval> | null = null;
+const pendingTimeouts: ReturnType<typeof setTimeout>[] = [];
+
+const clearPendingTimeouts = () => {
+  pendingTimeouts.forEach(t => clearTimeout(t));
+  pendingTimeouts.length = 0;
+};
 const connectionProgress = ref(0);
 const connectionCurrentStep = ref(0);
 const connectionMessage = ref('');
@@ -129,122 +139,141 @@ onMounted(async () => {
   shortcutManager.register(PredefinedShortcuts.SPLIT_VERTICAL);
   shortcutManager.register(PredefinedShortcuts.SPLIT_HORIZONTAL);
 
-  eventBus.on(APP_EVENTS.OPEN_SETTINGS, (args: unknown) => {
-    const payload = args as { section?: string } | undefined;
-    openSettings(payload?.section);
-  });
+  // All eventBus handlers are collected so they can be removed on unmount,
+  // preventing leaks and duplicate handlers during HMR.
+  const offFns = __eventOffFns;
 
-  eventBus.on(APP_EVENTS.CLOSE_DIALOG, () => {
-    closeSettings();
-    closeSSHForm();
-  });
+  offFns.push(
+    eventBus.on(APP_EVENTS.OPEN_SETTINGS, (args: unknown) => {
+      const payload = args as { section?: string } | undefined;
+      openSettings(payload?.section);
+    })
+  );
 
-  eventBus.on(APP_EVENTS.SPLIT_VERTICAL, () => {
-    tabManagement.splitActivePane('vertical');
-  });
+  offFns.push(
+    eventBus.on(APP_EVENTS.CLOSE_DIALOG, () => {
+      closeSettings();
+      closeSSHForm();
+    })
+  );
 
-  eventBus.on(APP_EVENTS.SPLIT_HORIZONTAL, () => {
-    tabManagement.splitActivePane('horizontal');
-  });
+  offFns.push(
+    eventBus.on(APP_EVENTS.SPLIT_VERTICAL, () => {
+      tabManagement.splitActivePane('vertical');
+    })
+  );
 
-  eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
-    openSSHForm();
-  });
+  offFns.push(
+    eventBus.on(APP_EVENTS.SPLIT_HORIZONTAL, () => {
+      tabManagement.splitActivePane('horizontal');
+    })
+  );
 
-  eventBus.on(APP_EVENTS.EDIT_SESSION, async (session: any) => {
-    logger.debug('Handling EDIT_SESSION event', session?.id);
-    if (!session) {
-      logger.error('EDIT_SESSION session is null');
-      return;
-    }
+  offFns.push(
+    eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
+      openSSHForm();
+    })
+  );
 
-    // 1. Initial form state with known info (no password/passphrase yet)
-    sshFormMode.value = 'edit';
-    editingSessionId.value = session.id;
-
-    const initialFormData: SSHConnectionFormData = {
-      id: session.id,
-      server_name: session.server_name || '',
-      addr: session.addr || '',
-      port: session.port || 22,
-      username: session.username || '',
-      password: '',
-      private_key_path: session.private_key_path || '',
-      key_passphrase: '',
-      save_session: true,
-      groups: session.group_ids ? [...session.group_ids] : [],
-      tags: session.tag_ids ? [...session.tag_ids] : [],
-    };
-
-    savedSSHFormData.value = initialFormData;
-    sshErrorMessage.value = null;
-    isConnecting.value = false;
-
-    // 2. Open form immediately to respond to user click
-    logger.debug('Calling openSSHForm()');
-    openSSHForm();
-
-    // 3. Fetch credentials in background
-    try {
-      logger.debug('Fetching credentials in background for', session.id);
-      const credentials = await invoke<[string, string | null, string | null]>(
-        'get_session_credentials',
-        { sessionId: session.id }
-      );
-
-      // 4. If form is still open and we're editing the same session, update sensitive fields
-      if (showSSHForm.value && editingSessionId.value === session.id) {
-        logger.debug('Updating sensitive fields in background');
-        savedSSHFormData.value = {
-          ...initialFormData,
-          password: credentials[1] || '',
-          key_passphrase: credentials[2] || '',
-        };
+  offFns.push(
+    eventBus.on(APP_EVENTS.EDIT_SESSION, (async (session: unknown) => {
+      const payload = session as SavedSessionDisplay | null;
+      logger.debug('Handling EDIT_SESSION event', payload?.id);
+      if (!payload) {
+        logger.error('EDIT_SESSION session is null');
+        return;
       }
-    } catch (error) {
-      logger.error('Failed to fetch credentials in background', error);
-    }
-  });
 
-  eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (args: unknown) => {
-    const session = args as SavedSession;
-    if (!session) return;
+      // 1. Initial form state with known info (no password/passphrase yet)
+      sshFormMode.value = 'edit';
+      editingSessionId.value = payload.id;
 
-    try {
-      sshFormMode.value = 'create';
-      editingSessionId.value = session.id;
-
-      const credentials = await invoke<[string, string | null, string | null]>(
-        'get_session_credentials',
-        { sessionId: session.id }
-      ).catch(() => [session.id, null, null]);
-
-      const connectData: SSHConnectionFormData = {
-        id: session.id,
-        server_name: session.server_name,
-        addr: session.addr,
-        port: session.port,
-        username: session.username,
-        password: credentials[1] || '',
-        private_key_path: session.private_key_path || '',
-        key_passphrase: credentials[2] || '',
-        save_session: false,
-        groups: [],
-        tags: [],
+      const initialFormData: SSHConnectionFormData = {
+        id: payload.id,
+        server_name: payload.server_name || '',
+        addr: payload.addr || '',
+        port: payload.port || 22,
+        username: payload.username || '',
+        password: '',
+        private_key_path: payload.private_key_path || '',
+        key_passphrase: '',
+        save_session: true,
+        groups: payload.group_ids ? [...payload.group_ids] : [],
+        tags: payload.tag_ids ? [...payload.tag_ids] : [],
       };
 
-      await invoke('update_session_timestamp', { id: session.id }).catch(err =>
-        logger.error('Failed to update timestamp', err)
-      );
-      eventBus.emit(APP_EVENTS.SESSION_SAVED);
+      savedSSHFormData.value = initialFormData;
+      sshErrorMessage.value = null;
+      isConnecting.value = false;
 
-      savedSSHFormData.value = connectData;
+      // 2. Open form immediately to respond to user click
+      logger.debug('Calling openSSHForm()');
       openSSHForm();
-      handleSSHConnect(connectData);
-    } catch (error) {
-      logger.error('Failed to connect to saved session', error);
-    }
-  }) as (...args: unknown[]) => void);
+
+      // 3. Fetch credentials in background
+      try {
+        logger.debug('Fetching credentials in background for', payload.id);
+        const credentials = await invoke<[string, string | null, string | null]>(
+          'get_session_credentials',
+          { sessionId: payload.id }
+        );
+
+        // 4. If form is still open and we're editing the same session, update sensitive fields
+        if (showSSHForm.value && editingSessionId.value === payload.id) {
+          logger.debug('Updating sensitive fields in background');
+          savedSSHFormData.value = {
+            ...initialFormData,
+            password: credentials[1] || '',
+            key_passphrase: credentials[2] || '',
+          };
+        }
+      } catch (error) {
+        logger.error('Failed to fetch credentials in background', error);
+      }
+    }) as (...args: unknown[]) => void)
+  );
+
+  offFns.push(
+    eventBus.on(APP_EVENTS.CONNECT_SESSION, (async (args: unknown) => {
+      const session = args as SavedSession;
+      if (!session) return;
+
+      try {
+        sshFormMode.value = 'create';
+        editingSessionId.value = session.id;
+
+        const credentials = await invoke<[string, string | null, string | null]>(
+          'get_session_credentials',
+          { sessionId: session.id }
+        ).catch(() => [session.id, null, null]);
+
+        const connectData: SSHConnectionFormData = {
+          id: session.id,
+          server_name: session.server_name,
+          addr: session.addr,
+          port: session.port,
+          username: session.username,
+          password: credentials[1] || '',
+          private_key_path: session.private_key_path || '',
+          key_passphrase: credentials[2] || '',
+          save_session: false,
+          groups: [],
+          tags: [],
+        };
+
+        await invoke('update_session_timestamp', { id: session.id }).catch(err =>
+          logger.error('Failed to update timestamp', err)
+        );
+        eventBus.emit(APP_EVENTS.SESSION_SAVED);
+
+        savedSSHFormData.value = connectData;
+        openSSHForm();
+        handleSSHConnect(connectData);
+      } catch (error) {
+        logger.error('Failed to connect to saved session', error);
+      }
+    }) as (...args: unknown[]) => void)
+  );
 
   // Global right-click handling: prevent browser default menu in production
   // but only when clicking on empty areas (not on interactive components)
@@ -289,6 +318,10 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   shortcutManager.unregisterAll();
+
+  // Remove all eventBus handlers registered in onMounted
+  __eventOffFns.forEach(fn => fn());
+  __eventOffFns.length = 0;
 
   // Clean up all sessions using Pinia store
   sessionStore.cleanupAllSessions().catch(error => {
@@ -363,7 +396,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
   connectionProgress.value = 0;
   connectionCurrentStep.value = 0;
-  connectionMessage.value = 'Establishing SSH connection';
+  connectionMessage.value = t('connection.establishingSSH');
   connectionStatus.value = 'connecting';
   connectionErrorMessage.value = '';
   connectionErrorTitle.value = '';
@@ -374,11 +407,13 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   // 2. Initiate backend connection via Pinia store
   try {
     // Simulate step transitions for better UX
-    setTimeout(() => {
-      connectionCurrentStep.value = 1;
-      connectionProgress.value = 30;
-      connectionMessage.value = 'Authenticating user';
-    }, 800);
+    pendingTimeouts.push(
+      setTimeout(() => {
+        connectionCurrentStep.value = 1;
+        connectionProgress.value = 30;
+        connectionMessage.value = t('connection.authenticating');
+      }, 800)
+    );
 
     await sessionStore.createSSHSession(
       sessionId,
@@ -454,62 +489,70 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
     connectionCurrentStep.value = 2;
     connectionProgress.value = 70;
-    connectionMessage.value = 'Initializing terminal';
+    connectionMessage.value = t('connection.initializingTerminal');
 
     // Final step completion
     connectionProgress.value = 100;
     connectionCurrentStep.value = 3;
     connectionStatus.value = 'success';
-    connectionMessage.value = 'Connection established successfully';
+    connectionMessage.value = t('connection.connectionEstablished');
 
     // Keep progress bar visible for a brief moment before closing and opening the tab
-    setTimeout(() => {
-      // Close the SSH form entirely (including progress bar)
-      closeSSHForm();
-      showConnectionProgress.value = false;
-
-      // Reset form mode and internal state
-      sshFormMode.value = 'create';
-      editingSessionId.value = null;
-
-      // 3. Create and add a new tab AFTER the form is closed
-      // Use a small delay to allow the modal to disappear visually
+    pendingTimeouts.push(
       setTimeout(() => {
-        const tabId = uuidv4();
-        tabManagement.addTab({
-          id: tabId,
-          label: data.server_name || data.addr,
-          type: TAB_TYPE.SSH,
-          closable: true,
-          panes: [{ id: sessionId, type: 'ssh' }],
-        });
-        tabManagement.setActivePane(sessionId);
-      }, 100);
-    }, 500);
+        // Close the SSH form entirely (including progress bar)
+        closeSSHForm();
+        showConnectionProgress.value = false;
+
+        // Reset form mode and internal state
+        sshFormMode.value = 'create';
+        editingSessionId.value = null;
+
+        // 3. Create and add a new tab AFTER the form is closed
+        // Use a small delay to allow the modal to disappear visually
+        pendingTimeouts.push(
+          setTimeout(() => {
+            const tabId = uuidv4();
+            tabManagement.addTab({
+              id: tabId,
+              label: data.server_name || data.addr,
+              type: TAB_TYPE.SSH,
+              closable: true,
+              panes: [{ id: sessionId, type: 'ssh' }],
+            });
+            tabManagement.setActivePane(sessionId);
+          }, 100)
+        );
+      }, 500)
+    );
   } catch (error) {
     logger.error('Failed to create SSH session', error);
 
     // Set error state in progress bar
     connectionStatus.value = 'error';
     connectionProgress.value = 0;
-    connectionErrorTitle.value = 'Connection Failed';
-    connectionMessage.value = 'Failed to establish connection';
+    connectionErrorTitle.value = t('connection.connectionFailed');
+    connectionMessage.value = t('connection.connectionError');
 
     // Parse error message
     let errorDetails = '';
 
     // Handle both JS Errors and structured objects from Tauri
     if (typeof error === 'object' && error !== null) {
-      const err = error as Record<string, any>;
+      const err = error as Record<string, unknown>;
 
       // Check for specific Tauri error patterns (structured SshError)
       if (err.connectionFailed) {
-        errorDetails = `Connection failed: ${err.connectionFailed.host}:${err.connectionFailed.port} - ${err.connectionFailed.reason}`;
+        const cf = err.connectionFailed as {
+          host: string;
+          port: number;
+          reason: string;
+        };
+        errorDetails = `${t('connection.connectionFailed')}: ${cf.host}:${cf.port} - ${cf.reason}`;
       } else if (err.authenticationFailed) {
-        errorDetails =
-          'Authentication failed. Please check your username and password.';
+        errorDetails = t('ssh.errorAuthenticationFailed');
       } else if (err.channelError) {
-        errorDetails = `Channel error: ${err.channelError}`;
+        errorDetails = `${t('ssh.errorChannel')}: ${String(err.channelError)}`;
       } else if (err.message) {
         // Standard JS Error or object with message property
         errorDetails = String(err.message);
@@ -518,7 +561,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         try {
           // Avoid [object Object]
           const json = JSON.stringify(error);
-          errorDetails = json === '{}' ? 'Unknown error' : json;
+          errorDetails = json === '{}' ? t('connection.connectionError') : json;
         } catch (e) {
           // If stringify failed, fall back to string conversion
           errorDetails = String(error);
@@ -547,6 +590,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       clearInterval(connectionTimerInterval);
       connectionTimerInterval = null;
     }
+    clearPendingTimeouts();
   }
 };
 
@@ -633,7 +677,7 @@ const handleSettingsUpdate = (value: boolean) => {
 };
 
 // Handle creating a new tab
-const handleCreateTab = (tab: any) => {
+const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   tabManagement.addTab(tab);
 };
 </script>

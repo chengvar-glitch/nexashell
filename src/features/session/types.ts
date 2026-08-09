@@ -1,13 +1,15 @@
 /**
  * Session data model matching backend database schema
  */
+export type AuthType = 'password' | 'key';
+
 export interface SavedSession {
   id: string;
   addr: string;
   port: number;
   server_name: string;
   username: string;
-  auth_type: string; // 'password' | 'key'
+  auth_type: AuthType;
   private_key_path?: string | null;
   is_favorite: boolean;
   last_connected_at?: string | null;

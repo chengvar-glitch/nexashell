@@ -447,6 +447,7 @@ import {
   X,
   GripVertical,
   MoreVertical,
+  type LucideIcon,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
@@ -599,8 +600,15 @@ const filteredSessions = computed(() => {
 });
 
 // Selection handlers
+// Pre-computed tag name -> tag map for O(1) lookups when rendering many tags
+const tagsByName = computed(() => {
+  const map = new Map<string, Tag>();
+  tags.value.forEach(t => map.set(t.name, t));
+  return map;
+});
+
 const getTagStyles = (tagName: string) => {
-  const tag = tags.value.find(t => t.name === tagName);
+  const tag = tagsByName.value.get(tagName);
   if (!tag?.color) return {};
 
   // For colors, we create a soft background and a matching border
@@ -653,8 +661,13 @@ const contextMenuItems = ref<
     label: string;
     danger?: boolean;
     divider?: boolean;
-    icon?: any;
-    children?: any[];
+    icon?: LucideIcon;
+    children?: Array<{
+      key: string;
+      label: string;
+      danger?: boolean;
+      icon?: LucideIcon;
+    }>;
     active?: boolean;
   }>
 >([]);
@@ -701,11 +714,13 @@ const handleTagsUpdated = async () => {
 };
 
 const toggleSessionSelection = (sessionId: string) => {
-  if (selectedSessionIds.value.has(sessionId)) {
-    selectedSessionIds.value.delete(sessionId);
+  const next = new Set(selectedSessionIds.value);
+  if (next.has(sessionId)) {
+    next.delete(sessionId);
   } else {
-    selectedSessionIds.value.add(sessionId);
+    next.add(sessionId);
   }
+  selectedSessionIds.value = next;
 };
 
 const isSessionSelected = (sessionId: string) => {
@@ -714,11 +729,13 @@ const isSessionSelected = (sessionId: string) => {
 
 const toggleSelectAllGlobal = (event: Event) => {
   const checkbox = event.target as HTMLInputElement;
+  const next = new Set(selectedSessionIds.value);
   if (checkbox.checked) {
-    filteredSessions.value.forEach(s => selectedSessionIds.value.add(s.id));
+    filteredSessions.value.forEach(s => next.add(s.id));
   } else {
-    filteredSessions.value.forEach(s => selectedSessionIds.value.delete(s.id));
+    filteredSessions.value.forEach(s => next.delete(s.id));
   }
+  selectedSessionIds.value = next;
 };
 
 // Fetch all sessions from the database in a single IPC round-trip.

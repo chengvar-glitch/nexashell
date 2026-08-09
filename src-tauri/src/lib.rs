@@ -11,25 +11,27 @@ use terminal::TerminalManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let log_builder = tauri_plugin_log::Builder::default()
+        .level(log::LevelFilter::Info)
+        .level_for("rusqlite", log::LevelFilter::Warn)
+        .target(tauri_plugin_log::Target::new(
+            tauri_plugin_log::TargetKind::LogDir {
+                file_name: Some("nexashell".to_string()),
+            },
+        ));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(log_builder.build())
         .manage(SshManager::default())
         .manage(TerminalManager::default())
         .setup(|app| {
-            // Initialize database before app is fully started. This ensures
-            // schema and indexes exist even if the DB file was absent.
-            match db::init_db() {
-                Ok(v) => {
-                    println!("db init: {}", v);
-                }
-                Err(e) => {
-                    eprintln!("db init error: {}", e);
-                }
+            if let Err(e) = db::init_db() {
+                log::error!("Database initialization failed: {}", e);
             }
 
-            // Pre-initialize encryption key (PBKDF2) to avoid
-            // blocking the main thread on first credential access
             encryption::EncryptionManager::init();
+
             #[cfg(target_os = "macos")]
             {
                 use cocoa::appkit::{NSWindow, NSWindowTitleVisibility};
@@ -42,17 +44,12 @@ pub fn run() {
                         let ns_window = ns_window as id;
 
                         unsafe {
-                            // Already handled by tauri.conf.json "Overlay"
-                            // but ensuring proper visibility here
                             ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-                            
                             ns_window.setOpaque_(NO);
                             ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(
                                 cocoa::base::nil,
                             ));
                             ns_window.setMovableByWindowBackground_(NO);
-
-                            // Force refresh shadow
                             ns_window.setHasShadow_(NO);
                             ns_window.setHasShadow_(YES);
                         }
@@ -63,7 +60,6 @@ pub fn run() {
             #[cfg(not(target_os = "macos"))]
             {
                 if let Some(window) = app.get_webview_window("main") {
-                    // Windows/Linux use custom title bar, so hide native decorations
                     let _ = window.set_decorations(false);
                     let _ = window.center();
                 }
@@ -92,7 +88,6 @@ pub fn run() {
             ssh::set_ssh_status_refresh_rate,
             terminal::connect_local,
             terminal::disconnect_local,
-            db::init_db,
             db::add_session,
             db::save_session,
             db::save_session_with_credentials,
@@ -125,8 +120,12 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                let manager = app_handle.state::<SshManager>();
-                manager.disconnect_all();
+                if let Some(manager) = app_handle.try_state::<SshManager>() {
+                    manager.disconnect_all();
+                }
+                if let Some(manager) = app_handle.try_state::<TerminalManager>() {
+                    manager.disconnect_all();
+                }
             }
         });
 }
