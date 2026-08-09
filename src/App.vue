@@ -323,6 +323,9 @@ onBeforeUnmount(() => {
   __eventOffFns.forEach(fn => fn());
   __eventOffFns.length = 0;
 
+  // Cancel any pending connection timers before the component is destroyed
+  clearPendingTimeouts();
+
   // Clean up all sessions using Pinia store
   sessionStore.cleanupAllSessions().catch(error => {
     logger.error('Error cleaning up sessions on app close', error);
@@ -584,13 +587,16 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
 
     connectionErrorMessage.value = errorDetails;
     sshErrorMessage.value = errorDetails;
+
+    // Connection failed — clear simulated step timers; the success-path
+    // timers (e.g. closing the form) must be preserved so they can fire.
+    clearPendingTimeouts();
   } finally {
     isConnecting.value = false;
     if (connectionTimerInterval) {
       clearInterval(connectionTimerInterval);
       connectionTimerInterval = null;
     }
-    clearPendingTimeouts();
   }
 };
 
