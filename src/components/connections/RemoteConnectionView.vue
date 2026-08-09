@@ -747,6 +747,67 @@ let lastSeq = 0;
 let unlistenFn: UnlistenFn | null = null;
 
 /**
+ * Write the backend's buffered initial output (welcome banner, MOTD, first
+ * prompt) into the terminal, deduping against the live event stream so the
+ * same seq is never written twice. Returns true when content was written.
+ */
+const writeBufferedOutput = async (): Promise<boolean> => {
+  if (props.tabType === 'terminal' || !terminal) return false;
+
+  const bufferedOutput = await sessionApi.getBufferedSSHOutput(
+    props.sessionId
+  );
+  if (bufferedOutput.length === 0) return false;
+
+  let wroteAny = false;
+  for (const chunk of bufferedOutput) {
+    // Dedupe against the live event stream — the output task emits chunks
+    // in real time while the connection comes up, so the same seq can
+    // arrive both live AND in the buffer. Without this check the welcome
+    // banner is written twice.
+    if (chunk.seq > lastSeq) {
+      terminal.write(chunk.output);
+      lastSeq = Math.max(lastSeq, chunk.seq);
+      wroteAny = true;
+    }
+  }
+
+  if (!wroteAny) return false;
+
+  logger.info('Writing buffered SSH output to terminal', {
+    chunks: bufferedOutput.length,
+  });
+
+  // Scan initial output for home directory (usually shown in first prompt)
+  if (!remoteHomeDir.value) {
+    const initialBuffer = bufferedOutput
+      .map(c => c.output)
+      .join('')
+      .split('\n');
+
+    for (const line of initialBuffer) {
+      // eslint-disable-next-line no-control-regex
+      const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
+
+      // Look for paths in initial prompts
+      const centosMatch = cleanLine.match(/\[.*@.*\s+(.*)\][#$]/);
+      const ubuntuMatch = cleanLine.match(/.*@.*:(.*)[#$]/);
+
+      const initialPath = centosMatch?.[1] || ubuntuMatch?.[1];
+      if (initialPath && initialPath.startsWith('/')) {
+        remoteHomeDir.value = initialPath;
+        logger.info('Cached initial remote home directory', {
+          home: remoteHomeDir.value,
+        });
+        break;
+      }
+    }
+  }
+
+  return true;
+};
+
+/**
  * Establish connection via session store and API
  */
 const connectSession = async (cols: number, rows: number): Promise<void> => {
@@ -754,97 +815,64 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
     throw new Error('sessionId is required');
   }
 
-  if (sessionStore.hasSession(props.sessionId)) {
-    return;
-  }
+  const sessionExists = sessionStore.hasSession(props.sessionId);
 
   try {
-    if (props.tabType === 'terminal') {
-      logger.info('Creating local terminal session', {
-        sessionId: props.sessionId,
-      });
-      await sessionStore.createLocalSession(
-        props.sessionId,
-        props.sessionId,
-        cols,
-        rows
-      );
-    } else {
-      // Get session info from store (includes serverName)
-      const session = sessionStore.getSession(props.sessionId);
-      const serverName =
-        session?.connectionParams?.serverName || props.ip || 'Unknown';
+    if (!sessionExists) {
+      if (props.tabType === 'terminal') {
+        logger.info('Creating local terminal session', {
+          sessionId: props.sessionId,
+        });
+        await sessionStore.createLocalSession(
+          props.sessionId,
+          props.sessionId,
+          cols,
+          rows
+        );
+      } else {
+        // Get session info from store (includes serverName)
+        const session = sessionStore.getSession(props.sessionId);
+        const serverName =
+          session?.connectionParams?.serverName || props.ip || 'Unknown';
 
-      // Split panes resolve credentials from the non-reactive cache
-      // (pre-seeded by splitActivePane keyed by pane/session id)
-      const cached = sessionStore.getCachedCredentials(props.sessionId);
+        // Split panes resolve credentials from the non-reactive cache
+        // (pre-seeded by splitActivePane keyed by pane/session id)
+        const cached = sessionStore.getCachedCredentials(props.sessionId);
 
-      await sessionStore.createSSHSession(
-        props.sessionId,
-        props.sessionId,
-        serverName,
-        props.ip || '',
-        props.port || 22,
-        props.username || '',
-        props.password || cached?.password || '',
-        props.privateKeyPath || cached?.privateKeyPath || null,
-        props.keyPassphrase || cached?.keyPassphrase || null,
-        cols,
-        rows
-      );
+        await sessionStore.createSSHSession(
+          props.sessionId,
+          props.sessionId,
+          serverName,
+          props.ip || '',
+          props.port || 22,
+          props.username || '',
+          props.password || cached?.password || '',
+          props.privateKeyPath || cached?.privateKeyPath || null,
+          props.keyPassphrase || cached?.keyPassphrase || null,
+          cols,
+          rows
+        );
+      }
     }
 
-    // Retrieve buffered initial output (e.g., welcome banner, login prompts)
-    // Wait for the backend to complete the initial buffering phase.
-    // A delay of ~2 seconds ensures the full initial sequence is captured for SSH.
     if (props.tabType !== 'terminal') {
-      await new Promise(resolve => setTimeout(resolve, 2100));
-
-      const bufferedOutput = await sessionApi.getBufferedSSHOutput(
-        props.sessionId
-      );
-      if (terminal && bufferedOutput.length > 0) {
-        logger.info('Writing buffered SSH output to terminal', {
-          chunks: bufferedOutput.length,
-        });
-        for (const chunk of bufferedOutput) {
-          // Dedupe against the live event stream — the output task emits
-          // chunks in real time while the connection comes up, so the same
-          // seq can arrive both live AND in the buffer. Without this check
-          // the welcome banner is written twice.
-          if (chunk.seq > lastSeq) {
-            terminal.write(chunk.output);
-            lastSeq = Math.max(lastSeq, chunk.seq);
-          }
-        }
-
-        // Scan initial output for home directory (usually shown in first prompt)
-        if (!remoteHomeDir.value) {
-          const initialBuffer = bufferedOutput
-            .map(c => c.output)
-            .join('')
-            .split('\n');
-
-          for (const line of initialBuffer) {
-            // eslint-disable-next-line no-control-regex
-            const cleanLine = line.replace(/\x1b\[[0-9;]*m/g, '').trim();
-
-            // Look for paths in initial prompts
-            const centosMatch = cleanLine.match(/\[.*@.*\s+(.*)\][#$]/);
-            const ubuntuMatch = cleanLine.match(/.*@.*:(.*)[#$]/);
-
-            const initialPath = centosMatch?.[1] || ubuntuMatch?.[1];
-            if (initialPath && initialPath.startsWith('/')) {
-              remoteHomeDir.value = initialPath;
-              logger.info('Cached initial remote home directory', {
-                home: remoteHomeDir.value,
-              });
-              break;
-            }
-          }
+      if (sessionExists) {
+        // The session was already connected before this component mounted
+        // (App.vue connects first, then mounts the tab). The welcome banner
+        // was streamed before our listener existed — recover it from the
+        // backend's initial-output buffer. Poll briefly: on very fast
+        // connections the buffer may still be filling up.
+        for (let attempt = 0; attempt < 12; attempt++) {
+          if (await writeBufferedOutput()) return;
+          await new Promise(resolve => setTimeout(resolve, 300));
         }
       } else {
-        logger.debug('No buffered SSH output available');
+        // Fresh connection: wait for the backend to complete its ~2s
+        // initial buffering phase so the full welcome sequence is captured,
+        // then replay it (live events already wrote most of it; this covers
+        // any gap).
+        await new Promise(resolve => setTimeout(resolve, 2100));
+        await writeBufferedOutput();
       }
     }
   } catch (error) {
