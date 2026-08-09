@@ -267,8 +267,8 @@ fn build_pty_modes() -> PtyModes {
     modes.set_boolean(ExtensiblePtyModeOpcode::Extended(IUTF8), true);
 
     modes.set_boolean(PtyModeOpcode::ISIG, true);
-    modes.set_boolean(PtyModeOpcode::ECHO, false);
-    modes.set_boolean(PtyModeOpcode::ICANON, false);
+    modes.set_boolean(PtyModeOpcode::ICANON, true);
+    modes.set_boolean(PtyModeOpcode::ECHO, true);
     modes.set_boolean(PtyModeOpcode::ECHOE, true);
     modes.set_boolean(PtyModeOpcode::ECHOK, true);
     modes.set_boolean(PtyModeOpcode::ECHONL, false);
