@@ -48,8 +48,9 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 ## Testing
 
 - Vitest configured in `vite.config.ts` (happy-dom, globals: true, v8 coverage).
-- **No tests exist** — setup file and all tests were deleted. Do not attempt to run `bun test`.
-- No CI/CD configured.
+- Frontend: `bun test` (Vitest), unit tests co-located as `*.test.ts`.
+- Rust: `cargo test` (crypto round-trips, legacy export compat, SQL builder).
+- CI/CD: `.github/workflows/ci.yml` (lint + type-check + frontend test + cargo build).
 
 ## Environment variables
 
@@ -103,8 +104,6 @@ bun tauri build
 
 ## Gotchas
 
-- `bun test` script is **not defined** in `package.json` despite being listed in README.
 - Package manager is bun (>=1.0).
 - Rust deps in `src-tauri/Cargo.toml`, JS deps in root `package.json`.
 - VSCode extensions: Vue (Volar), Tauri, rust-analyzer.
-- Empty placeholder directories: `src/core/utils/tab/`, `src/core/utils/window/`.

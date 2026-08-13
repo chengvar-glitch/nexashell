@@ -1,6 +1,6 @@
 use crate::common::{OutputChunk, SessionId};
 use serde::Serialize;
-use ssh2::{HashType, OpenFlags, OpenType, PtyModes, PtyModeOpcode, ExtensiblePtyModeOpcode, Session};
+use ssh2::{ExtensiblePtyModeOpcode, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -11,6 +11,9 @@ use std::time::Duration;
 use tauri::{Emitter, Listener};
 use thiserror::Error;
 use tokio::sync::mpsc;
+
+mod hostkey;
+use hostkey::verify_host_key;
 
 const MAX_CACHED_INITIAL_CHUNKS: usize = 200;
 
@@ -60,99 +63,6 @@ const INITIAL_BATCH_TIME_MS: u64 = 100;
 const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000;
 const NORMAL_BATCH_SIZE_THRESHOLD: usize = 1024;
 const NORMAL_BATCH_TIME_MS: u64 = 20;
-
-// ============================================================================
-// Host Key Verification (TOFU — Trust On First Use)
-// ============================================================================
-
-fn known_hosts_path() -> Result<std::path::PathBuf, String> {
-    let data_dir = dirs::data_dir()
-        .ok_or_else(|| "Failed to determine app data directory".to_string())?
-        .join("NexaShell");
-    std::fs::create_dir_all(&data_dir).map_err(|e| e.to_string())?;
-    Ok(data_dir.join("known_hosts"))
-}
-
-/// Returns the SHA256 fingerprint of the session's host key, base64-encoded
-/// (without the `SHA256:` prefix to match OpenSSH's visual representation
-/// minus the prefix).
-fn host_key_fingerprint(sess: &Session) -> Result<String, String> {
-    let key = sess
-        .host_key_hash(HashType::Sha256)
-        .ok_or_else(|| "No host key available".to_string())?;
-    Ok(base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        key,
-    ))
-}
-
-/// Verify the host key for `host` using a TOFU policy.
-///
-/// - First connection: store the fingerprint and accept.
-/// - Subsequent connections: reject if the fingerprint differs (possible MITM).
-fn verify_host_key(sess: &Session, host: &str) -> Result<(), SshError> {
-    let fingerprint = host_key_fingerprint(sess).map_err(|e| {
-        SshError::HostKeyVerificationFailed {
-            host: host.to_string(),
-            reason: e,
-        }
-    })?;
-
-    let path = known_hosts_path().map_err(|e| SshError::HostKeyVerificationFailed {
-        host: host.to_string(),
-        reason: e,
-    })?;
-
-    let mut known: HashMap<String, String> = if path.exists() {
-        match std::fs::read_to_string(&path) {
-            Ok(content) => content
-                .lines()
-                .filter_map(|line| {
-                    let mut parts = line.splitn(2, ' ');
-                    let h = parts.next()?;
-                    let fp = parts.next()?;
-                    Some((h.to_string(), fp.to_string()))
-                })
-                .collect(),
-            Err(e) => {
-                log::warn!("Failed to read known_hosts ({}): {}", path.display(), e);
-                HashMap::new()
-            }
-        }
-    } else {
-        HashMap::new()
-    };
-
-    if let Some(existing) = known.get(host) {
-        if existing != &fingerprint {
-            return Err(SshError::HostKeyVerificationFailed {
-                host: host.to_string(),
-                reason: format!(
-                    "Host key mismatch!\nStored: {}\nGot:    {}",
-                    existing, fingerprint
-                ),
-            });
-        }
-        return Ok(());
-    }
-
-    // First time seeing this host — store and accept
-    known.insert(host.to_string(), fingerprint);
-    let serialized: String = known
-        .iter()
-        .map(|(h, fp)| format!("{} {}\n", h, fp))
-        .collect();
-    if let Err(e) = std::fs::write(&path, serialized) {
-        log::warn!("Failed to write known_hosts: {}", e);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
-
-    Ok(())
-}
 
 // ============================================================================
 // Data Structures
@@ -209,16 +119,8 @@ pub struct SshChannelInfo {
     pub status_handle: Option<tokio::task::JoinHandle<()>>,
     pub input_sender: mpsc::UnboundedSender<String>,
     pub stop_flag: Arc<AtomicBool>,
-    /// Monotonically increasing sequence number for output chunks.
-    /// Kept for future replay/sync features.
-    #[allow(dead_code)]
-    pub next_seq: Arc<AtomicU64>,
     pub initial_outputs: Arc<tokio::sync::Mutex<Vec<OutputChunk>>>,
     pub refresh_interval: Arc<AtomicU64>,
-
-    /// Main interactive session (non-blocking, used by the I/O task only).
-    #[allow(dead_code)]
-    pub sess_arc: Arc<tokio::sync::Mutex<Session>>,
 
     /// Auxiliary blocking session used for SFTP, monitoring, and path probing.
     /// This runs on its own TCP connection and stays in blocking mode,
@@ -288,6 +190,7 @@ pub struct SshManager {
 }
 
 impl SshManager {
+    #[allow(clippy::too_many_arguments)]
     pub async fn connect_ssh(
         &self,
         app_handle: Option<tauri::AppHandle>,
@@ -315,14 +218,7 @@ impl SshManager {
         // 1. Establish both sessions (interactive + helper) on separate TCP
         //    connections. Blocking work runs on spawn_blocking.
         let connect_res = tokio::task::spawn_blocking(move || {
-            Self::establish_sessions(
-                &addr,
-                &host_for_err,
-                port,
-                &auth,
-                cols,
-                rows,
-            )
+            Self::establish_sessions(&addr, &host_for_err, port, &auth, cols, rows)
         })
         .await
         .map_err(|e| SshError::TaskError(e.to_string()))?;
@@ -342,7 +238,8 @@ impl SshManager {
 
         let (input_listener_id, resize_listener_id) = if let Some(h) = &app_handle {
             let input_id = Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
-            let resize_id = Self::register_resize_listener(h, &session_id, &channel_arc, &stop_flag);
+            let resize_id =
+                Self::register_resize_listener(h, &session_id, &channel_arc, &stop_flag);
             (Some(input_id), Some(resize_id))
         } else {
             (None, None)
@@ -378,10 +275,8 @@ impl SshManager {
                     status_handle: Some(status_handle),
                     input_sender,
                     stop_flag,
-                    next_seq,
                     initial_outputs,
                     refresh_interval,
-                    sess_arc,
                     helper_sess: helper_arc,
                     input_listener_id,
                     resize_listener_id,
@@ -405,38 +300,39 @@ impl SshManager {
     ) -> Result<(Session, ssh2::Channel, Session), SshError> {
         use std::net::ToSocketAddrs;
 
-        let open_tcp = || -> Result<TcpStream, SshError> {
-            let socket_addr = addr
-                .to_socket_addrs()
-                .map_err(|e| SshError::ConnectionFailed {
-                    host: host_for_err.to_string(),
-                    port,
-                    reason: format!("Failed to resolve address: {}", e),
-                })?
-                .next()
-                .ok_or_else(|| SshError::ConnectionFailed {
-                    host: host_for_err.to_string(),
-                    port,
-                    reason: "No addresses found".to_string(),
-                })?;
+        let open_tcp =
+            || -> Result<TcpStream, SshError> {
+                let socket_addr = addr
+                    .to_socket_addrs()
+                    .map_err(|e| SshError::ConnectionFailed {
+                        host: host_for_err.to_string(),
+                        port,
+                        reason: format!("Failed to resolve address: {}", e),
+                    })?
+                    .next()
+                    .ok_or_else(|| SshError::ConnectionFailed {
+                        host: host_for_err.to_string(),
+                        port,
+                        reason: "No addresses found".to_string(),
+                    })?;
 
-            let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(
-                |e| SshError::ConnectionFailed {
-                    host: host_for_err.to_string(),
-                    port,
-                    reason: e.to_string(),
-                },
-            )?;
+                let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30))
+                    .map_err(|e| SshError::ConnectionFailed {
+                        host: host_for_err.to_string(),
+                        port,
+                        reason: e.to_string(),
+                    })?;
 
-            // TCP read timeout so a hung server cannot block handshake forever.
-            let _ = tcp.set_read_timeout(Some(Duration::from_secs(60)));
+                // TCP read timeout so a hung server cannot block handshake forever.
+                let _ = tcp.set_read_timeout(Some(Duration::from_secs(60)));
 
-            Ok(tcp)
-        };
+                Ok(tcp)
+            };
 
         let make_session = |tcp: TcpStream| -> Result<Session, SshError> {
-            let mut sess = Session::new()
-                .map_err(|e| SshError::OperationFailed(format!("Failed to create session: {}", e)))?;
+            let mut sess = Session::new().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to create session: {}", e))
+            })?;
             sess.set_tcp_stream(tcp);
             sess.handshake()
                 .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
@@ -451,12 +347,7 @@ impl SshManager {
                 let path = Path::new(key_path);
                 if path.exists() {
                     let key_result = if let Some(ref passphrase) = auth.key_passphrase {
-                        sess.userauth_pubkey_file(
-                            &auth.username,
-                            None,
-                            path,
-                            Some(passphrase),
-                        )
+                        sess.userauth_pubkey_file(&auth.username, None, path, Some(passphrase))
                     } else {
                         sess.userauth_pubkey_file(&auth.username, None, path, None)
                     };
@@ -478,10 +369,7 @@ impl SshManager {
             if !authenticated {
                 sess.userauth_password(&auth.username, &auth.password)
                     .map_err(|e| {
-                        SshError::AuthenticationFailed(format!(
-                            "Authentication failed: {}",
-                            e
-                        ))
+                        SshError::AuthenticationFailed(format!("Authentication failed: {}", e))
                     })?;
             }
 
@@ -576,6 +464,11 @@ impl SshManager {
 
             if let Ok(payload) = serde_json::from_str::<ResizePayload>(event.payload()) {
                 let task_channel_clone = task_channel.clone();
+                // Detached resize task: the channel lock is async so it cannot
+                // run synchronously in this event callback. Dropping the
+                // JoinHandle detaches (does NOT abort) the task, which may
+                // outlive the callback.
+                #[allow(clippy::let_underscore_future)]
                 let _ = tokio::spawn(async move {
                     let mut ch = task_channel_clone.lock().await;
                     if let Err(e) = ch.request_pty_size(payload.cols, payload.rows, None, None) {
@@ -586,6 +479,7 @@ impl SshManager {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn spawn_io_task(
         channel_arc: Arc<tokio::sync::Mutex<ssh2::Channel>>,
         sess_arc: Arc<tokio::sync::Mutex<Session>>,
@@ -603,18 +497,31 @@ impl SshManager {
             let mut seen_first_output = false;
             let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
-            let mut idle_reads = 0u32;
+            // Adaptive idle backoff: starts at 1ms, doubles on each consecutive
+            // WouldBlock up to 64ms, so idle sessions don't busy-poll the CPU
+            // or thrash the channel/session mutexes. Resets on any data or input.
+            let mut idle_backoff_ms: u64 = 1;
+            let mut sleep_before_read: Option<u64> = None;
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
                     break;
                 }
 
+                // Apply the adaptive idle backoff before the next read when the
+                // previous read produced no data. Input is still processed first
+                // below (it is drained eagerly), so keystrokes are not delayed.
+                if let Some(ms) = sleep_before_read.take() {
+                    tokio::time::sleep(Duration::from_millis(ms)).await;
+                }
+
                 // Process user input FIRST for low-latency IME response.
                 // The main session is non-blocking, so a full channel/TCP
                 // buffer surfaces as WouldBlock — retry with backoff instead of
                 // dropping the remainder of the input.
+                let mut saw_input = false;
                 while let Ok(input) = input_receiver.try_recv() {
+                    saw_input = true;
                     let mut sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
                     let bytes = input.as_bytes();
@@ -649,10 +556,10 @@ impl SshManager {
                         }
                     }
 
-                    if let Err(e) = ch.flush() {
-                        if e.kind() != std::io::ErrorKind::WouldBlock {
-                            log::error!("[SSH I/O] flush failed: {}", e);
-                        }
+                    if let Err(e) = ch.flush()
+                        && e.kind() != std::io::ErrorKind::WouldBlock
+                    {
+                        log::error!("[SSH I/O] flush failed: {}", e);
                     }
                 }
 
@@ -669,7 +576,7 @@ impl SshManager {
 
                 match read_result {
                     Some(Ok(n)) => {
-                        idle_reads = 0;
+                        idle_backoff_ms = 1;
                         pending_output.push_str(&String::from_utf8_lossy(&buffer[..n]));
                     }
                     Some(Err(e)) => {
@@ -684,10 +591,21 @@ impl SshManager {
                         break;
                     }
                     None => {
-                        idle_reads += 1;
-                        let sleep_ms = if idle_reads > 5 { 10 } else { 1 };
-                        tokio::time::sleep(Duration::from_millis(sleep_ms)).await;
+                        sleep_before_read = Some(idle_backoff_ms);
+                        // Exponential backoff capped at 64ms. We stay responsive
+                        // to bursts because the reset happens on the next read
+                        // or input, and the cap keeps latency low enough for
+                        // interactive shells.
+                        if idle_backoff_ms < 64 {
+                            idle_backoff_ms *= 2;
+                        }
                     }
+                }
+
+                // Reset backoff whenever input arrived, so keystrokes never
+                // wait behind a long idle sleep.
+                if saw_input {
+                    idle_backoff_ms = 1;
                 }
 
                 let in_initial = in_initial_buffering
@@ -742,6 +660,10 @@ impl SshManager {
         tokio::spawn(async move {
             let mut last_net_read: Option<(f64, f64, std::time::Instant)> = None;
             let mut last_cpu_read: Option<(u64, u64)> = None;
+            // Cache the remote OS once so non-Linux hosts don't re-run the
+            // Linux-only metrics pipeline (awk/free/df/proc) every poll — it
+            // would fail or return zeros and is pure wasted round-trips.
+            let mut platform_cached: Option<bool> = None; // Some(is_linux)
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
@@ -752,9 +674,24 @@ impl SshManager {
                 let helper = helper_sess.clone();
 
                 // All blocking SSH operations run on spawn_blocking so we never
-                // stall a tokio worker thread.
+                // stall a tokio worker thread. When the platform is not yet
+                // known, the blocking closure determines it first (single
+                // cheap `uname` exec), then conditionally runs the Linux metrics.
                 let status_res = tokio::task::spawn_blocking(move || {
                     let sess = helper.blocking_lock();
+
+                    if platform_cached.is_none() {
+                        platform_cached =
+                            Some(Self::is_linux_host_blocking(&sess).unwrap_or(false));
+                    }
+
+                    if platform_cached == Some(false) {
+                        // Non-Linux host: metrics pipeline is Linux-specific.
+                        // Return a zeroed status rather than re-running the
+                        // command chain every interval.
+                        return Ok((Self::empty_status(), (0, 0)));
+                    }
+
                     let mut channel = sess.channel_session().map_err(|e| {
                         SshError::ChannelError(format!("Create status channel failed: {}", e))
                     })?;
@@ -815,6 +752,47 @@ impl SshManager {
                 tokio::time::sleep(Duration::from_millis(interval)).await;
             }
         })
+    }
+
+    /// Detects whether the remote host runs Linux using a single cheap `uname`
+    /// exec. Called at most once per session and cached so the monitoring loop
+    /// skips the Linux-only metrics pipeline on macOS/BSD/Windows hosts.
+    /// The caller must hold the helper session lock and run on a blocking thread.
+    fn is_linux_host_blocking(sess: &Session) -> Result<bool, SshError> {
+        let mut channel = sess
+            .channel_session()
+            .map_err(|e| SshError::ChannelError(format!("uname channel failed: {}", e)))?;
+        channel
+            .exec("uname -s 2>/dev/null || echo unknown")
+            .map_err(|e| SshError::OperationFailed(e.to_string()))?;
+        let mut output = String::new();
+        let _ = channel.read_to_string(&mut output);
+        let _ = channel.wait_close();
+        Ok(output.trim().eq_ignore_ascii_case("linux"))
+    }
+
+    /// A zeroed status used for hosts that don't expose the Linux `/proc`
+    /// metrics the dashboard reads.
+    fn empty_status() -> ServerStatus {
+        ServerStatus {
+            cpu_usage: 0.0,
+            mem_usage: 0.0,
+            mem_total: 0,
+            mem_used: 0,
+            mem_avail: 0,
+            swap_usage: 0.0,
+            swap_total: 0,
+            swap_used: 0,
+            disk_usage: 0.0,
+            disk_total: 0,
+            disk_used: 0,
+            disk_avail: 0,
+            net_up: 0.0,
+            net_down: 0.0,
+            latency: 0,
+            load_avg: [0.0; 3],
+            uptime: "unsupported platform".to_string(),
+        }
     }
 
     /// Fetches server metrics using a single blocking exec channel. The caller
@@ -893,8 +871,7 @@ impl SshManager {
         } else {
             (1, 0, 1)
         };
-        let mem_usage =
-            (100.0 * (1.0 - (mem_avail as f64 / mem_total as f64))).clamp(0.0, 100.0);
+        let mem_usage = (100.0 * (1.0 - (mem_avail as f64 / mem_total as f64))).clamp(0.0, 100.0);
 
         let swap_parts: Vec<u64> = lines[2]
             .split_whitespace()
@@ -1013,34 +990,34 @@ impl SshManager {
     }
 
     pub fn disconnect_ssh(&self, session_id: &SessionId) -> Result<(), SshError> {
-        if let Ok(mut channels) = self.channels.write() {
-            if let Some(mut info) = channels.remove(session_id) {
-                info.stop_flag.store(true, Ordering::SeqCst);
+        if let Ok(mut channels) = self.channels.write()
+            && let Some(mut info) = channels.remove(session_id)
+        {
+            info.stop_flag.store(true, Ordering::SeqCst);
 
-                if let Some(ref app_handle) = info.app_handle {
-                    if let Some(input_id) = info.input_listener_id.take() {
-                        app_handle.unlisten(input_id);
-                    }
-                    if let Some(resize_id) = info.resize_listener_id.take() {
-                        app_handle.unlisten(resize_id);
-                    }
+            if let Some(ref app_handle) = info.app_handle {
+                if let Some(input_id) = info.input_listener_id.take() {
+                    app_handle.unlisten(input_id);
                 }
-
-                if let Some(handle) = info.handle.take() {
-                    handle.abort();
+                if let Some(resize_id) = info.resize_listener_id.take() {
+                    app_handle.unlisten(resize_id);
                 }
-                if let Some(status_handle) = info.status_handle.take() {
-                    status_handle.abort();
-                }
-
-                // Best-effort graceful shutdown of helper session. The main
-                // session's channel is dropped when the JoinHandle aborts.
-                let helper = info.helper_sess.clone();
-                std::thread::spawn(move || {
-                    let sess = helper.blocking_lock();
-                    sess.disconnect(None, "User disconnect", None).ok();
-                });
             }
+
+            if let Some(handle) = info.handle.take() {
+                handle.abort();
+            }
+            if let Some(status_handle) = info.status_handle.take() {
+                status_handle.abort();
+            }
+
+            // Best-effort graceful shutdown of helper session. The main
+            // session's channel is dropped when the JoinHandle aborts.
+            let helper = info.helper_sess.clone();
+            std::thread::spawn(move || {
+                let sess = helper.blocking_lock();
+                sess.disconnect(None, "User disconnect", None).ok();
+            });
         }
         log::info!("Disconnected SSH session: {}", session_id.0);
         Ok(())
@@ -1304,7 +1281,7 @@ impl SshManager {
 // ============================================================================
 
 #[tauri::command]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 pub async fn connect_ssh(
     state: tauri::State<'_, SshManager>,
     app_handle: tauri::AppHandle,
@@ -1397,7 +1374,5 @@ pub async fn probe_remote_path(
     state: tauri::State<'_, SshManager>,
     sessionId: String,
 ) -> Result<String, SshError> {
-    state
-        .probe_remote_path(&SessionId::from(sessionId))
-        .await
+    state.probe_remote_path(&SessionId::from(sessionId)).await
 }

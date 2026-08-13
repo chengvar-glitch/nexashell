@@ -1,10 +1,12 @@
 use once_cell::sync::Lazy;
 use rusqlite::types::ToSql;
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
+
+pub mod import_export;
 
 /// Platform-specific app data directory path for the SQLite database.
 static DB_PATH: Lazy<Result<PathBuf, String>> = Lazy::new(|| {
@@ -22,16 +24,18 @@ fn db_path() -> Result<&'static PathBuf, String> {
 /// Singleton connection shared across all DB operations.
 static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
 
-fn with_db<F, T>(f: F) -> Result<T, String>
+pub(super) fn with_db<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, String>,
 {
     let guard = DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     f(conn)
 }
 
-fn db_conn() -> Result<std::sync::MutexGuard<'static, Option<Connection>>, String> {
+pub(super) fn db_conn() -> Result<std::sync::MutexGuard<'static, Option<Connection>>, String> {
     DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))
 }
 
@@ -108,9 +112,7 @@ fn add_column_if_not_exists(
         )
         .map_err(|e| e.to_string())?;
     if count == 0 {
-        if !table
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        if !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             || !column
                 .chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '_')
@@ -126,6 +128,65 @@ fn add_column_if_not_exists(
         )
         .map_err(|e| e.to_string())?;
     }
+    Ok(())
+}
+
+/// A single dynamic column assignment in an UPDATE statement.
+struct SetClause<'a> {
+    column: &'a str,
+    value: Box<dyn ToSql>,
+}
+
+/// Build the `SET ... WHERE ...` SQL and positional `?` parameter list from
+/// optional fields, so the "edit" commands (`save_session_with_credentials`,
+/// `edit_group`, `edit_tag`, `edit_session`) don't each hand-roll the fragile
+/// `Vec<Box<dyn ToSql>>` + string-concatenation boilerplate.
+///
+/// Column/table names are caller-controlled (never user input), but are still
+/// validated against `[A-Za-z0-9_]` as defense in depth.
+fn build_update(
+    table: &str,
+    sets: Vec<SetClause<'_>>,
+    where_column: &str,
+    where_value: Box<dyn ToSql>,
+) -> Result<(String, Vec<Box<dyn ToSql>>), String> {
+    let ident_ok = |s: &str| s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+
+    if !ident_ok(table) || !ident_ok(where_column) {
+        return Err(format!(
+            "Invalid identifier in UPDATE: {}.{}",
+            table, where_column
+        ));
+    }
+    for set in &sets {
+        if !ident_ok(set.column) {
+            return Err(format!("Invalid column identifier: {}", set.column));
+        }
+    }
+
+    let mut params_vec: Vec<Box<dyn ToSql>> = Vec::with_capacity(sets.len() + 1);
+    let mut assignments = Vec::with_capacity(sets.len());
+    for set in sets {
+        assignments.push(format!("{} = ?", set.column));
+        params_vec.push(set.value);
+    }
+    // `updated_at` is always bumped on edit.
+    assignments.push("updated_at = CURRENT_TIMESTAMP".to_string());
+
+    let sql = format!(
+        "UPDATE {} SET {} WHERE {} = ?",
+        table,
+        assignments.join(", "),
+        where_column
+    );
+    params_vec.push(where_value);
+
+    Ok((sql, params_vec))
+}
+
+fn exec_update(conn: &Connection, sql: &str, params_vec: &[Box<dyn ToSql>]) -> Result<(), String> {
+    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
+    conn.execute(sql, p.as_slice()).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -212,9 +273,15 @@ pub fn init_db() -> Result<String, String> {
             updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
         )",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
-    add_column_if_not_exists(&conn, "sessions", "is_favorite", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_not_exists(
+        &conn,
+        "sessions",
+        "is_favorite",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
     add_column_if_not_exists(&conn, "sessions", "encrypted_credentials", "TEXT")?;
     add_column_if_not_exists(&conn, "sessions", "last_connected_at", "TEXT")?;
 
@@ -225,27 +292,36 @@ pub fn init_db() -> Result<String, String> {
 
     ensure_groups_and_tags(&conn)?;
 
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)", []).map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sessions_server_name ON sessions(server_name)",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_groups_group_id ON session_groups(group_id)",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_groups_session_id ON session_groups(session_id)",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_tags_tag_id ON session_tags(tag_id)",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_tags_session_id ON session_tags(session_id)",
         [],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     {
         let mut guard = DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))?;
@@ -259,7 +335,7 @@ pub fn init_db() -> Result<String, String> {
     }
 }
 
-fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
+pub(super) fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     Ok(Session {
         id: row.get(0)?,
         addr: row.get(1)?,
@@ -275,8 +351,7 @@ fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
     })
 }
 
-const SESSION_COLUMNS: &str =
-    "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
+pub(super) const SESSION_COLUMNS: &str = "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
 
 #[tauri::command]
 pub fn add_session(
@@ -299,6 +374,7 @@ pub fn add_session(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_session_with_credentials(
     id: Option<String>,
     addr: String,
@@ -327,50 +403,68 @@ pub fn save_session_with_credentials(
     };
 
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     if is_update {
         // Only overwrite encrypted_credentials when a new password/passphrase
         // was provided. Otherwise a save where the caller omitted the fields
         // (e.g. credential fetch failed) would silently wipe stored secrets.
-        let mut sql = "UPDATE sessions SET addr = ?1, port = ?2, server_name = ?3, username = ?4, auth_type = ?5, private_key_path = ?6, updated_at = CURRENT_TIMESTAMP".to_string();
-        let mut params_vec: Vec<Box<dyn ToSql>> = vec![
-            Box::new(addr),
-            Box::new(port),
-            Box::new(server_name),
-            Box::new(username),
-            Box::new(auth_type),
-            Box::new(private_key_path),
+        let mut sets = vec![
+            SetClause {
+                column: "addr",
+                value: Box::new(addr),
+            },
+            SetClause {
+                column: "port",
+                value: Box::new(port),
+            },
+            SetClause {
+                column: "server_name",
+                value: Box::new(server_name),
+            },
+            SetClause {
+                column: "username",
+                value: Box::new(username),
+            },
+            SetClause {
+                column: "auth_type",
+                value: Box::new(auth_type),
+            },
+            SetClause {
+                column: "private_key_path",
+                value: Box::new(private_key_path),
+            },
         ];
-
-        if encrypted_credentials.is_some() {
-            sql.push_str(", encrypted_credentials = ?");
-            sql.push_str(&(params_vec.len() + 1).to_string());
-            params_vec.push(Box::new(encrypted_credentials));
+        if let Some(enc) = encrypted_credentials {
+            sets.push(SetClause {
+                column: "encrypted_credentials",
+                value: Box::new(enc),
+            });
         }
-
         if let Some(fav) = is_favorite {
-            sql.push_str(", is_favorite = ?");
-            sql.push_str(&(params_vec.len() + 1).to_string());
-            params_vec.push(Box::new(if fav { 1 } else { 0 }));
+            sets.push(SetClause {
+                column: "is_favorite",
+                value: Box::new(if fav { 1 } else { 0 }),
+            });
         }
 
-        sql.push_str(" WHERE id = ?");
-        sql.push_str(&(params_vec.len() + 1).to_string());
-        params_vec.push(Box::new(session_id.clone()));
-
-        let param_refs: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-        tx.execute(&sql, param_refs.as_slice()).map_err(|e| e.to_string())?;
+        let (sql, params) = build_update("sessions", sets, "id", Box::new(session_id.clone()))?;
+        let p: Vec<&dyn ToSql> = params.iter().map(|b| &**b as &dyn ToSql).collect();
+        tx.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
 
         tx.execute(
             "DELETE FROM session_groups WHERE session_id = ?1",
             params![session_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
         tx.execute(
             "DELETE FROM session_tags WHERE session_id = ?1",
             params![session_id],
-        ).map_err(|e| e.to_string())?;
+        )
+        .map_err(|e| e.to_string())?;
     } else {
         tx.execute(
             "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials)
@@ -440,6 +534,7 @@ pub fn get_session_credentials(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn save_session(
     addr: String,
     port: i64,
@@ -453,7 +548,9 @@ pub fn save_session(
 ) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
 
     tx.execute(
@@ -580,11 +677,16 @@ pub fn get_sessions(
     }
 
     let guard = db_conn()?;
-    let conn = guard.as_ref().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_ref()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    let rows = stmt.query_map(p.as_slice(), row_to_session).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    let rows = stmt
+        .query_map(p.as_slice(), row_to_session)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -672,35 +774,43 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
 #[tauri::command]
 pub fn edit_group(id: String, name: Option<String>, sort: Option<i64>) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let mut sets = Vec::new();
-    let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(n) = name {
-        sets.push("name = ?");
-        params_vec.push(Box::new(n));
+        sets.push(SetClause {
+            column: "name",
+            value: Box::new(n),
+        });
     }
     if let Some(s) = sort {
-        sets.push("sort = ?");
-        params_vec.push(Box::new(s));
+        sets.push(SetClause {
+            column: "sort",
+            value: Box::new(s),
+        });
     }
     if sets.is_empty() {
         return Ok(());
     }
-    sets.push("updated_at = CURRENT_TIMESTAMP");
-    let sql = format!("UPDATE groups SET {} WHERE id = ?", sets.join(", "));
-    params_vec.push(Box::new(id));
-    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
-    Ok(())
+    let (sql, params) = build_update("groups", sets, "id", Box::new(id))?;
+    exec_update(conn, &sql, &params)
 }
 
 #[tauri::command]
 pub fn delete_group(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM session_groups WHERE group_id = ?1", params![id]).map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM groups WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM session_groups WHERE group_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM groups WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -713,44 +823,52 @@ pub fn edit_tag(
     sort: Option<i64>,
 ) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let mut sets = Vec::new();
-    let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(n) = name {
-        sets.push("name = ?");
-        params_vec.push(Box::new(n));
+        sets.push(SetClause {
+            column: "name",
+            value: Box::new(n),
+        });
     }
     if let Some(c) = color {
-        sets.push("color = ?");
-        params_vec.push(Box::new(c));
+        sets.push(SetClause {
+            column: "color",
+            value: Box::new(c),
+        });
     }
     if let Some(s) = sort {
-        sets.push("sort = ?");
-        params_vec.push(Box::new(s));
+        sets.push(SetClause {
+            column: "sort",
+            value: Box::new(s),
+        });
     }
     if sets.is_empty() {
         return Ok(());
     }
-    sets.push("updated_at = CURRENT_TIMESTAMP");
-    let sql = format!("UPDATE tags SET {} WHERE id = ?", sets.join(", "));
-    params_vec.push(Box::new(id));
-    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
-    Ok(())
+    let (sql, params) = build_update("tags", sets, "id", Box::new(id))?;
+    exec_update(conn, &sql, &params)
 }
 
 #[tauri::command]
 pub fn delete_tag(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM session_tags WHERE tag_id = ?1", params![id]).map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM tags WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM session_tags WHERE tag_id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM tags WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn edit_session(
     id: String,
     addr: Option<String>,
@@ -762,56 +880,78 @@ pub fn edit_session(
     is_favorite: Option<bool>,
 ) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let mut sets = Vec::new();
-    let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(a) = addr {
-        sets.push("addr = ?");
-        params_vec.push(Box::new(a));
+        sets.push(SetClause {
+            column: "addr",
+            value: Box::new(a),
+        });
     }
     if let Some(p) = port {
-        sets.push("port = ?");
-        params_vec.push(Box::new(p));
+        sets.push(SetClause {
+            column: "port",
+            value: Box::new(p),
+        });
     }
     if let Some(s) = server_name {
-        sets.push("server_name = ?");
-        params_vec.push(Box::new(s));
+        sets.push(SetClause {
+            column: "server_name",
+            value: Box::new(s),
+        });
     }
     if let Some(u) = username {
-        sets.push("username = ?");
-        params_vec.push(Box::new(u));
+        sets.push(SetClause {
+            column: "username",
+            value: Box::new(u),
+        });
     }
     if let Some(at) = auth_type {
-        sets.push("auth_type = ?");
-        params_vec.push(Box::new(at));
+        sets.push(SetClause {
+            column: "auth_type",
+            value: Box::new(at),
+        });
     }
     if let Some(pk) = private_key_path {
-        sets.push("private_key_path = ?");
-        params_vec.push(Box::new(pk));
+        sets.push(SetClause {
+            column: "private_key_path",
+            value: Box::new(pk),
+        });
     }
     if let Some(fav) = is_favorite {
-        sets.push("is_favorite = ?");
-        params_vec.push(Box::new(if fav { 1 } else { 0 }));
+        sets.push(SetClause {
+            column: "is_favorite",
+            value: Box::new(if fav { 1 } else { 0 }),
+        });
     }
     if sets.is_empty() {
         return Ok(());
     }
-    sets.push("updated_at = CURRENT_TIMESTAMP");
-    let sql = format!("UPDATE sessions SET {} WHERE id = ?", sets.join(", "));
-    params_vec.push(Box::new(id));
-    let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
-    conn.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
-    Ok(())
+    let (sql, params) = build_update("sessions", sets, "id", Box::new(id))?;
+    exec_update(conn, &sql, &params)
 }
 
 #[tauri::command]
 pub fn delete_session(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM session_groups WHERE session_id = ?1", params![id]).map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM session_tags WHERE session_id = ?1", params![id]).map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM sessions WHERE id = ?1", params![id]).map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM session_groups WHERE session_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM session_tags WHERE session_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute("DELETE FROM sessions WHERE id = ?1", params![id])
+        .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     log::debug!("Deleted session {}", id);
     Ok(())
@@ -820,14 +960,17 @@ pub fn delete_session(id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn add_group(name: Option<String>, sort: Option<i64>) -> Result<String, String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let id = Uuid::new_v4().to_string();
     let name = name.unwrap_or_else(|| "Default Group".to_string());
     let sort = sort.unwrap_or(1);
     conn.execute(
         "INSERT INTO groups (id, name, sort) VALUES (?1, ?2, ?3)",
         params![id, name, sort],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -848,7 +991,8 @@ pub fn list_groups() -> Result<Vec<Group>, String> {
                 })
             })
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -899,7 +1043,8 @@ pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String>
                 })
             })
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -910,14 +1055,17 @@ pub fn add_tag(
     sort: Option<i64>,
 ) -> Result<String, String> {
     let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
+    let conn = guard
+        .as_mut()
+        .ok_or_else(|| "DB not initialized".to_string())?;
     let id = Uuid::new_v4().to_string();
     let name = name.unwrap_or_default();
     let sort = sort.unwrap_or(1);
     conn.execute(
         "INSERT INTO tags (id, name, color, sort) VALUES (?1, ?2, ?3, ?4)",
         params![id, name, color, sort],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
     Ok(id)
 }
 
@@ -939,7 +1087,8 @@ pub fn list_tags() -> Result<Vec<Tag>, String> {
                 })
             })
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -991,215 +1140,51 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
                 })
             })
             .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
     })
 }
 
-#[tauri::command]
-pub fn export_sessions(password: String) -> Result<String, String> {
-    // Read all raw data under the lock, then release it before doing the
-    // expensive PBKDF2 key derivation (hundreds of ms per session).
-    struct RawData {
-        sessions: Vec<(Session, Option<String>)>,
-        group_map: std::collections::HashMap<String, Vec<String>>,
-        tag_map: std::collections::HashMap<String, Vec<String>>,
-        groups: Vec<Group>,
-        tags: Vec<Tag>,
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let raw = with_db(|conn| {
-        let sql = format!(
-            "SELECT {}, encrypted_credentials FROM sessions",
-            SESSION_COLUMNS
+    #[test]
+    fn build_update_generates_correct_sql_and_params() {
+        let sets = vec![
+            SetClause {
+                column: "name",
+                value: Box::new("prod db".to_string()),
+            },
+            SetClause {
+                column: "port",
+                value: Box::new(22i64),
+            },
+        ];
+        let (sql, params) = build_update("sessions", sets, "id", Box::new("abc".to_string()))
+            .expect("build_update should succeed");
+
+        assert_eq!(
+            sql,
+            "UPDATE sessions SET name = ?, port = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
         );
-        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-        let session_rows = stmt
-            .query_map([], |row| {
-                let mut s = row_to_session(row)?;
-                // When using SELECT with extra column at end, indices shift:
-                // encrypted_credentials is column 11.
-                let _ = &mut s;
-                let encrypted: Option<String> = row.get(11)?;
-                Ok((s, encrypted))
-            })
-            .map_err(|e| e.to_string())?;
-        let sessions = session_rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        drop(stmt);
-
-        let mut group_map = std::collections::HashMap::new();
-        let mut g = conn
-            .prepare("SELECT session_id, group_id FROM session_groups").map_err(|e| e.to_string())?;
-        let rows = g.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
-        for r in rows {
-            let (sid, gid): (String, String) = r.map_err(|e| e.to_string())?;
-            group_map
-                .entry(sid)
-                .or_insert_with(Vec::new)
-                .push(gid);
-        }
-        drop(g);
-
-        let mut tag_map = std::collections::HashMap::new();
-        let mut t = conn
-            .prepare("SELECT session_id, tag_id FROM session_tags").map_err(|e| e.to_string())?;
-        let rows = t.query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        }).map_err(|e| e.to_string())?;
-        for r in rows {
-            let (sid, tid): (String, String) = r.map_err(|e| e.to_string())?;
-            tag_map.entry(sid).or_insert_with(Vec::new).push(tid);
-        }
-        drop(t);
-
-        let groups = {
-            let mut s = conn.prepare(
-                "SELECT id, name, sort, created_at, updated_at FROM groups",
-            ).map_err(|e| e.to_string())?;
-            let rows = s.query_map([], |row| {
-                Ok(Group {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    sort: row.get(2)?,
-                    created_at: row.get(3)?,
-                    updated_at: row.get(4)?,
-                })
-            }).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        };
-
-        let tags = {
-            let mut s = conn.prepare(
-                "SELECT id, name, color, sort, created_at, updated_at FROM tags",
-            ).map_err(|e| e.to_string())?;
-            let rows = s.query_map([], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    color: row.get(2)?,
-                    sort: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
-                })
-            }).map_err(|e| e.to_string())?;
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|e| e.to_string())?
-        };
-
-        Ok(RawData {
-            sessions,
-            group_map,
-            tag_map,
-            groups,
-            tags,
-        })
-    })?;
-
-    let mut group_map = raw.group_map;
-    let mut tag_map = raw.tag_map;
-    let mut export_sessions = Vec::with_capacity(raw.sessions.len());
-    for (metadata, encrypted_creds) in raw.sessions {
-        let re_encrypted = if let Some(creds) = encrypted_creds {
-            let sensitive = crate::encryption::EncryptionManager::decrypt(&creds)?;
-            Some(crate::encryption::EncryptionManager::encrypt_with_key(
-                &sensitive, &password,
-            )?)
-        } else {
-            None
-        };
-
-        export_sessions.push(ExportSession {
-            group_ids: group_map.remove(&metadata.id).unwrap_or_default(),
-            tag_ids: tag_map.remove(&metadata.id).unwrap_or_default(),
-            metadata,
-            encrypted_credentials: re_encrypted,
-        });
+        assert_eq!(params.len(), 3, "two set columns + one where value");
     }
 
-    let data = ExportData {
-        sessions: export_sessions,
-        groups: raw.groups,
-        tags: raw.tags,
-    };
-    serde_json::to_string(&data).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub fn import_sessions(json_data: String, password: String) -> Result<(), String> {
-    let export_data: ExportData = serde_json::from_str(&json_data).map_err(|e| e.to_string())?;
-
-    // Decrypt/re-encrypt all credentials BEFORE taking the DB lock — PBKDF2
-    // (390k iterations per session) must not block every other DB call.
-    let mut prepared_sessions = Vec::with_capacity(export_data.sessions.len());
-    for mut session in export_data.sessions {
-        let re_encrypted = if let Some(creds) = session.encrypted_credentials.take() {
-            let sensitive =
-                crate::encryption::EncryptionManager::decrypt_with_key(&creds, &password)?;
-            Some(crate::encryption::EncryptionManager::encrypt(&sensitive)?)
-        } else {
-            None
-        };
-        prepared_sessions.push((session, re_encrypted));
+    #[test]
+    fn build_update_always_bumps_updated_at() {
+        let (sql, _) = build_update("groups", Vec::new(), "id", Box::new("g1".to_string()))
+            .expect("build_update should succeed");
+        assert!(sql.contains("updated_at = CURRENT_TIMESTAMP"));
     }
 
-    let mut guard = db_conn()?;
-    let conn = guard.as_mut().ok_or_else(|| "DB not initialized".to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-
-    for group in export_data.groups {
-        tx.execute(
-            "INSERT OR IGNORE INTO groups (id, name, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![group.id, group.name, group.sort, group.created_at, group.updated_at],
-        ).map_err(|e| e.to_string())?;
+    #[test]
+    fn build_update_rejects_invalid_identifiers() {
+        let sets = vec![SetClause {
+            column: "name; DROP TABLE sessions",
+            value: Box::new(1i64),
+        }];
+        let res = build_update("sessions", sets, "id", Box::new("x".to_string()));
+        assert!(res.is_err(), "injection attempt must be rejected");
     }
-
-    for tag in export_data.tags {
-        tx.execute(
-            "INSERT OR IGNORE INTO tags (id, name, color, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![tag.id, tag.name, tag.color, tag.sort, tag.created_at, tag.updated_at],
-        ).map_err(|e| e.to_string())?;
-    }
-
-    for (session, re_encrypted) in prepared_sessions {
-        let metadata = session.metadata;
-
-        tx.execute(
-            "INSERT OR REPLACE INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![
-                metadata.id, metadata.addr, metadata.port, metadata.server_name,
-                metadata.username, metadata.auth_type, metadata.private_key_path,
-                if metadata.is_favorite { 1 } else { 0 }, re_encrypted,
-                metadata.created_at, metadata.updated_at
-            ],
-        ).map_err(|e| e.to_string())?;
-
-        let _ = tx.execute(
-            "DELETE FROM session_groups WHERE session_id = ?1",
-            params![metadata.id],
-        );
-        for gid in session.group_ids {
-            let _ = tx.execute(
-                "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
-                params![metadata.id, gid],
-            );
-        }
-
-        let _ = tx.execute(
-            "DELETE FROM session_tags WHERE session_id = ?1",
-            params![metadata.id],
-        );
-        for tid in session.tag_ids {
-            let _ = tx.execute(
-                "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-                params![metadata.id, tid],
-            );
-        }
-    }
-
-    tx.commit().map_err(|e| e.to_string())
 }

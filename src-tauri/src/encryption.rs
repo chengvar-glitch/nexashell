@@ -1,11 +1,11 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit},
 };
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use once_cell::sync::OnceCell;
 use pbkdf2::pbkdf2_hmac;
-use rand::{thread_rng, RngCore};
+use rand::{RngCore, thread_rng};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use zeroize::Zeroize;
@@ -113,7 +113,7 @@ impl EncryptionManager {
 
                 // Attempt to migrate the key into the keychain for better security
                 if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
-                    let b64 = general_purpose::STANDARD.encode(&key);
+                    let b64 = general_purpose::STANDARD.encode(key);
                     if entry.set_password(&b64).is_ok() {
                         let _ = std::fs::remove_file(&key_path);
                     }
@@ -135,19 +135,16 @@ impl EncryptionManager {
         thread_rng().fill_bytes(&mut key);
 
         // Write to file with restrictive permissions
-        std::fs::write(&key_path, &key).map_err(|e| e.to_string())?;
+        std::fs::write(&key_path, key).map_err(|e| e.to_string())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &key_path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
         }
 
         // Also try to store in keychain
         if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
-            let b64 = general_purpose::STANDARD.encode(&key);
+            let b64 = general_purpose::STANDARD.encode(key);
             if entry.set_password(&b64).is_ok() {
                 let _ = std::fs::remove_file(&key_path);
             }
@@ -184,10 +181,7 @@ impl EncryptionManager {
         Ok(format!("v1${}${}", salt_b64, inner))
     }
 
-    pub fn decrypt_with_key(
-        encrypted: &str,
-        key_str: &str,
-    ) -> Result<SensitiveData, String> {
+    pub fn decrypt_with_key(encrypted: &str, key_str: &str) -> Result<SensitiveData, String> {
         // New format: v1$<salt_b64>$<nonce+ciphertext_b64>
         if let Some(rest) = encrypted.strip_prefix("v1$") {
             let mut parts = rest.splitn(2, '$');
@@ -267,5 +261,71 @@ impl EncryptionManager {
 
         let data: SensitiveData = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
         Ok(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> SensitiveData {
+        SensitiveData {
+            password: Some("hunter2".to_string()),
+            key_passphrase: Some("pass-phrase-123".to_string()),
+        }
+    }
+
+    #[test]
+    fn roundtrip_with_master_key() {
+        EncryptionManager::init();
+        let data = sample();
+        let enc = EncryptionManager::encrypt(&data).expect("encrypt");
+        let dec = EncryptionManager::decrypt(&enc).expect("decrypt");
+        assert_eq!(dec, data);
+    }
+
+    #[test]
+    fn roundtrip_no_credentials() {
+        EncryptionManager::init();
+        let data = SensitiveData {
+            password: None,
+            key_passphrase: None,
+        };
+        let enc = EncryptionManager::encrypt(&data).expect("encrypt");
+        let dec = EncryptionManager::decrypt(&enc).expect("decrypt");
+        assert_eq!(dec, data);
+    }
+
+    #[test]
+    fn export_roundtrip_new_format() {
+        let data = sample();
+        let enc = EncryptionManager::encrypt_with_key(&data, "export-pass").expect("encrypt");
+        assert!(
+            enc.starts_with("v1$"),
+            "should use the v1$<salt>$<payload> format"
+        );
+        let dec = EncryptionManager::decrypt_with_key(&enc, "export-pass").expect("decrypt");
+        assert_eq!(dec, data);
+    }
+
+    #[test]
+    fn export_wrong_password_fails() {
+        let data = sample();
+        let enc = EncryptionManager::encrypt_with_key(&data, "correct").expect("encrypt");
+        assert!(EncryptionManager::decrypt_with_key(&enc, "wrong").is_err());
+    }
+
+    #[test]
+    fn legacy_export_format_still_decrypts() {
+        // Simulate the pre-v1.3 format: static salt, bare nonce+ciphertext.
+        let data = sample();
+        let mut key = [0u8; KEY_LEN];
+        let salt = b"nexashell-export";
+        pbkdf2_hmac::<Sha256>(b"legacy-pass", salt, 100_000, &mut key);
+        let inner = EncryptionManager::encrypt_with_key_bytes(&data, &key).expect("encrypt");
+        key.zeroize();
+
+        let dec = EncryptionManager::decrypt_with_key(&inner, "legacy-pass").expect("decrypt");
+        assert_eq!(dec, data);
     }
 }

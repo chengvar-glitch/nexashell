@@ -1,4 +1,4 @@
-use tauri::{command, AppHandle, Window};
+use tauri::{AppHandle, Window, command};
 
 const PREVIEW_MAX_BYTES: u64 = 1024;
 

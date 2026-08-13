@@ -1,5 +1,5 @@
 use crate::common::{OutputChunk, SessionId};
-use portable_pty::{native_pty_system, Child, CommandBuilder, PtySize};
+use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -81,10 +81,9 @@ impl TerminalManager {
         cmd.env("TERM", "xterm-256color");
         cmd.env("COLORTERM", "truecolor");
 
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .map_err(|e| TerminalError::SpawnFailed(format!("Failed to spawn shell '{}': {}", shell, e)))?;
+        let child = pair.slave.spawn_command(cmd).map_err(|e| {
+            TerminalError::SpawnFailed(format!("Failed to spawn shell '{}': {}", shell, e))
+        })?;
 
         let (input_sender, mut input_receiver) = mpsc::unbounded_channel::<String>();
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -145,20 +144,40 @@ impl TerminalManager {
 
         // Input writer runs on an async task. PTY master writes are normally
         // fast; if the buffer is full the OS will apply backpressure.
+        // Drains all currently-pending inputs into a single buffer and issues
+        // one write per batch, so large pastes don't spawn one syscall per
+        // input event.
         let stop_flag_writer = stop_flag.clone();
         let mut writer_clone = writer;
         let input_handle = tokio::spawn(async move {
-            while let Some(input) = input_receiver.recv().await {
+            let mut batch = Vec::<u8>::with_capacity(4096);
+            loop {
                 if stop_flag_writer.load(Ordering::SeqCst) {
                     break;
                 }
+
+                // Wait for at least one input, then drain everything else that
+                // is already queued (non-blocking) into the same batch.
+                match input_receiver.recv().await {
+                    Some(input) => batch.extend_from_slice(input.as_bytes()),
+                    None => break,
+                }
+                while let Ok(input) = input_receiver.try_recv() {
+                    batch.extend_from_slice(input.as_bytes());
+                }
+
+                if batch.is_empty() {
+                    continue;
+                }
+
                 if writer_clone
-                    .write_all(input.as_bytes())
+                    .write_all(&batch)
                     .and_then(|_| writer_clone.flush())
                     .is_err()
                 {
                     break;
                 }
+                batch.clear();
             }
         });
 
@@ -215,51 +234,50 @@ impl TerminalManager {
                 cols: u16,
                 rows: u16,
             }
-            if let Ok(payload) = serde_json::from_str::<ResizePayload>(event.payload()) {
-                if let Ok(m) = master.lock() {
-                    if let Err(e) = m.resize(PtySize {
-                        rows: payload.rows,
-                        cols: payload.cols,
-                        pixel_width: 0,
-                        pixel_height: 0,
-                    }) {
-                        log::warn!("PTY resize failed: {}", e);
-                    }
-                }
+            if let Ok(payload) = serde_json::from_str::<ResizePayload>(event.payload())
+                && let Ok(m) = master.lock()
+                && let Err(e) = m.resize(PtySize {
+                    rows: payload.rows,
+                    cols: payload.cols,
+                    pixel_width: 0,
+                    pixel_height: 0,
+                })
+            {
+                log::warn!("PTY resize failed: {}", e);
             }
         })
     }
 
     pub fn disconnect_local(&self, session_id: &SessionId) -> Result<(), TerminalError> {
-        if let Ok(mut channels) = self.channels.write() {
-            if let Some(mut info) = channels.remove(session_id) {
-                info.stop_flag.store(true, Ordering::SeqCst);
+        if let Ok(mut channels) = self.channels.write()
+            && let Some(mut info) = channels.remove(session_id)
+        {
+            info.stop_flag.store(true, Ordering::SeqCst);
 
-                if let Some(handle) = info.output_handle.take() {
-                    handle.abort();
-                }
-                if let Some(handle) = info.input_handle.take() {
-                    handle.abort();
-                }
+            if let Some(handle) = info.output_handle.take() {
+                handle.abort();
+            }
+            if let Some(handle) = info.input_handle.take() {
+                handle.abort();
+            }
 
-                // Unregister event listeners — this was missing previously and
-                // caused the closures (which hold the PTY master Arc) to live
-                // for the lifetime of the app.
-                if let Some(ref app_handle) = info.app_handle {
-                    if let Some(id) = info.input_listener_id.take() {
-                        app_handle.unlisten(id);
-                    }
-                    if let Some(id) = info.resize_listener_id.take() {
-                        app_handle.unlisten(id);
-                    }
+            // Unregister event listeners — this was missing previously and
+            // caused the closures (which hold the PTY master Arc) to live
+            // for the lifetime of the app.
+            if let Some(ref app_handle) = info.app_handle {
+                if let Some(id) = info.input_listener_id.take() {
+                    app_handle.unlisten(id);
                 }
+                if let Some(id) = info.resize_listener_id.take() {
+                    app_handle.unlisten(id);
+                }
+            }
 
-                if let Some(child_arc) = info.child.take() {
-                    if let Ok(mut child) = child_arc.lock() {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                    }
-                }
+            if let Some(child_arc) = info.child.take()
+                && let Ok(mut child) = child_arc.lock()
+            {
+                let _ = child.kill();
+                let _ = child.wait();
             }
         }
         Ok(())

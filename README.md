@@ -174,6 +174,12 @@ bun tauri dev
   bun lint:check     # ESLint without auto-fix (CI-friendly)
   bun type-check     # vue-tsc --noEmit
   ```
+- **Tests**:
+  ```bash
+  bun test           # Run frontend (Vitest) unit tests
+  bun test:coverage  # Frontend tests with coverage report
+  cargo test         # Rust unit tests (run from src-tauri/)
+  ```
 
 ---
 

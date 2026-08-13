@@ -35,7 +35,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 use cocoa::appkit::{NSWindow, NSWindowTitleVisibility};
-                use cocoa::base::{id, NO, YES};
+                use cocoa::base::{NO, YES, id};
 
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_shadow(true);
@@ -44,7 +44,8 @@ pub fn run() {
                         let ns_window = ns_window as id;
 
                         unsafe {
-                            ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
+                            ns_window
+                                .setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
                             ns_window.setOpaque_(NO);
                             ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(
                                 cocoa::base::nil,
@@ -113,8 +114,8 @@ pub fn run() {
             db::edit_session,
             db::delete_session,
             db::toggle_favorite,
-            db::export_sessions,
-            db::import_sessions,
+            db::import_export::export_sessions,
+            db::import_export::import_sessions,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
