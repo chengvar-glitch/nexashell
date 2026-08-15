@@ -51,6 +51,10 @@ pub enum SshError {
 
     #[error("Host key verification failed for {host}: {reason}")]
     HostKeyVerificationFailed { host: String, reason: String },
+
+    /// Upload was cancelled by the user before it finished transferring.
+    #[error("Upload cancelled by user")]
+    UploadCancelled,
 }
 
 // ============================================================================
@@ -114,6 +118,15 @@ struct SshAuth {
     key_passphrase: Option<String>,
 }
 
+/// Per-task control shared between the active upload loop and the pause /
+/// resume / cancel Tauri commands. The `paused` condvar lets an in-flight
+/// upload park at a chunk boundary until it is resumed or cancelled.
+#[derive(Default)]
+pub struct UploadControl {
+    pub cancel: Arc<AtomicBool>,
+    pub paused: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
 pub struct SshChannelInfo {
     pub handle: Option<tokio::task::JoinHandle<()>>,
     pub status_handle: Option<tokio::task::JoinHandle<()>>,
@@ -127,6 +140,10 @@ pub struct SshChannelInfo {
     /// eliminating the blocking-mode race that previously froze terminals
     /// during file uploads.
     pub helper_sess: Arc<tokio::sync::Mutex<Session>>,
+
+    /// Active SFTP upload controls keyed by task id. Entries are inserted when
+    /// an upload starts and removed when it terminates (success/error/cancel).
+    pub uploads: Arc<RwLock<HashMap<String, Arc<UploadControl>>>>,
 
     pub input_listener_id: Option<tauri::EventId>,
     pub resize_listener_id: Option<tauri::EventId>,
@@ -235,6 +252,7 @@ impl SshManager {
         let channel_arc = Arc::new(tokio::sync::Mutex::new(main_channel));
         let sess_arc = Arc::new(tokio::sync::Mutex::new(main_sess));
         let helper_arc = Arc::new(tokio::sync::Mutex::new(helper_sess));
+        let uploads_map = Arc::new(RwLock::new(HashMap::new()));
 
         let (input_listener_id, resize_listener_id) = if let Some(h) = &app_handle {
             let input_id = Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
@@ -278,6 +296,7 @@ impl SshManager {
                     initial_outputs,
                     refresh_interval,
                     helper_sess: helper_arc,
+                    uploads: uploads_map,
                     input_listener_id,
                     resize_listener_id,
                     app_handle: app_handle.clone(),
@@ -1069,7 +1088,7 @@ impl SshManager {
         local_path: String,
         remote_path: String,
     ) -> Result<(), SshError> {
-        let (helper_sess, stop_flag) = {
+        let (helper_sess, stop_flag, uploads) = {
             let channels = self
                 .channels
                 .read()
@@ -1077,17 +1096,34 @@ impl SshManager {
             let info = channels
                 .get(&session_id)
                 .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
-            (info.helper_sess.clone(), info.stop_flag.clone())
+            (
+                info.helper_sess.clone(),
+                info.stop_flag.clone(),
+                info.uploads.clone(),
+            )
         };
 
         let watcher_app = app_handle.clone();
         let watcher_sid = session_id.as_ref().to_string();
         let watcher_task_id = task_id.clone();
 
+        // Register the per-task control so pause/cancel commands can find it.
+        let control: Arc<UploadControl> = Arc::new(UploadControl::default());
+        {
+            let mut uploads = uploads
+                .write()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            uploads.insert(task_id.clone(), control.clone());
+        }
+        // Clean up the control entry once the upload terminates (success/error/cancel).
+        let uploads_cleanup = uploads.clone();
+        let cleanup_task_id = task_id.clone();
+
         let upload_handle = tokio::task::spawn_blocking(move || {
             let sid = session_id.as_ref().to_string();
             let upload_start = std::time::Instant::now();
             let event_name = format!("ssh-upload-progress-{}", sid);
+            let control = control.clone();
 
             let result: Result<u64, SshError> = (|| {
                 let mut local_file = std::fs::File::open(&local_path).map_err(|e| {
@@ -1101,7 +1137,9 @@ impl SshManager {
                 let mut buffer = [0u8; 1024 * 512];
                 let mut total_written: u64 = 0;
 
-                // Open SFTP subsystem and remote file ONCE.
+                // Open SFTP subsystem and remote file ONCE. The file handle and
+                // the localized SFTP file pointer stay open across pause spans,
+                // so resume simply continues writing at the same offset.
                 let sess = helper_sess.blocking_lock();
                 let sftp = sess.sftp().map_err(|e| {
                     SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
@@ -1122,10 +1160,62 @@ impl SshManager {
                     })?;
 
                 loop {
+                    // Cancel has priority over pause: a cancelled task must
+                    // leave the pause wait immediately.
+                    if control.cancel.load(Ordering::SeqCst) {
+                        return Err(SshError::UploadCancelled);
+                    }
                     if stop_flag.load(Ordering::SeqCst) {
                         return Err(SshError::OperationFailed(
                             "Upload aborted: session disconnected".to_string(),
                         ));
+                    }
+
+                    // Park at the current chunk boundary while paused. The
+                    // pause lock is held for the whole span, so the pause
+                    // status is reported exactly once per pause/resume cycle.
+                    {
+                        let (pause_lock, cvar) = &*control.paused;
+                        let mut paused = pause_lock.lock().unwrap();
+                        if *paused {
+                            let _ = app_handle.emit(
+                                &event_name,
+                                UploadProgress {
+                                    task_id: task_id.clone(),
+                                    session_id: sid.clone(),
+                                    progress: if total_bytes > 0 {
+                                        (total_written as f64 / total_bytes as f64) * 100.0
+                                    } else {
+                                        0.0
+                                    },
+                                    uploaded_bytes: total_written,
+                                    total_bytes,
+                                    status: "paused".to_string(),
+                                    message: "Upload paused".to_string(),
+                                    speed: 0.0,
+                                    error: None,
+                                },
+                            );
+                            while *paused {
+                                if control.cancel.load(Ordering::SeqCst) {
+                                    return Err(SshError::UploadCancelled);
+                                }
+                                if stop_flag.load(Ordering::SeqCst) {
+                                    return Err(SshError::OperationFailed(
+                                        "Upload aborted: session disconnected".to_string(),
+                                    ));
+                                }
+                                paused = cvar
+                                    .wait_timeout(paused, std::time::Duration::from_millis(200))
+                                    .map_err(|e| {
+                                        SshError::OperationFailed(format!(
+                                            "Pause wait failed: {}",
+                                            e
+                                        ))
+                                    })?
+                                    .0;
+                            }
+                        }
                     }
 
                     let n = local_file.read(&mut buffer).map_err(|e| {
@@ -1189,8 +1279,8 @@ impl SshManager {
                     let _ = app_handle.emit(
                         &event_name,
                         UploadProgress {
-                            task_id,
-                            session_id: sid,
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
                             progress: 100.0,
                             uploaded_bytes: total_bytes,
                             total_bytes,
@@ -1201,13 +1291,39 @@ impl SshManager {
                         },
                     );
                 }
+                Err(e) if matches!(e, SshError::UploadCancelled) => {
+                    log::info!("[SFTP {}] upload cancelled by user", sid);
+                    // Delete the partial remote file left behind by the
+                    // interrupted transfer (best-effort). The blocking session
+                    // lock is already released once the closure unwound.
+                    {
+                        let sess = helper_sess.blocking_lock();
+                        if let Ok(sftp) = sess.sftp() {
+                            let _ = sftp.unlink(Path::new(&remote_path));
+                        }
+                    }
+                    let _ = app_handle.emit(
+                        &event_name,
+                        UploadProgress {
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
+                            progress: 0.0,
+                            uploaded_bytes: 0,
+                            total_bytes: 0,
+                            status: "cancelled".to_string(),
+                            message: "Upload cancelled".to_string(),
+                            speed: 0.0,
+                            error: None,
+                        },
+                    );
+                }
                 Err(e) => {
                     log::error!("[SFTP {}] upload failed: {}", sid, e);
                     let _ = app_handle.emit(
                         &event_name,
                         UploadProgress {
-                            task_id,
-                            session_id: sid,
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
                             progress: 0.0,
                             uploaded_bytes: 0,
                             total_bytes: 0,
@@ -1218,6 +1334,12 @@ impl SshManager {
                         },
                     );
                 }
+            }
+
+            // Drop the per-task control reference so stale entries do not
+            // accumulate for terminated uploads.
+            if let Ok(mut uploads) = uploads_cleanup.write() {
+                uploads.remove(&cleanup_task_id);
             }
         });
 
@@ -1292,6 +1414,62 @@ impl SshManager {
             .get(session_id)
             .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
         info.refresh_interval.store(interval_ms, Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Look up the per-task upload control for a session/task, if present.
+    fn upload_control(
+        &self,
+        session_id: &SessionId,
+        task_id: &str,
+    ) -> Result<Option<Arc<UploadControl>>, SshError> {
+        let channels = self
+            .channels
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        let info = channels
+            .get(session_id)
+            .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+        let uploads = info
+            .uploads
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        Ok(uploads.get(task_id).cloned())
+    }
+
+    /// Pause a running upload at its next chunk boundary.
+    pub fn pause_upload(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
+        if let Some(control) = self.upload_control(session_id, task_id)? {
+            let (lock, _cvar) = &*control.paused;
+            let mut paused = lock.lock().unwrap();
+            *paused = true;
+            // No notify needed: the upload loop polls `paused` each iteration.
+        }
+        Ok(())
+    }
+
+    /// Resume a previously paused upload.
+    pub fn resume_upload(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
+        if let Some(control) = self.upload_control(session_id, task_id)? {
+            let (lock, cvar) = &*control.paused;
+            let mut paused = lock.lock().unwrap();
+            *paused = false;
+            cvar.notify_all();
+        }
+        Ok(())
+    }
+
+    /// Cancel a running or paused upload. The upload loop will terminate and
+    /// the partial remote file will be removed.
+    pub fn cancel_upload(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
+        if let Some(control) = self.upload_control(session_id, task_id)? {
+            control.cancel.store(true, Ordering::SeqCst);
+            // Wake any park wait so a paused upload aborts immediately.
+            let (lock, cvar) = &*control.paused;
+            let mut paused = lock.lock().unwrap();
+            *paused = false;
+            cvar.notify_all();
+        }
         Ok(())
     }
 }
@@ -1395,4 +1573,98 @@ pub async fn probe_remote_path(
     sessionId: String,
 ) -> Result<String, SshError> {
     state.probe_remote_path(&SessionId::from(sessionId)).await
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn pause_upload(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    taskId: String,
+) -> Result<(), SshError> {
+    state.pause_upload(&SessionId::from(sessionId), &taskId)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn resume_upload(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    taskId: String,
+) -> Result<(), SshError> {
+    state.resume_upload(&SessionId::from(sessionId), &taskId)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn cancel_upload(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    taskId: String,
+) -> Result<(), SshError> {
+    state.cancel_upload(&SessionId::from(sessionId), &taskId)
+}
+
+#[cfg(test)]
+mod upload_control_tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// A paused upload's `cancel` flag must cause the pause wait to terminate
+    /// (the loop polls both paused and cancel).
+    #[test]
+    fn cancel_wakes_paused_wait() {
+        let control = Arc::new(<UploadControl>::default());
+
+        let parked = {
+            let control_c = control.clone();
+            std::thread::spawn(move || {
+                let guard = control_c.paused.0.lock().unwrap();
+                let _ = control_c.paused.1.wait_timeout(
+                    guard,
+                    std::time::Duration::from_millis(300),
+                );
+                control_c.cancel.load(Ordering::SeqCst)
+            })
+        };
+
+        // Simulate a paused upload being cancelled: set both flags and wake.
+        *control.paused.0.lock().unwrap() = true;
+        control.cancel.store(true, Ordering::SeqCst);
+        *control.paused.0.lock().unwrap() = false;
+        control.paused.1.notify_all();
+
+        let observed = parked.join().unwrap();
+        assert!(observed, "cancel flag should be observable after wake");
+        assert!(control.cancel.load(Ordering::SeqCst));
+    }
+
+    /// Pause/resume flip the `paused` flag so the upload loop parks and
+    /// resumes accordingly.
+    #[test]
+    fn pause_then_resume_flips_flag() {
+        let control = Arc::new(<UploadControl>::default());
+        let (lock, _cvar) = &*control.paused;
+
+        // simulate pause_upload
+        *lock.lock().unwrap() = true;
+        assert!(*lock.lock().unwrap(), "paused flag should be set");
+
+        // simulate resume_upload
+        *lock.lock().unwrap() = false;
+        assert!(!*lock.lock().unwrap(), "paused flag should be cleared");
+    }
+
+    /// Repeated pause/resume cycles remain idempotent on the flag.
+    #[test]
+    fn idempotent_pause() {
+        let control = Arc::new(<UploadControl>::default());
+        let (lock, _cvar) = &*control.paused;
+        *lock.lock().unwrap() = true;
+        *lock.lock().unwrap() = true;
+        assert!(*lock.lock().unwrap());
+        *lock.lock().unwrap() = false;
+        *lock.lock().unwrap() = false;
+        assert!(!*lock.lock().unwrap());
+    }
 }

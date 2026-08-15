@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef, nextTick, watch, onActivated, onDeactivated } from 'vue';
+import { onMounted, onUnmounted, ref, shallowRef, nextTick, watch, onActivated, onDeactivated, computed } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -147,10 +147,98 @@ const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
 };
 
 const clearUploadTasks = () => {
-  // Only clear completed and error tasks, keep uploading/pending tasks
+  // Only clear completed and error tasks, keep uploading/pending/paused tasks
   uploadTasks.value = uploadTasks.value.filter(
-    task => task.status === 'uploading' || task.status === 'pending'
+    task =>
+      task.status === 'uploading' ||
+      task.status === 'pending' ||
+      task.status === 'paused'
   );
+};
+
+// ---------------------------------------------------------------------------
+// Pre-upload confirmation dialog
+// ---------------------------------------------------------------------------
+
+interface UploadPreviewItem {
+  localPath: string;
+  fileName: string;
+  remotePath: string;
+}
+
+interface UploadConfirmState {
+  open: boolean;
+  targetDir: string;
+  files: UploadPreviewItem[];
+}
+
+const uploadConfirm = ref<UploadConfirmState>({
+  open: false,
+  targetDir: '',
+  files: [],
+});
+
+/** Number of files queued for confirmation. */
+const confirmCount = computed(() => uploadConfirm.value.files.length);
+
+const closeUploadConfirm = () => {
+  uploadConfirm.value.open = false;
+  uploadConfirm.value.files = [];
+};
+
+/**
+ * Resolve the final remote file path for a local file against a target
+ * directory, applying home expansion, relative-path resolution, and
+ * normalization. This has no side effects and is reused by both the
+ * confirmation dialog and the actual upload.
+ */
+const resolveUploadTarget = (
+  path: string,
+  targetDirOverride?: string
+): { fileName: string; remotePath: string } => {
+  const fileName = path.split('/').pop() || path;
+  let targetDir =
+    targetDirOverride ?? currentRemotePath.value ?? '';
+
+  // 1. Handle home expansion
+  if (remoteHomeDir.value) {
+    if (targetDir === '~') {
+      targetDir = remoteHomeDir.value;
+    } else if (targetDir.startsWith('~/')) {
+      targetDir = targetDir.replace('~', remoteHomeDir.value);
+    }
+  }
+
+  // Resolve relative paths against last known absolute path
+  if (
+    targetDir &&
+    !targetDir.startsWith('/') &&
+    lastKnownAbsolutePath.value
+  ) {
+    targetDir = normalizeRemotePath(
+      `${lastKnownAbsolutePath.value}/${targetDir}`
+    );
+  }
+
+  // 2. Robust path normalization
+  if (!targetDir || targetDir === '.' || targetDir === '') {
+    if (lastKnownAbsolutePath.value) {
+      targetDir = lastKnownAbsolutePath.value;
+    } else {
+      targetDir = remoteHomeDir.value || '.';
+    }
+  }
+
+  // 3. Build final SFTP path
+  let remotePath = '';
+  if (targetDir === '.') {
+    remotePath = fileName;
+  } else {
+    const base = normalizeRemotePath(targetDir);
+    remotePath = base.endsWith('/') ? `${base}${fileName}` : `${base}/${fileName}`;
+  }
+
+  return { fileName, remotePath };
 };
 
 // Drag and drop listeners
@@ -167,31 +255,29 @@ interface UploadProgressPayload {
   progress: number;
   uploadedBytes: number;
   totalBytes: number;
-  status: 'uploading' | 'success' | 'error';
+  status: 'uploading' | 'paused' | 'success' | 'error' | 'cancelled';
   message: string;
   speed: number;
   error?: string;
 }
 
 /**
- * Handle file drop - Process uploads asynchronously
- * Non-blocking: returns immediately, all processing happens in background
+ * Handle file drop - Show a confirmation dialog with the resolved target
+ * path before any upload actually starts. The upload only begins once the
+ * user confirms. Non-blocking: returns immediately, all processing happens
+ * in the background.
  */
 const handleFileDrop = (paths: string[]) => {
-  // Show dashboard immediately and switch to uploads tab
-  showDashboard.value = true;
-  activeDashboardTab.value = 'uploads';
-
+  // Show dashboard immediately and switch to uploads tab (stays visible once
+  // the user confirms the upload).
   // Ensure terminal retains focus
   nextTick(() => {
     terminal?.focus();
   });
 
-  // Detect path and process files in background (fire-and-forget)
-  // Do NOT await here to keep the function non-blocking
+  // Detect path and build a preview of the resolved target in the background.
   (async () => {
     try {
-      // Detect current path
       await detectRemotePath(() => terminal);
       const detectedPath = currentRemotePath.value;
 
@@ -201,14 +287,45 @@ const handleFileDrop = (paths: string[]) => {
         home: remoteHomeDir.value,
       });
 
-      // Process all files asynchronously without blocking
-      paths.forEach(path => {
-        processFileUpload(path, detectedPath);
+      // Resolve each file's final remote path for the confirmation dialog.
+      const files = paths.map(path => {
+        const { fileName, remotePath } = resolveUploadTarget(path);
+        return { localPath: path, fileName, remotePath };
       });
+
+      uploadConfirm.value = {
+        open: true,
+        targetDir: detectedPath || currentRemotePath.value || '',
+        files,
+      };
     } catch (err) {
       logger.error('Failed to process dropped files', err);
     }
   })();
+};
+
+/** Confirm the pending uploads and start transferring them in the background. */
+const confirmUploads = () => {
+  const { files, targetDir } = uploadConfirm.value;
+  closeUploadConfirm();
+  showDashboard.value = true;
+  activeDashboardTab.value = 'uploads';
+  const effectiveDir = targetDir || currentRemotePath.value || '';
+  files.forEach(file => {
+    processFileUpload(file.localPath, effectiveDir);
+  });
+};
+
+/**
+ * Recompute the previewed remote paths when the user edits the target
+ * directory in the confirmation dialog.
+ */
+const recomputeConfirmTargets = () => {
+  const { targetDir } = uploadConfirm.value;
+  uploadConfirm.value.files = uploadConfirm.value.files.map(file => {
+    const { remotePath } = resolveUploadTarget(file.localPath, targetDir);
+    return { ...file, remotePath };
+  });
 };
 
 /**
@@ -216,77 +333,24 @@ const handleFileDrop = (paths: string[]) => {
  * Fire-and-forget pattern: start upload in background and return immediately
  */
 const processFileUpload = async (path: string, targetDirOverride?: string) => {
-  const fileName = path.split('/').pop() || path;
-  const taskId = addUploadTask(fileName);
+  const taskId = addUploadTask(path.split('/').pop() || path);
 
   // Prepare upload parameters in this async function
   // But do NOT await the actual upload - let it run in background
 
   try {
-    let targetDir = targetDirOverride ?? (currentRemotePath.value || '');
-    let pathSource = 'unknown';
-
-    // 1. Handle home expansion
-    if (remoteHomeDir.value) {
-      if (targetDir === '~') {
-        targetDir = remoteHomeDir.value;
-        pathSource = 'home-expansion';
-      } else if (targetDir.startsWith('~/')) {
-        targetDir = targetDir.replace('~', remoteHomeDir.value);
-        pathSource = 'home-expansion';
-      }
-    }
-
-    // Resolve relative paths against last known absolute path
-    if (
-      targetDir &&
-      !targetDir.startsWith('/') &&
-      lastKnownAbsolutePath.value
-    ) {
-      targetDir = normalizeRemotePath(
-        `${lastKnownAbsolutePath.value}/${targetDir}`
-      );
-      pathSource = 'resolved-relative-to-last-known';
-    }
-
-    // 2. Robust path normalization
-    let remoteFilePath = '';
-
-    if (!targetDir || targetDir === '.' || targetDir === '') {
-      if (lastKnownAbsolutePath.value) {
-        targetDir = lastKnownAbsolutePath.value;
-        pathSource = 'last-known-absolute';
-      } else {
-        targetDir = remoteHomeDir.value || '.';
-        pathSource = 'fallback-home';
-      }
-    } else {
-      if (targetDir.startsWith('/')) {
-        pathSource = 'absolute-path';
-      } else {
-        pathSource = 'relative-path';
-      }
-    }
-
-    // 3. Build final SFTP path
-    if (targetDir === '.') {
-      remoteFilePath = fileName;
-    } else {
-      const base = normalizeRemotePath(targetDir);
-      remoteFilePath = base.endsWith('/') ? `${base}${fileName}` : `${base}/${fileName}`;
-    }
+    const { fileName, remotePath } = resolveUploadTarget(path, targetDirOverride);
 
     updateUploadTask(taskId, {
       status: 'uploading',
       progress: 10,
       message: `Preparing upload...`,
-      remotePath: remoteFilePath,
+      remotePath,
     });
 
     logger.info('Path resolution', {
       originalPath: currentRemotePath.value,
-      resolvedPath: remoteFilePath,
-      source: pathSource,
+      resolvedPath: remotePath,
       detectionMethod: lastPathDetectionSource.value,
       fileName,
     });
@@ -297,7 +361,7 @@ const processFileUpload = async (path: string, targetDirOverride?: string) => {
       sessionId: props.sessionId,
       taskId,
       localPath: path,
-      remotePath: remoteFilePath,
+      remotePath,
     }).catch(err => {
       const errorMessage =
         err instanceof Error
@@ -334,6 +398,80 @@ const processFileUpload = async (path: string, targetDirOverride?: string) => {
     });
 
     logger.error('Failed to prepare upload', err);
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Upload control: pause / resume / cancel
+// ---------------------------------------------------------------------------
+
+/** Pause a running upload at its next chunk boundary. */
+const pauseUploadTask = async (taskId: string) => {
+  // Optimistically reflect the paused state immediately.
+  updateUploadTask(taskId, {
+    status: 'paused',
+    message: t('upload.pausing'),
+  });
+  try {
+    await invoke('pause_upload', {
+      sessionId: props.sessionId,
+      taskId,
+    });
+    updateUploadTask(taskId, {
+      message: t('upload.paused'),
+    });
+  } catch (err) {
+    logger.error('Failed to pause upload', err);
+    updateUploadTask(taskId, {
+      status:
+        uploadTasks.value.find(t => t.id === taskId)?.status ?? 'uploading',
+      message: t('upload.failedToPause'),
+    });
+  }
+};
+
+/** Resume a previously paused upload. */
+const resumeUploadTask = async (taskId: string) => {
+  updateUploadTask(taskId, {
+    status: 'uploading',
+    message: t('upload.resuming'),
+  });
+  try {
+    await invoke('resume_upload', {
+      sessionId: props.sessionId,
+      taskId,
+    });
+  } catch (err) {
+    logger.error('Failed to resume upload', err);
+    updateUploadTask(taskId, {
+      status: 'paused',
+      message: t('upload.failedToResume'),
+    });
+  }
+};
+
+/** Cancel a running or paused upload. */
+const cancelUploadTask = async (taskId: string) => {
+  updateUploadTask(taskId, {
+    status: 'cancelled',
+    progress: 0,
+    message: t('upload.cancelling'),
+  });
+  try {
+    await invoke('cancel_upload', {
+      sessionId: props.sessionId,
+      taskId,
+    });
+    updateUploadTask(taskId, {
+      message: t('upload.cancelled'),
+    });
+  } catch (err) {
+    logger.error('Failed to cancel upload', err);
+    updateUploadTask(taskId, {
+      status:
+        uploadTasks.value.find(t => t.id === taskId)?.status ?? 'cancelled',
+      message: t('upload.failedToCancel'),
+    });
   }
 };
 
@@ -1145,6 +1283,9 @@ const initialize = async (): Promise<void> => {
       @clear-tasks="clearUploadTasks"
       @toggle="showDashboard = !showDashboard"
       @update:active-tab="activeDashboardTab = $event"
+      @pause-task="pauseUploadTask"
+      @resume-task="resumeUploadTask"
+      @cancel-task="cancelUploadTask"
     />
     <div ref="terminalRef" class="terminal-container" />
 
@@ -1177,6 +1318,72 @@ const initialize = async (): Promise<void> => {
         </div>
         <div class="overlay-tip">
           💡 {{ t('ssh.editPathBeforeDrop') }}
+        </div>
+      </div>
+    </div>
+
+    <!-- Pre-upload Confirmation Dialog -->
+    <div v-if="uploadConfirm.open" class="upload-confirm-overlay">
+      <div class="upload-confirm-card" @click.stop>
+        <div class="upload-confirm-header">
+          <h3>{{ t('upload.confirmTitle') }}</h3>
+          <button
+            type="button"
+            class="upload-confirm-close"
+            aria-label="Close"
+            @click="closeUploadConfirm"
+          >
+            ×
+          </button>
+        </div>
+
+        <div class="upload-confirm-body">
+          <div class="confirm-dir-group">
+            <label class="confirm-label">{{
+              t('upload.targetDirectory')
+            }}</label>
+            <input
+              v-model="uploadConfirm.targetDir"
+              class="confirm-dir-input"
+              type="text"
+              spellcheck="false"
+              @input="recomputeConfirmTargets"
+              @keydown.enter.exact.stop.prevent="confirmUploads"
+            />
+          </div>
+
+          <div class="confirm-files">
+            <div
+              v-for="file in uploadConfirm.files"
+              :key="file.localPath"
+              class="confirm-file-row"
+            >
+              <div class="confirm-file-info">
+                <span class="confirm-file-name">{{ file.fileName }}</span>
+                <span class="confirm-file-path" :title="file.remotePath">
+                  {{ t('upload.to') }}: {{ file.remotePath }}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="upload-confirm-footer">
+          <button
+            type="button"
+            class="btn-secondary"
+            @click="closeUploadConfirm"
+          >
+            {{ t('upload.cancelUpload') }}
+          </button>
+          <button
+            type="button"
+            class="btn-primary"
+            :disabled="confirmCount === 0"
+            @click="confirmUploads"
+          >
+            {{ t('upload.confirmUpload', { count: confirmCount }) }}
+          </button>
         </div>
       </div>
     </div>
@@ -1362,5 +1569,176 @@ const initialize = async (): Promise<void> => {
   width: 100%;
   height: 100%;
   transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Pre-upload confirmation dialog */
+.upload-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 16px;
+}
+
+.upload-confirm-card {
+  width: 460px;
+  max-width: 100%;
+  max-height: 80vh;
+  background-color: #252526;
+  border: 1px solid #3c3c3c;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.upload-confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid #3c3c3c;
+}
+
+.upload-confirm-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+
+.upload-confirm-close {
+  background: none;
+  border: none;
+  color: #9d9d9d;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+
+.upload-confirm-close:hover {
+  color: #fff;
+  background-color: #3c3c3c;
+}
+
+.upload-confirm-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+}
+
+.confirm-dir-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.confirm-label {
+  font-size: 12px;
+  color: #9d9d9d;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.confirm-dir-input {
+  background-color: #1e1e1e;
+  border: 1px solid #3c3c3c;
+  border-radius: 4px;
+  color: #e8e8e8;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.confirm-dir-input:focus {
+  outline: none;
+  border-color: #facc15;
+}
+
+.confirm-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.confirm-file-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background-color: #2b2b2c;
+}
+
+.confirm-file-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.confirm-file-name {
+  font-size: 13px;
+  color: #fff;
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.confirm-file-path {
+  font-size: 12px;
+  color: #9d9d9d;
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+.upload-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid #3c3c3c;
+}
+
+.upload-confirm-footer .btn-secondary,
+.upload-confirm-footer .btn-primary {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.2s;
+}
+
+.upload-confirm-footer .btn-secondary {
+  background-color: #3a3a3a;
+  color: #e8e8e8;
+  border-color: #4a4a4a;
+}
+
+.upload-confirm-footer .btn-secondary:hover {
+  background-color: #454545;
+}
+
+.upload-confirm-footer .btn-primary {
+  background-color: #facc15;
+  color: #1e1e1e;
+  border-color: #facc15;
+}
+
+.upload-confirm-footer .btn-primary:hover {
+  background-color: #fbbf24;
+}
+
+.upload-confirm-footer .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

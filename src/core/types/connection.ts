@@ -26,7 +26,7 @@ export interface UploadTask {
   id: string;
   fileName: string;
   remotePath?: string;
-  status: 'pending' | 'uploading' | 'success' | 'error';
+  status: 'pending' | 'uploading' | 'paused' | 'success' | 'error' | 'cancelled';
   progress: number;
   message: string;
   timestamp: number;

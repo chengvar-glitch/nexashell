@@ -27,6 +27,9 @@ import {
   ChevronLeft,
   CheckCircle2,
   AlertCircle,
+  XCircle,
+  PauseCircle,
+  Play,
   FileUp,
   LayoutDashboard,
 } from 'lucide-vue-next';
@@ -45,6 +48,9 @@ const emit = defineEmits([
   'clear-tasks',
   'toggle',
   'update:active-tab',
+  'pause-task',
+  'resume-task',
+  'cancel-task',
 ]);
 
 const localHistory = ref<ServerStatus[]>([]);
@@ -106,6 +112,10 @@ const getTaskStatusColor = (status: UploadTask['status']) => {
       return '#10b981'; // Green
     case 'error':
       return '#ef4444'; // Red
+    case 'cancelled':
+      return '#6b7280'; // Gray
+    case 'paused':
+      return '#facc15'; // Amber
     case 'uploading':
       return '#3b82f6'; // Blue
     case 'pending':
@@ -121,6 +131,10 @@ const getTaskStatusIcon = (status: UploadTask['status']) => {
       return CheckCircle2;
     case 'error':
       return AlertCircle;
+    case 'cancelled':
+      return XCircle;
+    case 'paused':
+      return PauseCircle;
     case 'uploading':
       return Activity;
     case 'pending':
@@ -781,6 +795,8 @@ watch(
               :class="{
                 success: task.status === 'success',
                 error: task.status === 'error',
+                cancelled: task.status === 'cancelled',
+                paused: task.status === 'paused',
                 uploading: task.status === 'uploading',
                 pending: task.status === 'pending',
               }"
@@ -852,6 +868,40 @@ watch(
               <p v-else-if="task.message" class="task-message">
                 {{ task.message }}
               </p>
+
+              <!-- Upload actions: pause for uploading, resume for paused,
+                   cancel for both. -->
+              <div v-if="task.status === 'uploading' || task.status === 'paused'" class="task-actions">
+                <button
+                  v-if="task.status === 'paused'"
+                  type="button"
+                  class="task-action-btn"
+                  :title="t('upload.resume')"
+                  @click="emit('resume-task', task.id)"
+                >
+                  <Play :size="12" />
+                  <span>{{ t('upload.resume') }}</span>
+                </button>
+                <button
+                  v-if="task.status === 'uploading'"
+                  type="button"
+                  class="task-action-btn"
+                  :title="t('upload.pause')"
+                  @click="emit('pause-task', task.id)"
+                >
+                  <PauseCircle :size="12" />
+                  <span>{{ t('upload.pause') }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="task-action-btn danger"
+                  :title="t('upload.cancel')"
+                  @click="emit('cancel-task', task.id)"
+                >
+                  <XCircle :size="12" />
+                  <span>{{ t('upload.cancel') }}</span>
+                </button>
+              </div>
             </div>
             <button
               v-if="uploadTasksData.length > 0"

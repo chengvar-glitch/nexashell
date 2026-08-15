@@ -624,6 +624,15 @@
   background: linear-gradient(to right, rgba(59, 130, 246, 0.05), transparent);
 }
 
+.task-item.paused {
+  background: linear-gradient(to right, rgba(250, 204, 21, 0.06), transparent);
+}
+
+.task-item.cancelled {
+  background: linear-gradient(to right, rgba(107, 114, 128, 0.06), transparent);
+  opacity: 0.75;
+}
+
 .task-header {
   display: flex;
   justify-content: space-between;
@@ -780,6 +789,40 @@
   padding: 4px 6px;
   border-radius: 3px;
   border-left: 2px solid #ef4444;
+}
+
+.task-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.task-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #b8b8b8;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.task-action-btn:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.task-action-btn.danger:hover {
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.25);
 }
 
 .clear-btn {
