@@ -5,6 +5,11 @@ export default {
     connect: '连接',
     edit: '编辑',
   },
+  tabs: {
+    savedConnections: '已保存的连接',
+    noSavedConnections: '暂无已保存的连接',
+    newConnection: '新建 SSH 连接',
+  },
   home: {
     views: '视图',
     allSessions: '全部会话',

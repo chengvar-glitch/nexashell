@@ -299,15 +299,29 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* macOS-native context-menu styling. Overrides the web-ish `.panel`
+   (large radius / heavy glass / springy transition) with an NSMenu-like look:
+   compact, subtle acrylic, tight rows, system highlight on hover, no bounce. */
 .dropdown-menu {
   position: absolute;
   min-width: 200px;
-  /* Override .panel's overflow: hidden to allow submenus to be visible */
+  /* Override `.panel` defaults to get a native-feeling menu surface. */
+  background-color: var(--color-bg-menu);
+  border: 0.5px solid var(--color-border-primary);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 0.5px var(--color-border-secondary),
+    0 6px 20px rgba(0, 0, 0, var(--shadow-alpha));
+  backdrop-filter: var(--blur-medium);
+  -webkit-backdrop-filter: var(--blur-medium);
   overflow: visible !important;
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
 }
 
 .menu-list {
-  padding: 8px;
+  padding: 5px;
   position: relative;
 }
 
@@ -315,14 +329,19 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 5px 8px;
   font-size: 13px;
+  line-height: 18px;
   color: var(--color-text-primary);
-  cursor: pointer;
-  transition: all var(--transition-base);
-  border-radius: var(--radius-md);
+  cursor: default;
+  transition:
+    background-color 0.08s ease,
+    color 0.08s ease;
+  border-radius: 5px;
   gap: 12px;
   position: relative;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .menu-item-content {
@@ -330,6 +349,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   flex: 1;
+  white-space: nowrap;
 }
 
 .menu-icon {
@@ -338,15 +358,21 @@ onUnmounted(() => {
 }
 
 .menu-item:hover .menu-icon {
-  color: var(--color-primary);
+  color: inherit;
 }
 
 .menu-item:hover {
-  background-color: var(--color-interactive-hover);
+  background-color: var(--color-interactive-selected);
+}
+
+.menu-item:hover,
+.menu-item-active {
+  color: var(--color-accent);
 }
 
 .menu-label {
   flex: 1;
+  font-weight: 500;
 }
 
 .menu-item-suffix {
@@ -356,14 +382,12 @@ onUnmounted(() => {
 }
 
 .menu-shortcut {
-  font-size: 11px;
-  font-family:
-    ui-monospace, 'SF Mono', 'Cascadia Mono', 'Consolas', Monaco, 'Courier New',
-    monospace;
-  background-color: var(--color-bg-tertiary);
-  padding: 3px 7px;
-  border-radius: var(--radius-sm);
+  font-size: 12px;
   color: var(--color-text-tertiary);
+  /* No background chip: native menus show shortcuts as plain labels. */
+  padding: 0;
+  border-radius: 0;
+  font-family: inherit;
 }
 
 .submenu-chevron {
@@ -371,16 +395,25 @@ onUnmounted(() => {
 }
 
 .menu-item:hover .menu-shortcut {
-  background-color: var(--color-bg-elevated);
+  color: inherit;
+  background-color: transparent;
 }
 
 .submenu {
   position: absolute;
   left: 100%;
-  top: -8px;
+  top: -5px;
   min-width: 180px;
   z-index: 9999;
   margin-left: 4px;
+  background-color: var(--color-bg-menu);
+  border: 0.5px solid var(--color-border-primary);
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 0.5px var(--color-border-secondary),
+    0 6px 20px rgba(0, 0, 0, var(--shadow-alpha));
+  backdrop-filter: var(--blur-medium);
+  -webkit-backdrop-filter: var(--blur-medium);
 }
 
 .submenu-left {
@@ -390,68 +423,39 @@ onUnmounted(() => {
   margin-right: 4px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not(.theme-light) .menu-item:hover .menu-shortcut {
-    background-color: var(--color-bg-elevated);
-  }
-}
-
-:root.theme-dark .menu-item:hover .menu-shortcut {
-  background-color: var(--color-bg-elevated);
-}
-
 .menu-item-danger {
-  color: #ff3b30;
+  color: var(--color-danger);
 }
 
 .menu-item-active {
-  color: var(--color-primary);
-  background-color: var(--color-bg-tertiary);
-  font-weight: 500;
+  background-color: var(--color-interactive-selected);
 }
 
 .menu-item-danger:hover {
-  background-color: rgba(255, 59, 48, 0.08);
+  background-color: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  color: var(--color-danger);
 }
 
 .menu-divider {
-  height: 0.5px;
-  margin: 8px 0;
+  height: 1px;
+  margin: 5px 6px;
   background-color: var(--color-border-secondary);
 }
 
 .dropdown-fade-enter-active,
 .dropdown-fade-leave-active {
   transition:
-    opacity var(--transition-base),
-    transform var(--transition-base);
+    opacity 0.12s ease,
+    transform 0.12s ease;
 }
 
 .dropdown-fade-enter-from {
   opacity: 0;
-  transform: translateY(-4px) scale(0.98);
+  transform: translateY(-2px);
 }
 
 .dropdown-fade-leave-to {
   opacity: 0;
-  transform: translateY(-4px) scale(0.98);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not(.theme-light) .menu-item-danger {
-    color: #ff453a;
-  }
-
-  :root:not(.theme-light) .menu-item-danger:hover {
-    background-color: rgba(255, 69, 58, 0.12);
-  }
-}
-
-:root.theme-dark .menu-item-danger {
-  color: #ff453a;
-}
-
-:root.theme-dark .menu-item-danger:hover {
-  background-color: rgba(255, 69, 58, 0.12);
+  transform: translateY(-2px);
 }
 </style>

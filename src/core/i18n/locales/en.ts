@@ -5,6 +5,11 @@ export default {
     connect: 'Connect',
     edit: 'Edit',
   },
+  tabs: {
+    savedConnections: 'Saved connections',
+    noSavedConnections: 'No saved connections',
+    newConnection: 'New SSH Connection',
+  },
   home: {
     views: 'Views',
     allSessions: 'All Sessions',

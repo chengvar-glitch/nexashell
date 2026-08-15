@@ -725,6 +725,11 @@
   background-color: #f59e0b;
 }
 
+.progress-fill-paused {
+  background-color: #facc15;
+  box-shadow: 0 0 8px rgba(250, 204, 21, 0.3);
+}
+
 @keyframes pulse {
   0%,
   100% {

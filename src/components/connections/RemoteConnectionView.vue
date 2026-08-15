@@ -146,6 +146,12 @@ const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
   }
 };
 
+// Remove a task from the list entirely (used when an upload is cancelled and
+// its remote file is deleted, so the now-meaningless entry does not linger).
+const removeUploadTask = (id: string) => {
+  uploadTasks.value = uploadTasks.value.filter(task => task.id !== id);
+};
+
 const clearUploadTasks = () => {
   // Only clear completed and error tasks, keep uploading/pending/paused tasks
   uploadTasks.value = uploadTasks.value.filter(
@@ -452,26 +458,30 @@ const resumeUploadTask = async (taskId: string) => {
 
 /** Cancel a running or paused upload. */
 const cancelUploadTask = async (taskId: string) => {
-  updateUploadTask(taskId, {
-    status: 'cancelled',
-    progress: 0,
-    message: t('upload.cancelling'),
-  });
+  // Optimistically remove the task so the list is clean instantly. If the
+  // backend cancellation fails, surface an error entry so the user knows.
+  removeUploadTask(taskId);
   try {
     await invoke('cancel_upload', {
       sessionId: props.sessionId,
       taskId,
     });
-    updateUploadTask(taskId, {
-      message: t('upload.cancelled'),
-    });
   } catch (err) {
     logger.error('Failed to cancel upload', err);
-    updateUploadTask(taskId, {
-      status:
-        uploadTasks.value.find(t => t.id === taskId)?.status ?? 'cancelled',
-      message: t('upload.failedToCancel'),
-    });
+    const previous = uploadTasks.value.find(t => t.id === taskId);
+    // Re-insert a terminal error entry (the cancelled-pending remote file may
+    // be left behind if the backend cancellation truly failed).
+    uploadTasks.value = [
+      ...uploadTasks.value,
+      previous ? { ...previous, status: 'error' as const, message: t('upload.failedToCancel') } : {
+        id: taskId,
+        fileName: t('upload.failedToCancel'),
+        status: 'error' as const,
+        progress: 0,
+        message: t('upload.failedToCancel'),
+        timestamp: Date.now(),
+      },
+    ];
   }
 };
 

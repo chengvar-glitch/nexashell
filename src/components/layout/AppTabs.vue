@@ -25,6 +25,8 @@ import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
+import { sessionApi } from '@/features/session';
+import type { SavedSession } from '@/features/session';
 
 const logger = createLogger('APP_TABS');
 
@@ -48,6 +50,37 @@ const isDropdownOpen = ref(false);
 const dropdownX = ref(0);
 const dropdownY = ref(0);
 let tabCounter = 1;
+
+// Saved connections dropdown (shown by the "+" button)
+const savedConnectionsOpen = ref(false);
+const savedConnectionsX = ref(0);
+const savedConnectionsY = ref(0);
+const savedConnections = ref<SavedSession[]>([]);
+// TTL cache: avoid re-querying the DB via IPC on every toggle of the
+// dropdown. The list only changes on save/edit/delete, which bump the
+// timestamp; refetching after this long is cheap insurance.
+const SAVED_CONNECTIONS_CACHE_TTL = 30_000;
+let savedConnectionsLoadedAt = 0;
+
+// Compute a dropdown position just below `event`'s element, clamping x so the
+// menu does not run off the right edge. Shared by both dropdowns.
+const positionMenuBelow = (
+  event: MouseEvent,
+  menuWidth: number
+): { x: number; y: number } => {
+  const target = event.currentTarget as HTMLElement;
+  const container = target.closest('.tab-actions') as HTMLElement;
+  if (!container) {
+    return { x: 0, y: 0 };
+  }
+  const rect = container.getBoundingClientRect();
+  const availableRightSpace = window.innerWidth - rect.left;
+  const x =
+    availableRightSpace < menuWidth
+      ? Math.max(rect.right - menuWidth, 0)
+      : rect.left;
+  return { x, y: rect.bottom + 2 };
+};
 
 const tabsContainerRef = ref<HTMLElement>();
 
@@ -90,25 +123,10 @@ const handleAddTab = async () => {
 const toggleDropdown = (event: MouseEvent) => {
   event.stopPropagation();
   if (!isDropdownOpen.value) {
-    const target = event.currentTarget as HTMLElement;
-    const container = target.closest('.tab-actions') as HTMLElement;
-    if (container) {
-      const rect = container.getBoundingClientRect();
-
-      // Calculate the available space on the right side
-      const availableRightSpace = window.innerWidth - rect.left;
-      const menuWidth = 200; // Approximate dropdown menu width
-
-      // Adjust x position if menu would go off-screen
-      if (availableRightSpace < menuWidth) {
-        // Position the menu to appear from the right edge of the button
-        dropdownX.value = Math.max(rect.right - menuWidth, 0); // Ensure it doesn't go off the left edge
-      } else {
-        dropdownX.value = rect.left;
-      }
-
-      dropdownY.value = rect.bottom + 2;
-    }
+    const { x, y } = positionMenuBelow(event, 200);
+    dropdownX.value = x;
+    dropdownY.value = y;
+    savedConnectionsOpen.value = false;
   }
   isDropdownOpen.value = !isDropdownOpen.value;
 };
@@ -178,12 +196,110 @@ const handleNewTabShortcut = () => {
   handleAddTab();
 };
 
-// Open SSH connection form when clicking the plus button
-const openSSHConnectionForm = () => {
-  // Open SSH form modal
-  if (openSSHForm) {
-    openSSHForm();
+// Saved connections dropdown (shown by the "+" button)
+const translatedSavedConnections = computed<Array<{
+  key: string;
+  label: string;
+  icon: typeof Server;
+  disabled?: boolean;
+  divider?: boolean;
+}>>(() => {
+  const items: Array<{
+    key: string;
+    label: string;
+    icon: typeof Server;
+    disabled?: boolean;
+    divider?: boolean;
+  }> = [
+    {
+      key: '__new__',
+      label: t('tabs.newConnection'),
+      icon: Plus,
+    },
+  ];
+  if (savedConnections.value.length === 0) {
+    items.push(
+      {
+        key: '__divider__',
+        label: '—',
+        icon: Server,
+        divider: true,
+      },
+      {
+        key: '__empty__',
+        label: t('tabs.noSavedConnections'),
+        icon: Server,
+        disabled: true,
+      }
+    );
+  } else {
+    items.push({
+      key: '__divider__',
+      label: '—',
+      icon: Server,
+      divider: true,
+    });
+    for (const session of savedConnections.value) {
+      items.push({
+        key: session.id,
+        label: session.server_name,
+        icon: Server,
+      });
+    }
   }
+  return items;
+});
+
+const sortSavedConnections = (list: SavedSession[]): SavedSession[] => {
+  const byRecent = (a: SavedSession, b: SavedSession): number => {
+    const timeOf = (value?: string | null): number =>
+      value ? new Date(value.replace(' ', 'T') + 'Z').getTime() : 0;
+    return timeOf(b.updated_at) - timeOf(a.updated_at);
+  };
+  return [...list].sort(byRecent);
+};
+
+const toggleSavedConnections = async (event: MouseEvent) => {
+  event.stopPropagation();
+  if (!savedConnectionsOpen.value) {
+    const { x, y } = positionMenuBelow(event, 220);
+    savedConnectionsX.value = x;
+    savedConnectionsY.value = y;
+    isDropdownOpen.value = false;
+
+    // Reuse the cached list within the TTL window to avoid an IPC + DB round
+    // trip on every open. Sessions are shown newest-first.
+    const now = Date.now();
+    if (
+      savedConnections.value.length === 0 ||
+      now - savedConnectionsLoadedAt > SAVED_CONNECTIONS_CACHE_TTL
+    ) {
+      const list = await sessionApi.listSessions();
+      savedConnections.value = sortSavedConnections(list);
+      savedConnectionsLoadedAt = now;
+    }
+  }
+  savedConnectionsOpen.value = !savedConnectionsOpen.value;
+};
+
+// Invalidate the saved-connections cache when a session is saved/edited so
+// the next open pulls fresh data.
+const invalidateSavedConnectionsCache = () => {
+  savedConnectionsLoadedAt = 0;
+};
+
+const handleSavedSessionSelect = (key: string) => {
+  savedConnectionsOpen.value = false;
+  if (key === '__empty__' || key === '__divider__') return;
+  if (key === '__new__') {
+    if (openSSHForm) {
+      openSSHForm();
+    }
+    return;
+  }
+  const session = savedConnections.value.find(s => s.id === key);
+  if (!session) return;
+  eventBus.emit(APP_EVENTS.CONNECT_SESSION, session);
 };
 
 // Scroll to the currently active tab
@@ -224,6 +340,7 @@ onMounted(() => {
   eventBus.on(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.on(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.on(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
+  eventBus.on(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
 
   window.addEventListener('resize', scrollToActiveTab);
 });
@@ -233,6 +350,7 @@ onBeforeUnmount(() => {
   eventBus.off(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.off(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.off(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
+  eventBus.off(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
 
   window.removeEventListener('resize', scrollToActiveTab);
 });
@@ -260,16 +378,19 @@ onBeforeUnmount(() => {
         />
       </TransitionGroup>
 
-      <div class="tab-actions" :class="{ 'is-active': isDropdownOpen }">
+      <div
+        class="tab-actions"
+        :class="{ 'is-active': isDropdownOpen || savedConnectionsOpen }"
+      >
         <ShortcutHint
-          :text="formatShortcut('Cmd+T') + ' to create SSH connection'"
+          :text="t('tabs.savedConnections')"
           position="bottom"
         >
           <button
             class="action-btn"
-            :class="{ 'is-active': isDropdownOpen }"
-            aria-label="Add SSH connection"
-            @click="openSSHConnectionForm"
+            :class="{ 'is-active': savedConnectionsOpen }"
+            :aria-label="t('tabs.savedConnections')"
+            @click="toggleSavedConnections"
           >
             <Plus :size="14" />
           </button>
@@ -301,6 +422,14 @@ onBeforeUnmount(() => {
       :x="dropdownX"
       :y="dropdownY"
       @select="handleMenuSelect"
+    />
+
+    <DropdownMenu
+      v-model:visible="savedConnectionsOpen"
+      :items="translatedSavedConnections"
+      :x="savedConnectionsX"
+      :y="savedConnectionsY"
+      @select="handleSavedSessionSelect"
     />
   </div>
 </template>
