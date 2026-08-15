@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef, triggerRef, nextTick, watch, onActivated, onDeactivated } from 'vue';
+import { onMounted, onUnmounted, ref, shallowRef, nextTick, watch, onActivated, onDeactivated } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -42,11 +42,14 @@ const setupStatusListener = async () => {
   statusUnlisten = await listen<ServerStatus>(
     `ssh-status-${props.sessionId}`,
     event => {
-      statusHistory.value.push(event.payload);
-      if (statusHistory.value.length > MAX_HISTORY) {
-        statusHistory.value.shift();
-      }
-      triggerRef(statusHistory);
+      // Replace the array reference (instead of in-place push) so the child
+      // ServerDashboard's `props.history` reference actually changes and its
+      // computed metrics re-evaluate. With shallowRef + `triggerRef`, an
+      // in-place push keeps the same array reference, so the dashboard never
+      // repaints and the status center stays blank/zeros.
+      const next = statusHistory.value.concat(event.payload);
+      statusHistory.value =
+        next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
     }
   );
 };
@@ -112,23 +115,34 @@ const uploadTasks = shallowRef<UploadTask[]>([]);
 
 const addUploadTask = (fileName: string): string => {
   const id = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  uploadTasks.value.unshift({
-    id,
-    fileName,
-    status: 'pending',
-    progress: 0,
-    message: 'Preparing...',
-    timestamp: Date.now(),
-  });
-  triggerRef(uploadTasks);
+  // Replace the array reference so the dashboard's `props.uploadTasks`
+  // reference changes and the task list re-renders (in-place unshift keeps
+  // the same reference, so the list never updates).
+  uploadTasks.value = [
+    {
+      id,
+      fileName,
+      status: 'pending',
+      progress: 0,
+      message: 'Preparing...',
+      timestamp: Date.now(),
+    },
+    ...uploadTasks.value,
+  ];
   return id;
 };
 
 const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
-  const task = uploadTasks.value.find(t => t.id === id);
-  if (task) {
-    Object.assign(task, updates);
-    triggerRef(uploadTasks);
+  let changed = false;
+  const next = uploadTasks.value.map(task => {
+    if (task.id === id) {
+      changed = true;
+      return { ...task, ...updates };
+    }
+    return task;
+  });
+  if (changed) {
+    uploadTasks.value = next;
   }
 };
 
@@ -371,6 +385,7 @@ const closeSearch = () => {
 // Output deduplication tracking
 let lastSeq = 0;
 let unlistenFn: UnlistenFn | null = null;
+let unlistenDisconnect: UnlistenFn | null = null;
 
 /**
  * Write the backend's buffered initial output (welcome banner, MOTD, first
@@ -559,6 +574,43 @@ const setupSSHOutputListener = async (sessionId: string): Promise<void> => {
 };
 
 /**
+ * Listen for the backend's spontaneous disconnect event.
+ *
+ * When the SSH connection drops (idle timeout on the server, network blip,
+ * NAT dropping the idle TCP connection), the backend I/O task emits
+ * `ssh-disconnected-{id}` and stops reading/writing — but the frontend
+ * session store still believes the session is connected. Without this
+ * listener, keystrokes keep being emitted into a dead channel (silently
+ * dropped), which surfaces to the user as "can't type characters" after the
+ * terminal has been idle for a while. Listeners must be registered for both
+ * SSH and local terminals so the session status is marked accordingly.
+ */
+const setupDisconnectListener = async (sessionId: string): Promise<void> => {
+  if (unlistenDisconnect) {
+    await unlistenDisconnect();
+    unlistenDisconnect = null;
+  }
+  if (!sessionId) return;
+
+  unlistenDisconnect = await listen(`ssh-disconnected-${sessionId}`, () => {
+    // Only react if this component still owns the session; switching tabs or
+    // unmounting unregisters the listener first.
+    if (props.sessionId !== sessionId) return;
+
+    logger.warn('SSH session disconnected remotely', { sessionId });
+
+    if (terminal) {
+      terminal.write('\r\n\x1b[31m[connection lost]\x1b[0m\r\n');
+    }
+
+    // Mark the session as disconnected so the rest of the app (tab badges,
+    // session stats) reflects reality, without removing it — the user can
+    // still re-open the tab to reconnect.
+    sessionStore.updateSessionStatus(sessionId, 'disconnected');
+  });
+};
+
+/**
  * Connect (or reconnect) to the session identified by `sessionId`.
  * Called on mount and whenever the sessionId prop changes.
  */
@@ -569,6 +621,7 @@ const connectToSession = async (sessionId: string): Promise<void> => {
   try {
     // Register listener BEFORE connection to catch welcome message
     await setupSSHOutputListener(sessionId);
+    await setupDisconnectListener(sessionId);
 
     if (terminal) {
       // First, ensure we have the correct size before connecting
@@ -731,6 +784,15 @@ const cleanupResources = async (): Promise<void> => {
       unlistenFn = null;
     } catch (e) {
       logger.error('Event unlisten failed', e);
+    }
+  }
+
+  if (unlistenDisconnect) {
+    try {
+      await unlistenDisconnect();
+      unlistenDisconnect = null;
+    } catch (e) {
+      logger.error('Disconnect event unlisten failed', e);
     }
   }
 
@@ -1046,10 +1108,14 @@ const initialize = async (): Promise<void> => {
    * Using onData instead of onKey to properly handle IME (Chinese input)
    */
   terminal.onData(async (data: string) => {
-    const hasSession =
-      props.sessionId && sessionStore.hasSession(props.sessionId);
+    const session = props.sessionId
+      ? sessionStore.getSession(props.sessionId)
+      : undefined;
+    const hasSession = !!session;
+    const isDead =
+      session && (session.status === 'disconnected' || session.status === 'error');
 
-    if (hasSession) {
+    if (hasSession && !isDead) {
       // Send data immediately to ensure interactive tools (vim, ssh, etc.)
       // work correctly without broken escape sequences or latency.
       try {

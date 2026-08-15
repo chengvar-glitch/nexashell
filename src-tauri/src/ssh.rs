@@ -323,8 +323,15 @@ impl SshManager {
                         reason: e.to_string(),
                     })?;
 
-                // TCP read timeout so a hung server cannot block handshake forever.
-                let _ = tcp.set_read_timeout(Some(Duration::from_secs(60)));
+                // Enable OS-level TCP keepalive so idle connections stay alive
+                // through cloud security groups / NAT (which reap idle TCP
+                // flows after ~3-5 min). The kernel sends keepalive probes
+                // autonomously, independent of libssh2's non-blocking SSH I/O.
+                let sock = socket2::SockRef::from(&tcp);
+                let keepalive = socket2::TcpKeepalive::new()
+                    .with_time(Duration::from_secs(15))
+                    .with_interval(Duration::from_secs(5));
+                let _ = sock.set_tcp_keepalive(&keepalive);
 
                 Ok(tcp)
             };
@@ -333,11 +340,19 @@ impl SshManager {
             let mut sess = Session::new().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to create session: {}", e))
             })?;
+            // Guard the (blocking) handshake against a hung server using
+            // libssh2's own timeout, which only applies to blocking calls. It
+            // deliberately does NOT set a socket-level read timeout: a
+            // SO_RCVTIMEO on the fd would leak into the whole session lifetime
+            // and tear down long-lived idle SSH connections with a spurious
+            // "transport read" error.
+            sess.set_timeout(60_000);
             sess.set_tcp_stream(tcp);
             sess.handshake()
                 .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
-            // libssh2 keepalive every 30 seconds
-            sess.set_keepalive(true, 30);
+            // Handshake complete — clear the blocking timeout so subsequent
+            // (non-blocking) I/O is never subject to it.
+            sess.set_timeout(0);
             Ok(sess)
         };
 
@@ -398,8 +413,14 @@ impl SshManager {
             .shell()
             .map_err(|e| SshError::ChannelError(format!("Failed to start shell: {}", e)))?;
 
-        // Main session is non-blocking so the I/O task never stalls.
-        main_sess.set_blocking(false);
+        // Keep the main session in BLOCKING mode, but bound each blocking call
+        // to 100ms via libssh2's own timeout. Blocking mode is the officially
+        // recommended usage for ssh2-rs and avoids libssh2 1.11.1's known
+        // non-blocking bug (send_existing fails to set OUTBOUND on EAGAIN,
+        // which corrupts the transport and causes spurious "transport read"
+        // disconnects while typing). The 100ms ceiling lets the I/O loop drain
+        // user input with sub-100ms latency instead of stalling forever.
+        main_sess.set_timeout(100);
 
         // Helper session (blocking, for SFTP/monitoring/probing)
         let helper_tcp = open_tcp()?;
@@ -497,31 +518,19 @@ impl SshManager {
             let mut seen_first_output = false;
             let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
-            // Adaptive idle backoff: starts at 1ms, doubles on each consecutive
-            // WouldBlock up to 64ms, so idle sessions don't busy-poll the CPU
-            // or thrash the channel/session mutexes. Resets on any data or input.
-            let mut idle_backoff_ms: u64 = 1;
-            let mut sleep_before_read: Option<u64> = None;
+            // Blocking reads are bounded to 100ms by the session timeout, so an
+            // idle loop naturally paces itself (no busy-poll backoff needed).
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
                     break;
                 }
 
-                // Apply the adaptive idle backoff before the next read when the
-                // previous read produced no data. Input is still processed first
-                // below (it is drained eagerly), so keystrokes are not delayed.
-                if let Some(ms) = sleep_before_read.take() {
-                    tokio::time::sleep(Duration::from_millis(ms)).await;
-                }
-
                 // Process user input FIRST for low-latency IME response.
-                // The main session is non-blocking, so a full channel/TCP
-                // buffer surfaces as WouldBlock — retry with backoff instead of
-                // dropping the remainder of the input.
-                let mut saw_input = false;
+                // The main session is blocking with a 100ms timeout, so a full
+                // channel/TCP buffer surfaces as WouldBlock/TimedOut — retry
+                // with backoff instead of dropping the remainder of the input.
                 while let Ok(input) = input_receiver.try_recv() {
-                    saw_input = true;
                     let mut sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
                     let bytes = input.as_bytes();
@@ -537,7 +546,10 @@ impl SshManager {
                                 written += n;
                                 backoff = Duration::from_millis(1);
                             }
-                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            Err(ref e)
+                                if e.kind() == std::io::ErrorKind::WouldBlock
+                                    || e.kind() == std::io::ErrorKind::TimedOut =>
+                            {
                                 // Buffer full — release the locks while waiting
                                 // so reads/resizes can proceed, then retry.
                                 drop(ch);
@@ -558,6 +570,7 @@ impl SshManager {
 
                     if let Err(e) = ch.flush()
                         && e.kind() != std::io::ErrorKind::WouldBlock
+                        && e.kind() != std::io::ErrorKind::TimedOut
                     {
                         log::error!("[SSH I/O] flush failed: {}", e);
                     }
@@ -569,14 +582,21 @@ impl SshManager {
                     match ch.read(&mut buffer) {
                         Ok(0) => Some(Err("Connection closed by remote host".to_string())),
                         Ok(n) => Some(Ok(n)),
-                        Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => None,
+                        // In blocking mode with set_timeout, an idle read
+                        // returns TimedOut rather than WouldBlock; both mean
+                        // "no data right now, keep looping".
+                        Err(ref e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock
+                                || e.kind() == std::io::ErrorKind::TimedOut =>
+                        {
+                            None
+                        }
                         Err(e) => Some(Err(format!("Read error: {}", e))),
                     }
                 };
 
                 match read_result {
                     Some(Ok(n)) => {
-                        idle_backoff_ms = 1;
                         pending_output.push_str(&String::from_utf8_lossy(&buffer[..n]));
                     }
                     Some(Err(e)) => {
@@ -591,21 +611,10 @@ impl SshManager {
                         break;
                     }
                     None => {
-                        sleep_before_read = Some(idle_backoff_ms);
-                        // Exponential backoff capped at 64ms. We stay responsive
-                        // to bursts because the reset happens on the next read
-                        // or input, and the cap keeps latency low enough for
-                        // interactive shells.
-                        if idle_backoff_ms < 64 {
-                            idle_backoff_ms *= 2;
-                        }
+                        // No data (timed out). The blocking read already paced
+                        // us; loop again to drain input, which is the only
+                        // thing that needs polling.
                     }
-                }
-
-                // Reset backoff whenever input arrived, so keystrokes never
-                // wait behind a long idle sleep.
-                if saw_input {
-                    idle_backoff_ms = 1;
                 }
 
                 let in_initial = in_initial_buffering
@@ -663,7 +672,18 @@ impl SshManager {
             // Cache the remote OS once so non-Linux hosts don't re-run the
             // Linux-only metrics pipeline (awk/free/df/proc) every poll — it
             // would fail or return zeros and is pure wasted round-trips.
-            let mut platform_cached: Option<bool> = None; // Some(is_linux)
+            // A `OnceLock` (rather than a local `Option<bool>`) makes the cache
+            // actually visible across loop iterations — a plain `Option<bool>`
+            // is `Copy`, so the `move` closure copies it every iteration and
+            // the probe re-runs forever.
+            //
+            // On probe *failure* we assume the host IS Linux (`unwrap_or(true)`)
+            // and fall through to the real metrics pipeline, whose per-command
+            // `|| echo '0 0'` guards degrade gracefully. Treating a probe error
+            // as "not Linux" (`unwrap_or(false)`) would permanently pin the
+            // dashboard to all-zero `empty_status()` on any transient failure.
+            let platform_cached: Arc<std::sync::OnceLock<bool>> =
+                Arc::new(std::sync::OnceLock::new());
 
             loop {
                 if stop_flag.load(Ordering::SeqCst) {
@@ -672,6 +692,7 @@ impl SshManager {
 
                 let start_time = std::time::Instant::now();
                 let helper = helper_sess.clone();
+                let platform_cached = platform_cached.clone();
 
                 // All blocking SSH operations run on spawn_blocking so we never
                 // stall a tokio worker thread. When the platform is not yet
@@ -680,12 +701,11 @@ impl SshManager {
                 let status_res = tokio::task::spawn_blocking(move || {
                     let sess = helper.blocking_lock();
 
-                    if platform_cached.is_none() {
-                        platform_cached =
-                            Some(Self::is_linux_host_blocking(&sess).unwrap_or(false));
-                    }
+                    let is_linux = *platform_cached.get_or_init(|| {
+                        Self::is_linux_host_blocking(&sess).unwrap_or(true)
+                    });
 
-                    if platform_cached == Some(false) {
+                    if !is_linux {
                         // Non-Linux host: metrics pipeline is Linux-specific.
                         // Return a zeroed status rather than re-running the
                         // command chain every interval.
@@ -805,7 +825,7 @@ impl SshManager {
         // still attempt the Linux command but degrade gracefully rather than
         // failing with a cryptic parse error.
         let cmd = "LC_ALL=C awk '/^cpu / {print $2+$3+$4+$5+$6+$7+$8, $5}' /proc/stat 2>/dev/null || echo '0 0'; \
-                   LC_ALL=C free -b 2>/dev/null | awk '/Mem:/{print $2,$3,$7} /Swap:/{print $2,$3}' || echo '0 0 0\n0 0'; \
+                   LC_ALL=C free -b 2>/dev/null | awk '/Mem:/{print $2,$3,$7} /Swap:/{print $2,$3}' || printf '0 0 0\n0 0\n'; \
                    LC_ALL=C df -PB1 -x tmpfs -x devtmpfs -x overlay 2>/dev/null | awk 'NR>1 && !seen[$1]++ {t+=$2;u+=$3;a+=$4} END{print t,u,a}' || echo '0 0 0'; \
                    LC_ALL=C cat /proc/net/dev 2>/dev/null | awk 'NR>2 && $1!=\"lo:\"{rx+=$2; tx+=$10} END{print rx+0,tx+0}' || echo '0 0'; \
                    LC_ALL=C cat /proc/loadavg 2>/dev/null | awk '{print $1,$2,$3}' || echo '0 0 0'; \

@@ -277,22 +277,27 @@ mod tests {
 
     #[test]
     fn roundtrip_with_master_key() {
-        EncryptionManager::init();
+        // Exercise AES-GCM round-trip via the raw byte-key path so the test
+        // does not depend on the OS keychain (which can block on a macOS
+        // authorization prompt and hang headless/CI runs).
+        let mut key = [0u8; KEY_LEN];
+        thread_rng().fill_bytes(&mut key);
         let data = sample();
-        let enc = EncryptionManager::encrypt(&data).expect("encrypt");
-        let dec = EncryptionManager::decrypt(&enc).expect("decrypt");
+        let enc = EncryptionManager::encrypt_with_key_bytes(&data, &key).expect("encrypt");
+        let dec = EncryptionManager::decrypt_with_key_bytes(&enc, &key).expect("decrypt");
         assert_eq!(dec, data);
     }
 
     #[test]
     fn roundtrip_no_credentials() {
-        EncryptionManager::init();
+        let mut key = [0u8; KEY_LEN];
+        thread_rng().fill_bytes(&mut key);
         let data = SensitiveData {
             password: None,
             key_passphrase: None,
         };
-        let enc = EncryptionManager::encrypt(&data).expect("encrypt");
-        let dec = EncryptionManager::decrypt(&enc).expect("decrypt");
+        let enc = EncryptionManager::encrypt_with_key_bytes(&data, &key).expect("encrypt");
+        let dec = EncryptionManager::decrypt_with_key_bytes(&enc, &key).expect("decrypt");
         assert_eq!(dec, data);
     }
 
