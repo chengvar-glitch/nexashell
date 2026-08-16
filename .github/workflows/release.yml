@@ -9,8 +9,7 @@ on:
       - 'v*'
   workflow_dispatch:
 
-permissions:
-  contents: write # 允许创建 Release 并上传安装包
+permissions: write-all # 创建 Release + 上传安装包（tauri-action 需要 contents 写权限）
 
 concurrency:
   group: release-${{ github.ref_name }}
