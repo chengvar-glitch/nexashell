@@ -1,0 +1,85 @@
+name: Release
+
+# 触发方式：
+#   1. 推送 v* 标签（如 git tag v1.9.8 && git push origin main --tags）
+#   2. 在 Actions 页面手动 Run workflow（配合已存在的 tag，用 tagName 字段）
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # 允许创建 Release 并上传安装包
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false # 一个平台失败不阻塞其他平台
+      matrix:
+        include:
+          # macOS：universal 包（同时支持 Apple Silicon + Intel）
+          - platform: macos-latest
+            args: --target universal-apple-darwin --bundles app,dmg
+          # Windows：NSIS 安装包
+          - platform: windows-latest
+            args: --bundles nsis
+          # Linux：deb + AppImage
+          - platform: ubuntu-22.04
+            args: --bundles deb,appimage
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 只有 macOS universal 构建需要双架构 target
+      - name: Add macOS targets
+        if: matrix.platform == 'macos-latest'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and upload to GitHub Release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: NexaShell ${{ github.ref_name }}
+          releaseBody: |
+            ## NexaShell ${{ github.ref_name }}
+
+            自动构建产物，选择对应平台的安装包下载：
+
+            - **macOS**：`NexaShell_${{ github.ref_name }}_universal.dmg`（Apple Silicon + Intel）
+            - **Windows**：`NexaShell_${{ github.ref_name }}_x64-setup.exe`
+            - **Linux**：`.deb` / `.AppImage`
+
+            > 未经 Apple/微软签名，首次打开可能提示"无法验证开发者"，右键选择"打开"即可。
+          releaseDraft: true # 草稿模式，确认无误后再手动点 Publish
+          prerelease: false
+          args: ${{ matrix.args }}
