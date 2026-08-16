@@ -12,6 +12,11 @@ import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
+import { themeManager } from '@/core/utils/theme-manager';
+import {
+  resolveTerminalTheme,
+  toXtermTheme,
+} from '@/core/terminal-themes';
 import ServerDashboard from './ServerDashboard.vue';
 import TunnelManagerPanel from '@/components/tunnel/TunnelManagerPanel.vue';
 import { FolderTree, Waypoints } from 'lucide-vue-next';
@@ -77,15 +82,6 @@ watch(showDashboard, shown => {
 });
 
 // Terminal configuration constants - Now acting as defaults or base
-const TERMINAL_CONFIG = {
-  THEME: {
-    background: '#1e1e1e',
-    foreground: '#d4d4d4',
-    selectionBackground: '#facc15', // Bright yellow background for selection
-    selectionForeground: '#000000', // Black text for selected content
-  },
-};
-
 const LATENCY_THRESHOLD_MS = 100;
 
 /**
@@ -863,6 +859,30 @@ watch(
   }
 );
 
+/** Resolve the selected terminal theme & apply it to the live xterm instance. */
+function applyTerminalTheme() {
+  if (!terminal) return;
+  const theme = resolveTerminalTheme(
+    settingsStore.terminal.theme,
+    themeManager.getActualTheme()
+  );
+  terminal.options.theme = toXtermTheme(theme);
+}
+
+// Watch for the terminal theme setting, and re-apply on app light/dark changes
+// (relevant when the theme is `system`).
+watch(
+  () => settingsStore.terminal.theme,
+  () => applyTerminalTheme()
+);
+
+onMounted(() => {
+  window.addEventListener('theme-changed', applyTerminalTheme);
+});
+onUnmounted(() => {
+  window.removeEventListener('theme-changed', applyTerminalTheme);
+});
+
 /**
  * Adaptive monitoring refresh rate
  * 700ms when dashboard is open and Performance tab is active, 3s otherwise.
@@ -1095,7 +1115,12 @@ const initialize = async (): Promise<void> => {
     cols: 80,
     cursorBlink: settingsStore.terminal.cursorBlink,
     cursorStyle: settingsStore.terminal.cursorStyle,
-    theme: TERMINAL_CONFIG.THEME,
+    theme: toXtermTheme(
+      resolveTerminalTheme(
+        settingsStore.terminal.theme,
+        themeManager.getActualTheme()
+      )
+    ),
   });
 
   fitAddon = new FitAddon();

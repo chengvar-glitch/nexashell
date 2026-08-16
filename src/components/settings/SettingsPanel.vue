@@ -132,6 +132,24 @@
                 </h3>
                 <div class="setting-item">
                   <label class="setting-label">{{
+                    $t('settings.terminalTheme')
+                  }}</label>
+                  <select
+                    class="setting-select modal-input"
+                    :value="settingsStore.terminal.theme"
+                    @change="handleTerminalThemeChange"
+                  >
+                    <option
+                      v-for="key in TERMINAL_THEME_KEYS"
+                      :key="key"
+                      :value="key"
+                    >
+                      {{ terminalThemeLabel(key) }}
+                    </option>
+                  </select>
+                </div>
+                <div class="setting-item">
+                  <label class="setting-label">{{
                     $t('settings.cursorStyle')
                   }}</label>
                   <select
@@ -268,6 +286,8 @@ import {
 } from 'lucide-vue-next';
 import { themeManager, type ThemeMode, type AccentKey } from '@/core/utils/theme-manager';
 import { useSettingsStore, type CursorStyle } from '@/features/settings';
+import { TERMINAL_THEME_KEYS } from '@/core/terminal-themes';
+import type { TerminalThemeKey } from '@/core/terminal-themes';
 import { isMacOSBrowser } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
 
@@ -443,6 +463,26 @@ const handleLanguageChange = (event: Event) => {
 const handleCursorStyleChange = (event: Event) => {
   const target = event.target as HTMLSelectElement;
   settingsStore.setCursorStyle(target.value as CursorStyle);
+};
+
+const handleTerminalThemeChange = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const theme = target.value as TerminalThemeKey;
+  settingsStore.setTheme(theme);
+};
+
+const terminalThemeLabel = (key: TerminalThemeKey): string => {
+  const map: Record<TerminalThemeKey, string> = {
+    system: t('settings.termThemeSystem'),
+    oneark: t('settings.termThemeOneDark'),
+    modernDark: t('settings.termThemeModernDark'),
+    modernLight: t('settings.termThemeModernLight'),
+    solarizedDark: t('settings.termThemeSolarizedDark'),
+    solarizedLight: t('settings.termThemeSolarizedLight'),
+    githubDark: t('settings.termThemeGithubDark'),
+    githubLight: t('settings.termThemeGithubLight'),
+  };
+  return map[key];
 };
 
 const handleThemeChange = (event: Event) => {

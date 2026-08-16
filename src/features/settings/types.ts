@@ -1,3 +1,5 @@
+import type { TerminalThemeKey } from '@/core/terminal-themes';
+
 export type CursorStyle = 'block' | 'underline' | 'bar';
 
 export interface TerminalSettings {
@@ -6,6 +8,8 @@ export interface TerminalSettings {
   fontSize: number;
   fontFamily: string;
   scrollback: number;
+  /** Terminal color theme key. */
+  theme: TerminalThemeKey;
 }
 
 export interface SettingsState {

@@ -2,6 +2,8 @@ import { defineStore } from 'pinia';
 import { reactive } from 'vue';
 import { createLogger } from '@/core/utils/logger';
 import type { CursorStyle, TerminalSettings } from './types';
+import { TERMINAL_THEME_KEYS } from '@/core/terminal-themes';
+import type { TerminalThemeKey } from '@/core/terminal-themes';
 
 const logger = createLogger('SETTINGS_STORE');
 
@@ -14,6 +16,7 @@ const DEFAULT_TERMINAL: TerminalSettings = {
   fontFamily:
     'ui-monospace, Monaco, Menlo, Consolas, "Cascadia Code", "Ubuntu Mono", monospace',
   scrollback: 80000,
+  theme: 'system',
 };
 
 function loadTerminal(): TerminalSettings {
@@ -27,6 +30,13 @@ function loadTerminal(): TerminalSettings {
         terminal.fontFamily === 'Monaco, Menlo, Ubuntu Mono, monospace'
       ) {
         terminal.fontFamily = DEFAULT_TERMINAL.fontFamily;
+      }
+      // Validate the theme key; fall back to system if absent or invalid.
+      if (
+        !terminal.theme ||
+        !TERMINAL_THEME_KEYS.includes(terminal.theme as TerminalThemeKey)
+      ) {
+        terminal.theme = 'system';
       }
       return { ...DEFAULT_TERMINAL, ...terminal };
     } catch (e) {
@@ -62,10 +72,16 @@ export const useSettingsStore = defineStore('settings', () => {
     persistSettings({ ...terminal });
   }
 
+  function setTheme(theme: TerminalThemeKey) {
+    terminal.theme = theme;
+    persistSettings({ ...terminal });
+  }
+
   return {
     terminal,
     setCursorStyle,
     setCursorBlink,
     setFontSize,
+    setTheme,
   };
 });
