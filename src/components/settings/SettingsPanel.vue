@@ -231,6 +231,21 @@
                       {{ $t('settings.description') }}
                     </p>
 
+                    <div class="about-features">
+                      <p class="features-title">
+                        {{ $t('settings.features') }}
+                      </p>
+                      <ul class="features-list">
+                        <li
+                          v-for="feature in $t('settings.featuresList')"
+                          :key="feature"
+                          class="feature-item"
+                        >
+                          {{ feature }}
+                        </li>
+                      </ul>
+                    </div>
+
                     <div class="about-meta">
                       <div class="meta-item">
                         <span class="meta-label">{{
@@ -828,6 +843,49 @@ onUnmounted(() => {
   font-size: 13px;
   color: var(--color-text-secondary);
   line-height: 1.6;
+}
+
+.about-features {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--color-border-tertiary);
+}
+
+.features-title {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.features-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.feature-item {
+  position: relative;
+  padding-left: 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.feature-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--color-primary);
 }
 
 .about-meta {
