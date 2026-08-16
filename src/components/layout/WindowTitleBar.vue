@@ -201,7 +201,7 @@ const handleMaximize = async () => {
 
 <template>
   <div
-    class="window-title-bar glass-medium border-bottom"
+    class="window-title-bar border-bottom"
     :class="{
       'fullscreen-mode': isFullscreen && isMacOS_OS,
       'is-windows': isWindowsOS,

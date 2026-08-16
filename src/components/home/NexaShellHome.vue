@@ -1353,7 +1353,7 @@ const onCancelDelete = () => {
 
 .add-input:focus {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.1);
+  box-shadow: var(--focus-ring);
 }
 
 .add-input::placeholder {
@@ -1468,8 +1468,7 @@ const onCancelDelete = () => {
 }
 
 .btn-primary:hover {
-  filter: brightness(1.1);
-  box-shadow: 0 2px 8px rgba(var(--color-primary-rgb), 0.3);
+  background: var(--color-primary-hover);
 }
 
 /* Groups and Grids */
@@ -1578,15 +1577,11 @@ const onCancelDelete = () => {
   cursor: pointer;
   background: var(--color-bg-primary);
   height: 48px;
+  transition: background var(--transition-fast);
 }
 
 .session-row:hover {
-  background: var(--color-bg-secondary);
-}
-
-.session-row:hover td:first-child {
-  border-left: 3px solid var(--color-primary);
-  padding-left: 9px; /* Compensate for the 3px border to keep alignment */
+  background: var(--color-interactive-hover);
 }
 
 .session-row.selected {
@@ -1802,7 +1797,7 @@ const onCancelDelete = () => {
 
 .icon-action-btn.connect:hover {
   color: var(--color-primary);
-  background: rgba(var(--color-primary-rgb), 0.1);
+  background: var(--color-interactive-hover);
 }
 
 .icon-action-btn.delete:hover {

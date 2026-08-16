@@ -1666,7 +1666,7 @@ const initialize = async (): Promise<void> => {
 .upload-confirm-overlay {
   position: fixed;
   inset: 0;
-  background-color: rgba(0, 0, 0, 0.55);
+  background-color: var(--color-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1678,14 +1678,13 @@ const initialize = async (): Promise<void> => {
   width: 460px;
   max-width: 100%;
   max-height: 80vh;
-  background-color: #252526;
-  border: 1px solid #3c3c3c;
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .upload-confirm-header {
@@ -1693,31 +1692,31 @@ const initialize = async (): Promise<void> => {
   align-items: center;
   justify-content: space-between;
   padding: 14px 16px;
-  border-bottom: 1px solid #3c3c3c;
+  border-bottom: 1px solid var(--color-border-secondary);
 }
 
 .upload-confirm-header h3 {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #e8e8e8;
+  color: var(--color-text-primary);
 }
 
 .upload-confirm-close {
   background: none;
   border: none;
-  color: #9d9d9d;
-  font-size: 22px;
+  color: var(--color-text-tertiary);
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
-  border-radius: 4px;
-  transition: color 0.2s;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .upload-confirm-close:hover {
-  color: #fff;
-  background-color: #3c3c3c;
+  color: var(--color-text-primary);
+  background-color: var(--color-interactive-hover);
 }
 
 .upload-confirm-body {
@@ -1734,24 +1733,25 @@ const initialize = async (): Promise<void> => {
 
 .confirm-label {
   font-size: 12px;
-  color: #9d9d9d;
+  color: var(--color-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.4px;
 }
 
 .confirm-dir-input {
-  background-color: #1e1e1e;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  color: #e8e8e8;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
   padding: 8px 10px;
   font-size: 13px;
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
 }
 
 .confirm-dir-input:focus {
   outline: none;
-  border-color: #facc15;
+  border-color: var(--color-accent);
+  box-shadow: var(--focus-ring);
 }
 
 .confirm-files {
@@ -1765,8 +1765,8 @@ const initialize = async (): Promise<void> => {
   align-items: flex-start;
   gap: 8px;
   padding: 6px 8px;
-  border-radius: 4px;
-  background-color: #2b2b2c;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-interactive-hover);
 }
 
 .confirm-file-info {
@@ -1777,15 +1777,15 @@ const initialize = async (): Promise<void> => {
 
 .confirm-file-name {
   font-size: 13px;
-  color: #fff;
+  color: var(--color-text-primary);
   font-weight: 500;
   word-break: break-all;
 }
 
 .confirm-file-path {
   font-size: 12px;
-  color: #9d9d9d;
-  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
   word-break: break-all;
 }
 
@@ -1794,38 +1794,38 @@ const initialize = async (): Promise<void> => {
   justify-content: flex-end;
   gap: 10px;
   padding: 12px 16px;
-  border-top: 1px solid #3c3c3c;
+  border-top: 1px solid var(--color-border-secondary);
 }
 
 .upload-confirm-footer .btn-secondary,
 .upload-confirm-footer .btn-primary {
   padding: 8px 16px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   border: 1px solid transparent;
-  transition: background-color 0.2s;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .upload-confirm-footer .btn-secondary {
-  background-color: #3a3a3a;
-  color: #e8e8e8;
-  border-color: #4a4a4a;
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-primary);
 }
 
 .upload-confirm-footer .btn-secondary:hover {
-  background-color: #454545;
+  background-color: var(--color-bg-elevated);
 }
 
 .upload-confirm-footer .btn-primary {
-  background-color: #facc15;
-  color: #1e1e1e;
-  border-color: #facc15;
+  background-color: var(--color-accent);
+  color: var(--color-bg-primary);
+  border-color: var(--color-accent);
 }
 
 .upload-confirm-footer .btn-primary:hover {
-  background-color: #fbbf24;
+  background-color: color-mix(in srgb, var(--color-accent) 85%, white);
 }
 
 .upload-confirm-footer .btn-primary:disabled {

@@ -826,9 +826,9 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   background-color: var(--color-bg-primary);
   box-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.1),
-    var(--shadow-2xl);
+    var(--shadow-xl);
   border: none;
-  transition: all var(--transition-base);
+  transition: var(--transition-base);
   /* Use clip-path to force cropping and prevent black edges from rendering overflow */
   clip-path: inset(0 round var(--radius-2xl));
 }
@@ -852,14 +852,14 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   :root:not(.theme-light) .app-root {
     box-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.1),
-      var(--shadow-2xl);
+      var(--shadow-xl);
   }
 }
 
 :root.theme-dark .app-root {
   box-shadow:
     0 0 0 0.5px rgba(255, 255, 255, 0.1),
-    var(--shadow-2xl);
+    var(--shadow-xl);
 }
 
 /* Modal overlay - removing black overlay for desktop app but keeping focus */
@@ -891,7 +891,7 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   border-radius: var(--radius-lg);
   overflow: hidden;
   clip-path: none;
-  animation: modal-appear 0.35s var(--ease-spring);
+  animation: modal-appear 0.25s var(--ease-spring-out);
 }
 
 @keyframes modal-appear {

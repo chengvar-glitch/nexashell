@@ -357,7 +357,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="app-tabs glass-light border-bottom" data-tauri-drag-region>
+  <div class="app-tabs border-bottom" data-tauri-drag-region>
     <div
       ref="tabsContainerRef"
       class="tabs-container scrollbar-hidden"
@@ -513,7 +513,7 @@ onBeforeUnmount(() => {
 }
 
 .action-btn:hover {
-  background-color: var(--color-bg-hover);
+  background-color: var(--color-interactive-hover);
   color: var(--color-text-primary);
 }
 
@@ -540,7 +540,7 @@ onBeforeUnmount(() => {
 
 @media (prefers-color-scheme: dark) {
   :root:not(.theme-light) .action-btn:hover {
-    background-color: var(--color-bg-hover);
+    background-color: var(--color-interactive-hover);
   }
 }
 </style>

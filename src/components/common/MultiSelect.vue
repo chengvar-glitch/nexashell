@@ -476,12 +476,12 @@ watch(isOpen, async newVal => {
 }
 
 .input-wrapper:hover {
-  border-color: var(--color-border-hover);
+  border-color: var(--color-border-primary);
 }
 
 .input-wrapper:focus-within {
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.12);
+  box-shadow: var(--focus-ring);
 }
 
 /* ==================== Selected Items (Tags) ==================== */

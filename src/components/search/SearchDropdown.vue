@@ -517,20 +517,12 @@ defineExpose({
   cursor: pointer;
   border-radius: var(--radius-md);
   margin: 0 4px;
-  transition:
-    background-color 0.15s ease,
-    transform 0.1s ease;
-  transform: scale(1);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
 .search-dropdown-item.active {
   background-color: var(--color-interactive-selected);
   color: var(--color-text-primary);
-  transform: scale(1.005);
-}
-
-.search-dropdown-item:active {
-  transform: scale(0.99);
 }
 
 .item-icon {
@@ -638,7 +630,6 @@ defineExpose({
   border-color: var(--color-primary);
   color: white;
   opacity: 1;
-  box-shadow: 0 2px 4px rgba(var(--color-primary-rgb), 0.3);
 }
 
 :root.theme-light .search-dropdown-item.active .item-enter-hint {

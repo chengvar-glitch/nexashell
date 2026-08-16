@@ -201,13 +201,11 @@ const handleSave = () => {
   width: 180px;
   height: 180px;
   margin-bottom: 20px;
-  filter: drop-shadow(0 0 40px rgba(59, 130, 246, 0.4));
-  animation: breathing 4s infinite ease-in-out;
   /* Hardware acceleration */
   transform: translateZ(0);
   backface-visibility: hidden;
-  will-change: transform, filter, opacity;
-  transition: filter 0.5s var(--ease-spring-out);
+  will-change: transform;
+  transition: opacity var(--transition-fast);
 }
 
 .theme-dark .logo-img {
@@ -223,10 +221,8 @@ const handleSave = () => {
 
 .app-name {
   font-size: 3rem;
-  font-weight: 800;
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+  color: var(--color-text-primary);
   margin: 0;
   opacity: 0.9;
 }
@@ -310,25 +306,24 @@ h3 {
 .save-btn {
   width: 100%;
   margin-top: 16px;
-  padding: 16px;
-  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  padding: 14px;
+  background: var(--color-primary);
   border: none;
   border-radius: var(--radius-lg);
   color: white;
   font-weight: 600;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+  transition: background var(--transition-fast);
 }
 
 .save-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.4);
+  background: var(--color-primary-hover);
 }
 
 .save-btn:active {
-  transform: translateY(0);
+  background: var(--color-primary);
+  opacity: 0.85;
 }
 
 .skip-btn {
@@ -349,24 +344,6 @@ h3 {
 
 .skip-btn:active {
   transform: scale(0.97);
-}
-
-@keyframes breathing {
-  0% {
-    transform: translateZ(0) scale(1);
-    filter: drop-shadow(0 0 30px rgba(59, 130, 246, 0.3));
-    opacity: 0.95;
-  }
-  50% {
-    transform: translateZ(0) scale(1.04);
-    filter: drop-shadow(0 0 60px rgba(59, 130, 246, 0.5));
-    opacity: 1;
-  }
-  100% {
-    transform: translateZ(0) scale(1);
-    filter: drop-shadow(0 0 30px rgba(59, 130, 246, 0.3));
-    opacity: 0.95;
-  }
 }
 
 .fade-enter-active,

@@ -716,7 +716,7 @@ const handleTabKey = (event: KeyboardEvent) => {
 .input:focus {
   outline: none;
   border-color: var(--color-primary);
-  box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb), 0.08);
+  box-shadow: var(--focus-ring);
 }
 
 .input::placeholder {

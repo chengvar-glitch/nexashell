@@ -581,7 +581,6 @@ const handleClose = () => {
 .error-icon {
   color: #ff4757;
   margin-right: 8px;
-  animation: pulse-error 2s ease-in-out infinite;
 }
 
 .loading-icon {
@@ -625,18 +624,6 @@ const handleClose = () => {
   }
   to {
     transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse-error {
-  0%,
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.7;
-    transform: scale(1.05);
   }
 }
 
