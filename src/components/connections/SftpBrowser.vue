@@ -5,19 +5,15 @@ import {
   Folder,
   File,
   FileSymlink,
-  ArrowUp,
-  RotateCw,
-  Home,
-  LocateFixed,
   Download,
   Trash2,
   Pencil,
   X,
   Check,
-  ChevronRight,
-  FolderPlus,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-vue-next';
-import { useSftp, parentOfPath, normalizePath } from '@/composables/use-sftp';
+import { useSftp, normalizePath } from '@/composables/use-sftp';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import type { SftpEntry } from '@/core/types';
 import { formatBytes } from '@/core/types';
@@ -30,6 +26,8 @@ interface Props {
   initialPath?: string;
   /** Bumping this value triggers a refresh of the current directory. */
   refreshKey?: number;
+  /** Compact single-line row rendering (hides extra columns & the header). */
+  compact?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -43,30 +41,52 @@ const emit = defineEmits<{
 const sessionIdRef = ref(props.sessionId);
 const sftp = useSftp(sessionIdRef);
 
-const breadcrumbs = computed<Array<{ label: string; path: string }>>(() => {
-  const cur = sftp.currentPath.value;
-  if (cur === '/') return [{ label: '/', path: '/' }];
-  const parts = cur.split('/').filter(Boolean);
-  const crumbs: Array<{ label: string; path: string }> = [
-    { label: '/', path: '/' },
-  ];
-  let acc = '';
-  for (const part of parts) {
-    acc += `/${part}`;
-    crumbs.push({ label: part, path: acc });
+// --- Column sorting -----------------------------------------------------
+type SortKey = 'name' | 'size' | 'mtime';
+const sortKey = ref<SortKey>('name');
+const sortAsc = ref(true);
+
+const directionIcon = computed(() => (sortAsc.value ? ArrowUp : ArrowDown));
+
+const toggleSort = (key: SortKey) => {
+  if (sortKey.value === key) {
+    sortAsc.value = !sortAsc.value;
+  } else {
+    sortKey.value = key;
+    // Finder-like defaults: name ascending, size & date newest/largest first.
+    sortAsc.value = key !== 'size' && key !== 'mtime';
   }
-  return crumbs;
-});
+};
 
 const sortedEntries = computed<SftpEntry[]>(() => {
-  const dirs = sftp.entries.value.filter(e => e.isDir);
-  const files = sftp.entries.value.filter(e => !e.isDir);
-  const sortByName = (a: SftpEntry, b: SftpEntry) =>
-    a.name.localeCompare(b.name);
-  return [...dirs.sort(sortByName), ...files.sort(sortByName)];
+  const key = sortKey.value;
+  const asc = sortAsc.value;
+  const cmp = (a: SftpEntry, b: SftpEntry): number => {
+    if (key === 'size') {
+      const r = a.size - b.size;
+      return asc ? r : -r;
+    }
+    if (key === 'mtime') {
+      const aa = a.mtime ?? 0;
+      const bb = b.mtime ?? 0;
+      return asc ? aa - bb : bb - aa;
+    }
+    const r = a.name.localeCompare(b.name, undefined, { numeric: true });
+    return asc ? r : -r;
+  };
+  const dirs = sftp.entries.value.filter(e => e.isDir).sort(cmp);
+  const files = sftp.entries.value.filter(e => !e.isDir).sort(cmp);
+  return [...dirs, ...files];
 });
 
-// Inline "new directory" input
+// --- Selection ----------------------------------------------------------
+const selectedPath = ref<string | null>(null);
+
+const selectEntry = (entry: SftpEntry) => {
+  selectedPath.value = entry.path;
+};
+
+// --- Inline "new directory" input ---------------------------------------
 const showMkdir = ref(false);
 const mkdirName = ref('');
 // Inline "rename" editing per entry path
@@ -85,7 +105,8 @@ const formatMtime = (mtime?: number): string => {
 
 const enterPath = async (entry: SftpEntry) => {
   if (!entry.isDir) return;
-  await sftp.navigate(entry.path);
+  const ok = await sftp.navigate(entry.path);
+  if (ok) selectedPath.value = null;
 };
 
 const onMkdir = async () => {
@@ -153,15 +174,6 @@ const cancelRename = () => {
   editingName.value = '';
 };
 
-/**
- * Jump the file list back to the terminal's current remote directory (the
- * `initialPath` prop, kept up to date by the parent). Disabled at root.
- */
-const goToCurrentDir = async (): Promise<void> => {
-  const target = normalizePath(props.initialPath || '/');
-  await sftp.go(target);
-};
-
 onMounted(() => {
   // Open the requested initial path (e.g. the terminal's CWD), falling back
   // to the root when none is provided.
@@ -190,58 +202,26 @@ watch(
     void sftp.refresh();
   }
 );
+
+// The address bar in the parent window drives navigation. Expose a small,
+// typed imperative API so the toolbar can call us without duplicating the
+// SFTP state outside this component.
+defineExpose({
+  /** Navigate directly to an absolute path (no history push). */
+  go: sftp.go,
+  goUp: sftp.goUp,
+  goHome: sftp.goHome,
+  refresh: sftp.refresh,
+  /** Open the inline "new folder" input. */
+  newFolder: () => {
+    showMkdir.value = true;
+  },
+});
 </script>
 
 <template>
-  <div class="sftp-browser">
-    <div class="sftp-toolbar">
-      <div class="sftp-nav">
-        <button
-          type="button"
-          class="toolbar-btn"
-          :title="t('sftp.up')"
-          :disabled="parentOfPath(sftp.currentPath.value) === null"
-          @click="sftp.goUp"
-        >
-          <ArrowUp :size="13" />
-        </button>
-        <button
-          type="button"
-          class="toolbar-btn"
-          :title="t('sftp.goHome')"
-          @click="sftp.goHome('/')"
-        >
-          <Home :size="13" />
-        </button>
-        <button
-          type="button"
-          class="toolbar-btn"
-          :title="t('sftp.refresh')"
-          :disabled="sftp.loading.value"
-          @click="sftp.refresh"
-        >
-          <RotateCw :size="13" :class="{ spinning: sftp.loading.value }" />
-        </button>
-        <button
-          type="button"
-          class="toolbar-btn locate"
-          :title="t('sftp.locateCurrentDir')"
-          :disabled="sftp.loading.value"
-          @click="goToCurrentDir"
-        >
-          <LocateFixed :size="13" />
-        </button>
-      </div>
-      <button
-        type="button"
-        class="toolbar-btn add"
-        :title="t('sftp.newDir')"
-        @click="showMkdir = !showMkdir"
-      >
-        <FolderPlus :size="13" />
-      </button>
-    </div>
-
+  <div class="sftp-browser" :class="{ compact: props.compact }">
+    <!-- Inline "new folder" input, requested from the parent toolbar -->
     <div v-if="showMkdir" class="mkdir-row">
       <input
         v-model="mkdirName"
@@ -252,31 +232,17 @@ watch(
         @keydown.enter="onMkdir"
         @keydown.esc="showMkdir = false"
       />
-      <button type="button" class="tiny-btn ok" @click="onMkdir">
-        <Check :size="11" />
+      <button type="button" class="tiny-btn ok" :title="t('sftp.newDir')" @click="onMkdir">
+        <Check :size="12" />
       </button>
-      <button type="button" class="tiny-btn" @click="showMkdir = false">
-        <X :size="11" />
+      <button
+        type="button"
+        class="tiny-btn"
+        :title="t('common.cancel')"
+        @click="showMkdir = false"
+      >
+        <X :size="12" />
       </button>
-    </div>
-
-    <!-- Breadcrumb -->
-    <div class="breadcrumb">
-      <template v-for="(crumb, idx) in breadcrumbs" :key="crumb.path">
-        <button
-          type="button"
-          class="crumb"
-          :class="{ current: idx === breadcrumbs.length - 1 }"
-          @click="sftp.go(crumb.path)"
-        >
-          {{ crumb.label }}
-        </button>
-        <ChevronRight
-          v-if="idx < breadcrumbs.length - 1"
-          :size="10"
-          class="crumb-sep"
-        />
-      </template>
     </div>
 
     <div v-if="actionError" class="sftp-error">{{ actionError }}</div>
@@ -290,39 +256,78 @@ watch(
       <div class="list-progress-bar" />
     </div>
 
+    <!-- Sortable column header (detail mode only) -->
+    <div v-if="!props.compact" class="column-header">
+      <button
+        type="button"
+        class="th name"
+        :class="{ active: sortKey === 'name' }"
+        :title="t('sftp.name')"
+        @click="toggleSort('name')"
+      >
+        <span>{{ t('sftp.name') }}</span>
+        <component :is="directionIcon" v-if="sortKey === 'name'" :size="12" />
+      </button>
+      <button
+        type="button"
+        class="th size"
+        :class="{ active: sortKey === 'size' }"
+        :title="t('sftp.size')"
+        @click="toggleSort('size')"
+      >
+        <span>{{ t('sftp.size') }}</span>
+        <component :is="directionIcon" v-if="sortKey === 'size'" :size="12" />
+      </button>
+      <button
+        type="button"
+        class="th mtime"
+        :class="{ active: sortKey === 'mtime' }"
+        :title="t('sftp.modified')"
+        @click="toggleSort('mtime')"
+      >
+        <span>{{ t('sftp.modified') }}</span>
+        <component :is="directionIcon" v-if="sortKey === 'mtime'" :size="12" />
+      </button>
+      <span class="th spacer" aria-hidden="true" />
+    </div>
+
     <div
       v-if="!sftp.loading.value && sortedEntries.length === 0"
       class="sftp-state empty"
     >
-      <Folder :size="22" />
+      <div class="empty-icon">
+        <Folder :size="30" />
+      </div>
       <p>{{ t('sftp.emptyDir') }}</p>
     </div>
 
     <div
       v-else
-      class="file-list"
+      class="file-list scrollbar-thin"
       :class="{ loading: sftp.loading.value }"
     >
       <div
         v-for="entry in sortedEntries"
         :key="entry.path"
         class="file-row"
-        :class="{ dir: entry.isDir }"
+        :class="{ dir: entry.isDir, selected: selectedPath === entry.path }"
+        role="row"
+        @click="selectEntry(entry)"
         @dblclick="enterPath(entry)"
       >
-        <div class="file-icon-wrap" @click="enterPath(entry)">
+        <div class="file-icon-wrap">
           <Folder
             v-if="entry.isDir"
-            :size="15"
+            :size="16"
             class="file-icon dir"
             fill="currentColor"
           />
           <FileSymlink
             v-else-if="entry.isSymlink"
-            :size="15"
+            :size="16"
             class="file-icon symlink"
           />
-          <File v-else :size="15" class="file-icon file" />
+          <File v-else :size="16" class="file-icon file" />
         </div>
 
         <!-- Rename inline editor -->
@@ -336,27 +341,20 @@ watch(
             @keydown.esc="cancelRename"
           />
           <button type="button" class="tiny-btn ok" @click="onRename">
-            <Check :size="11" />
+            <Check :size="12" />
           </button>
           <button type="button" class="tiny-btn" @click="cancelRename">
-            <X :size="11" />
+            <X :size="12" />
           </button>
         </template>
 
         <template v-else>
-          <button
-            type="button"
-            class="file-name"
-            :title="entry.name"
-            @click="enterPath(entry)"
-          >
-            {{ entry.name }}
-          </button>
-          <span class="file-size">
+          <span class="file-name" :title="entry.name">{{ entry.name }}</span>
+          <span class="file-size" :class="{ 'is-dir': entry.isDir }">
             {{ entry.isDir ? '—' : formatBytes(entry.size) }}
           </span>
           <span class="file-mtime">{{ formatMtime(entry.mtime) }}</span>
-          <div class="file-actions">
+          <div class="file-actions" role="group">
             <button
               v-if="!entry.isDir"
               type="button"
@@ -364,7 +362,7 @@ watch(
               :title="t('sftp.download')"
               @click.stop="emit('download', entry)"
             >
-              <Download :size="12" />
+              <Download :size="13" />
             </button>
             <button
               type="button"
@@ -372,7 +370,7 @@ watch(
               :title="t('sftp.rename')"
               @click.stop="startRename(entry)"
             >
-              <Pencil :size="12" />
+              <Pencil :size="13" />
             </button>
             <button
               type="button"
@@ -380,11 +378,16 @@ watch(
               :title="t('sftp.delete')"
               @click.stop="onRemove(entry)"
             >
-              <Trash2 :size="12" />
+              <Trash2 :size="13" />
             </button>
           </div>
         </template>
       </div>
+    </div>
+
+    <!-- Footer status bar -->
+    <div class="fm-footer">
+      <span>{{ t('sftp.items', { count: sftp.entries.value.length }) }}</span>
     </div>
 
     <!-- Styled delete confirmation dialog -->
@@ -405,165 +408,159 @@ watch(
 .sftp-browser {
   display: flex;
   flex-direction: column;
-  /* Grow to fill the panel without depending on a definite % height: the
-     flex chain (dashboard .accordion-content → this root) is bounded, and
-     using flex-basis 0 + min-height:0 lets .file-list scroll internally. */
   flex: 1 1 0;
   min-height: 0;
   height: auto;
   overflow: hidden;
-  gap: 6px;
-  font-size: 12px;
+  gap: 4px;
+  font-size: 13px;
 }
 
-.sftp-toolbar {
+/* Layout for the detail/view area: header + list + footer all stretch. */
+.column-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--color-border-secondary);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}
+.sftp-browser.compact .column-header {
+  display: none;
 }
 
-.sftp-nav {
-  display: flex;
-  gap: 4px;
-}
-
-.toolbar-btn {
+.th {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
+  gap: 4px;
   border: none;
-  border-radius: 4px;
   background: transparent;
-  color: #9d9d9d;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  border-radius: var(--radius-xs);
+  padding: 2px 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
-.toolbar-btn:hover:not(:disabled) {
-  background: #3c3c3c;
-  color: #fff;
+.th:hover {
+  color: var(--color-text-primary);
+  background: var(--color-interactive-hover);
 }
-.toolbar-btn:disabled {
-  opacity: 0.35;
-  cursor: default;
+.th.active {
+  color: var(--color-text-primary);
+  font-weight: 600;
 }
-.toolbar-btn.add {
-  color: #facc15;
+.th.name {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
 }
-.toolbar-btn.add:hover {
-  background: rgba(250, 204, 21, 0.15);
+.th.size {
+  flex: 0 0 64px;
+  justify-content: flex-end;
 }
-.toolbar-btn.locate {
-  color: #60a5fa;
+.th.mtime {
+  flex: 0 0 92px;
+  justify-content: flex-end;
 }
-.toolbar-btn.locate:hover:not(:disabled) {
-  background: rgba(96, 165, 250, 0.15);
-  color: #60a5fa;
+.th.spacer {
+  flex: 0 0 78px;
+}
+.sftp-browser.compact .th.spacer {
+  flex: 0 0 0;
 }
 
 .mkdir-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 2px;
-  padding: 4px 6px;
-  background: rgba(255, 255, 255, 0.04);
-  border-radius: 4px;
-  min-height: 24px;
-}
-.crumb {
-  border: none;
-  background: transparent;
-  color: #9d9d9d;
-  font-size: 11px;
-  padding: 1px 3px;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.crumb:hover {
-  color: #fff;
-  background: #3a3a3a;
-}
-.crumb.current {
-  color: #facc15;
-  cursor: default;
-}
-.crumb-sep {
-  color: #5a5a5a;
+  gap: 6px;
+  padding: 0 12px;
 }
 
 .inline-input {
-  flex: 1;
-  min-width: 0;
-  background: #1e1e1e;
-  border: 1px solid #3c3c3c;
-  border-radius: 4px;
-  color: #e8e8e8;
-  padding: 4px 6px;
-  font-size: 12px;
+  width: 100%;
+  max-width: 340px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  padding: 5px 8px;
+  font-size: 13px;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .inline-input:focus {
   outline: none;
-  border-color: #facc15;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
 }
 .inline-input.grow {
   flex: 1;
+  max-width: none;
 }
 
 .tiny-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 4px;
-  background: #3a3a3a;
-  color: #9d9d9d;
+  border-radius: var(--radius-sm);
+  background: var(--color-interactive-hover);
+  color: var(--color-text-secondary);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .tiny-btn.ok {
-  background: rgba(250, 204, 21, 0.15);
-  color: #facc15;
+  background: color-mix(in srgb, var(--color-primary) 18%, transparent);
+  color: var(--color-primary);
 }
 .tiny-btn:hover {
-  color: #fff;
+  color: var(--color-text-primary);
+  background: var(--color-interactive-active);
 }
 
 .sftp-error {
-  color: #ef4444;
-  font-size: 11px;
-  padding: 2px 4px;
+  color: var(--color-danger);
+  font-size: 12px;
+  padding: 6px 12px;
   word-break: break-word;
+  background: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 25%, transparent);
+  border-radius: var(--radius-sm);
+  margin: 0 12px;
+  flex: 0 0 auto;
 }
 
 .sftp-state {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  color: #6b7280;
-  padding: 24px 0;
+  gap: 10px;
+  color: var(--color-text-tertiary);
+}
+.sftp-state .empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-xl);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
 }
 .sftp-state p {
   margin: 0;
-}
-.spinning {
-  animation: spin 0.9s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  font-size: 12px;
 }
 
 .file-list {
@@ -572,7 +569,8 @@ watch(
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
+  padding: 4px 8px;
   transition: opacity 0.15s ease;
 }
 .file-list.loading {
@@ -593,12 +591,12 @@ watch(
   position: absolute;
   inset: 0;
   width: 0;
-  background: #facc15;
+  background: var(--color-primary);
   opacity: 0;
   border-radius: 2px;
 }
 .list-progress.active {
-  background: rgba(250, 204, 21, 0.12);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
 }
 .list-progress.active .list-progress-bar {
   opacity: 1;
@@ -617,16 +615,38 @@ watch(
 .file-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 4px;
-  border-radius: 4px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
   cursor: default;
+  position: relative;
+  transition: background var(--transition-fast);
 }
 .file-row:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-interactive-hover);
+}
+.file-row.selected {
+  background: var(--color-interactive-selected);
+}
+.file-row.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--color-primary);
+}
+.file-row:focus-within {
+  box-shadow: var(--focus-ring);
 }
 .file-row.dir {
-  cursor: pointer;
+  cursor: default;
+}
+
+.sftp-browser.compact .file-row {
+  padding: 3px 10px;
 }
 
 .file-icon-wrap {
@@ -635,13 +655,13 @@ watch(
   flex: 0 0 auto;
 }
 .file-icon.dir {
-  color: #facc15;
+  color: #ffd60a;
 }
 .file-icon.symlink {
-  color: #60a5fa;
+  color: var(--color-accent);
 }
 .file-icon.file {
-  color: #9d9d9d;
+  color: var(--color-text-tertiary);
 }
 
 .file-name {
@@ -650,35 +670,40 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: left;
-  border: none;
-  background: transparent;
-  color: #e8e8e8;
-  font-size: 12px;
-  padding: 0;
-  cursor: inherit;
+  color: var(--color-text-primary);
+  font-size: 13px;
 }
 
 .file-size {
-  flex: 0 0 52px;
+  flex: 0 0 64px;
   text-align: right;
-  color: #6b7280;
-  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
+.file-size.is-dir {
+  color: var(--color-text-placeholder);
+}
 .file-mtime {
-  flex: 0 0 70px;
+  flex: 0 0 92px;
   text-align: right;
-  color: #6b7280;
-  font-size: 10px;
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.sftp-browser.compact .file-size,
+.sftp-browser.compact .file-mtime {
+  display: none;
 }
 
 .file-actions {
   display: none;
   align-items: center;
   gap: 2px;
+  flex: 0 0 auto;
 }
 .file-row:hover .file-actions,
+.file-row.selected .file-actions,
 .file-row:focus-within .file-actions {
   display: inline-flex;
 }
@@ -687,20 +712,34 @@ watch(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border: none;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #9d9d9d;
+  color: var(--color-text-secondary);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .action-btn:hover {
-  background: #3c3c3c;
-  color: #fff;
+  background: var(--color-interactive-active);
+  color: var(--color-text-primary);
 }
 .action-btn.danger:hover {
-  background: rgba(239, 68, 68, 0.15);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--color-danger) 15%, transparent);
+  color: var(--color-danger);
+}
+
+.fm-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 14px;
+  border-top: 1px solid var(--color-border-secondary);
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 </style>

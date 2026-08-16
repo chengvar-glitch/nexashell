@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -18,6 +18,13 @@ import {
   CheckCircle2,
   AlertCircle,
   Activity,
+  FolderUp,
+  FolderPlus,
+  Home,
+  RotateCw,
+  LayoutList,
+  PanelRightClose,
+  CircleX,
 } from 'lucide-vue-next';
 
 const logger = createLogger('FILE_MANAGER_WINDOW');
@@ -40,12 +47,53 @@ const showTransfers = ref(true);
 const currentRemotePath = ref('/');
 const refreshKey = ref(0);
 
+// Reference to the embedded browser so the unified toolbar can drive
+// navigation/mkdir through the imperative API exposed by SftpBrowser.
+const browserRef = ref<InstanceType<typeof SftpBrowser> | null>(null);
+
+// View mode: "detail" (sortable columns) vs "compact" (single-line rows).
+const compactView = ref(false);
+
+// Editable address bar.
+const addressDraft = ref('');
+const addressEditing = ref(false);
+const addressFocused = ref(false);
+
+// Local drag-and-drop overlay state via Tauri native events.
+const isDragging = ref(false);
+let unlistenDrop: UnlistenFn | null = null;
+let unlistenDragEnter: UnlistenFn | null = null;
+let unlistenDragLeave: UnlistenFn | null = null;
+
+const activeTaskCount = computed(
+  () =>
+    transferQueue.tasks.value.filter(
+      t => t.status === 'uploading' || t.status === 'downloading' || t.status === 'paused'
+    ).length
+);
+
 onMounted(async () => {
   if (!sessionId.value) return;
   disconnectUnlisten = await listen(`ssh-disconnected-${sessionId.value}`, () => {
     disconnected.value = true;
   });
   await transferQueue.setupListeners();
+
+  // Tauri native drag events. Dropping picks up the absolute local paths and
+  // uploads them into the current remote directory.
+  unlistenDrop = await listen<{ paths: string[] }>(
+    'tauri://drag-drop',
+    event => {
+      isDragging.value = false;
+      void uploadLocalPaths(event.payload.paths);
+    }
+  );
+  unlistenDragEnter = await listen('tauri://drag-enter', () => {
+    isDragging.value = true;
+  });
+  unlistenDragLeave = await listen('tauri://drag-leave', () => {
+    isDragging.value = false;
+  });
 });
 
 onUnmounted(() => {
@@ -53,11 +101,44 @@ onUnmounted(() => {
     void disconnectUnlisten();
     disconnectUnlisten = null;
   }
+  if (unlistenDrop) {
+    void unlistenDrop();
+    unlistenDrop = null;
+  }
+  if (unlistenDragEnter) {
+    void unlistenDragEnter();
+    unlistenDragEnter = null;
+  }
+  if (unlistenDragLeave) {
+    void unlistenDragLeave();
+    unlistenDragLeave = null;
+  }
   transferQueue.dispose();
 });
 
 const onCurrentPath = (path: string) => {
   currentRemotePath.value = path;
+};
+
+const refreshBrowser = () => {
+  refreshKey.value += 1;
+};
+
+const goUp = () => void browserRef.value?.goUp();
+const goHome = () => void browserRef.value?.goHome('/');
+const goRefresh = () => void browserRef.value?.refresh();
+const newFolder = () => void browserRef.value?.newFolder();
+
+/** Start an upload for a list of local file paths into the current remote dir. */
+const uploadLocalPaths = async (paths: string[]) => {
+  if (!sessionId.value || paths.length === 0) return;
+  const base = currentRemotePath.value === '/' ? '' : currentRemotePath.value;
+  for (const localPath of paths) {
+    const fileName = localPath.split('/').pop() || localPath;
+    await transferQueue.startUpload(localPath, `${base}/${fileName}`, fileName);
+  }
+  refreshBrowser();
+  showTransfers.value = true;
 };
 
 /** Pick one or more local files and upload them into the current remote dir. */
@@ -67,12 +148,7 @@ const onUpload = async () => {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const selected = await open({ multiple: true });
     const paths = Array.isArray(selected) ? selected : selected ? [selected] : [];
-    const base = currentRemotePath.value === '/' ? '' : currentRemotePath.value;
-    for (const localPath of paths) {
-      const fileName = localPath.split('/').pop() || localPath;
-      await transferQueue.startUpload(localPath, `${base}/${fileName}`, fileName);
-    }
-    refreshKey.value += 1;
+    await uploadLocalPaths(paths);
   } catch (err) {
     logger.error('Upload dialog failed', err);
   }
@@ -88,6 +164,35 @@ const downloadEntry = (entry: SftpEntry) => {
   })();
 };
 
+// --- Address bar ------------------------------------------------------
+const addressText = computed(() =>
+  addressEditing.value ? addressDraft.value : currentRemotePath.value
+);
+
+const startAddressEdit = () => {
+  addressDraft.value = currentRemotePath.value;
+  addressEditing.value = true;
+};
+
+const onAddressInput = (e: Event) => {
+  addressDraft.value = (e.target as HTMLInputElement).value;
+  addressEditing.value = true;
+};
+
+const commitAddress = () => {
+  if (!addressEditing.value) return;
+  const target = addressDraft.value.trim();
+  addressEditing.value = false;
+  if (!target || target === currentRemotePath.value) return;
+  void browserRef.value?.go(target);
+};
+
+const cancelAddress = () => {
+  addressEditing.value = false;
+  addressDraft.value = '';
+};
+
+// --- Transfer panel helpers -------------------------------------------
 const taskStatusIcon = (status: UploadTask['status']) => {
   switch (status) {
     case 'success':
@@ -107,22 +212,22 @@ const taskStatusIcon = (status: UploadTask['status']) => {
   }
 };
 
-const taskStatusColor = (status: UploadTask['status']) => {
-  switch (status) {
+const taskStatusClass = (task: UploadTask): string => {
+  switch (task.status) {
     case 'success':
-      return '#10b981';
+      return 'status-success';
     case 'error':
-      return '#ef4444';
+      return 'status-error';
     case 'cancelled':
-      return '#6b7280';
+      return 'status-cancelled';
     case 'paused':
-      return '#facc15';
+      return 'status-paused';
     case 'downloading':
-      return '#8b5cf6';
+      return 'status-download';
     case 'uploading':
-      return '#3b82f6';
+      return 'status-upload';
     default:
-      return '#6b7280';
+      return 'status-active';
   }
 };
 </script>
@@ -133,142 +238,205 @@ const taskStatusColor = (status: UploadTask['status']) => {
       <div v-if="disconnected" class="fm-disconnected">
         <span class="dot" />
         {{ t('dashboard.disconnected') }}
+        <button type="button" class="retry-close" @click="disconnected = false">
+          <CircleX :size="13" />
+        </button>
       </div>
 
       <div v-else class="fm-layout">
         <div class="fm-main">
+          <!-- Unified tool / address bar -->
           <div class="fm-toolbar">
-            <div class="fm-path">
-              <span class="fm-path-text" :title="currentRemotePath">{{
-                currentRemotePath
-              }}</span>
-            </div>
-            <div class="fm-toolbar-actions">
+            <div class="tb-nav">
               <button
                 type="button"
-                class="fm-btn primary"
-                :title="t('dashboard.upload')"
-                @click="onUpload"
+                class="tb-btn"
+                :title="t('sftp.up')"
+                @click="goUp"
               >
+                <ArrowUp :size="15" />
+              </button>
+              <button
+                type="button"
+                class="tb-btn"
+                :title="t('sftp.goHome')"
+                @click="goHome"
+              >
+                <Home :size="15" />
+              </button>
+              <button
+                type="button"
+                class="tb-btn"
+                :title="t('sftp.refresh')"
+                @click="goRefresh"
+              >
+                <RotateCw :size="15" />
+              </button>
+            </div>
+
+            <div
+              class="tb-address"
+              :class="{ editing: addressEditing, focused: addressFocused }"
+            >
+              <FolderUp v-if="!addressEditing" :size="14" class="tb-address-icon" />
+              <input
+                :value="addressText"
+                type="text"
+                spellcheck="false"
+                :placeholder="currentRemotePath"
+                @input="onAddressInput"
+                @focus="startAddressEdit(); addressFocused = true"
+                @blur="addressFocused = false; commitAddress()"
+                @keydown.enter="commitAddress()"
+                @keydown.esc="cancelAddress()"
+              />
+            </div>
+
+            <div class="tb-actions">
+              <button
+                type="button"
+                class="tb-btn"
+                :class="{ active: compactView }"
+                :title="compactView ? t('sftp.detailView') : t('sftp.compactView')"
+                @click="compactView = !compactView"
+              >
+                <LayoutList :size="15" />
+              </button>
+              <button
+                type="button"
+                class="tb-btn"
+                :title="t('sftp.newDir')"
+                @click="newFolder"
+              >
+                <FolderPlus :size="15" />
+              </button>
+              <button type="button" class="tb-btn upload" :title="t('dashboard.upload')" @click="onUpload">
                 <Upload :size="15" />
                 <span>{{ t('dashboard.upload') }}</span>
               </button>
               <button
                 type="button"
-                class="fm-btn"
+                class="tb-btn transfers-toggle"
+                :class="{ active: showTransfers }"
                 :title="t('dashboard.transfersToggle')"
                 @click="showTransfers = !showTransfers"
               >
                 <Activity :size="15" />
+                <span v-if="activeTaskCount" class="tb-badge">{{
+                  activeTaskCount
+                }}</span>
               </button>
             </div>
           </div>
 
           <div class="fm-browser">
             <SftpBrowser
+              ref="browserRef"
               :session-id="sessionId"
               :refresh-key="refreshKey"
+              :compact="compactView"
               @current-path="onCurrentPath"
               @download="downloadEntry"
             />
           </div>
         </div>
 
-        <!-- Transfer queue panel (right side) -->
-        <aside v-if="showTransfers" class="fm-transfers">
-          <div class="fm-transfers-header">
-            <span class="fm-transfers-title">{{ t('dashboard.uploads') }}</span>
-            <div class="fm-transfers-actions">
-              <button
-                type="button"
-                class="icon-btn-sm"
-                :title="t('dashboard.clearAll')"
-                @click="transferQueue.clearCompleted()"
-              >
-                <Trash2 :size="13" />
-              </button>
-              <button
-                type="button"
-                class="icon-btn-sm"
-                :title="t('dashboard.closePanel')"
-                @click="showTransfers = false"
-              >
-                <XCircle :size="13" />
-              </button>
+        <!-- Transfer queue panel (right side, collapsible) -->
+        <aside class="fm-transfers" :class="{ collapsed: !showTransfers }">
+          <div class="fm-transfers-inner">
+            <div class="fm-transfers-header">
+              <span class="fm-transfers-title">{{ t('dashboard.uploads') }}</span>
+              <div class="fm-transfers-actions">
+                <button
+                  type="button"
+                  class="icon-btn-sm"
+                  :title="t('dashboard.clearAll')"
+                  @click="transferQueue.clearCompleted()"
+                >
+                  <Trash2 :size="14" />
+                </button>
+                <button
+                  type="button"
+                  class="icon-btn-sm"
+                  :title="t('dashboard.closePanel')"
+                  @click="showTransfers = false"
+                >
+                  <PanelRightClose :size="14" />
+                </button>
+              </div>
             </div>
-          </div>
 
-          <div
-            v-if="transferQueue.tasks.value.length === 0"
-            class="fm-transfers-empty"
-          >
-            <Activity :size="20" />
-            <p>{{ t('dashboard.noUploadTasks') }}</p>
-          </div>
-          <div v-else class="fm-transfers-list">
             <div
-              v-for="task in transferQueue.tasks.value"
-              :key="task.id"
-              class="fm-task"
-              :class="task.status"
+              v-if="transferQueue.tasks.value.length === 0"
+              class="fm-transfers-empty"
             >
-              <div class="fm-task-header">
-                <component
-                  :is="taskStatusIcon(task.status)"
-                  :size="13"
-                  class="fm-task-icon"
-                  :style="{ color: taskStatusColor(task.status) }"
-                />
-                <span class="fm-task-name" :title="task.fileName || task.id">{{
-                  task.fileName || 'Transfer'
-                }}</span>
-                <span class="fm-task-time">{{ Math.floor(task.progress) }}%</span>
-              </div>
-              <div class="fm-task-progress">
-                <div
-                  class="fm-task-progress-fill"
-                  :class="`fill-${task.status}`"
-                  :style="{ width: `${Math.min(100, task.progress)}%` }"
-                />
-              </div>
-              <div v-if="task.speed" class="fm-task-meta">
-                <span>{{ formatSpeed(task.speed) }}</span>
-                <span v-if="task.fileSize">{{ formatBytes(task.fileSize) }}</span>
-              </div>
+              <Activity :size="22" />
+              <p>{{ t('dashboard.noUploadTasks') }}</p>
+            </div>
+            <div v-else class="fm-transfers-list scrollbar-thin">
               <div
-                v-if="
-                  task.status === 'uploading' ||
-                  task.status === 'downloading' ||
-                  task.status === 'paused'
-                "
-                class="fm-task-actions"
+                v-for="task in transferQueue.tasks.value"
+                :key="task.id"
+                class="fm-task"
+                :class="taskStatusClass(task)"
               >
-                <button
-                  v-if="task.status === 'paused' && task.direction !== 'download'"
-                  type="button"
-                  class="tiny-btn"
-                  :title="t('upload.resume')"
-                  @click="transferQueue.resume(task.id)"
+                <div class="fm-task-header">
+                  <div class="fm-task-icon-wrap" :class="taskStatusClass(task)">
+                    <component :is="taskStatusIcon(task.status)" :size="14" />
+                  </div>
+                  <span class="fm-task-name" :title="task.fileName || task.id">{{
+                    task.fileName || 'Transfer'
+                  }}</span>
+                  <span class="fm-task-percent">{{
+                    Math.floor(task.progress)
+                  }}%</span>
+                </div>
+                <div class="fm-task-progress">
+                  <div
+                    class="fm-task-progress-fill"
+                    :class="taskStatusClass(task)"
+                    :style="{ width: `${Math.min(100, task.progress)}%` }"
+                  />
+                </div>
+                <div v-if="task.speed || task.fileSize" class="fm-task-meta">
+                  <span v-if="task.speed">{{ formatSpeed(task.speed) }}</span>
+                  <span v-if="task.fileSize">{{ formatBytes(task.fileSize) }}</span>
+                </div>
+                <div
+                  v-if="
+                    task.status === 'uploading' ||
+                    task.status === 'downloading' ||
+                    task.status === 'paused'
+                  "
+                  class="fm-task-actions"
                 >
-                  <Play :size="11" />
-                </button>
-                <button
-                  v-if="task.status === 'uploading'"
-                  type="button"
-                  class="tiny-btn"
-                  :title="t('upload.pause')"
-                  @click="transferQueue.pause(task.id)"
-                >
-                  <PauseCircle :size="11" />
-                </button>
-                <button
-                  type="button"
-                  class="tiny-btn danger"
-                  :title="t('upload.cancel')"
-                  @click="transferQueue.cancel(task.id)"
-                >
-                  <XCircle :size="11" />
-                </button>
+                  <button
+                    v-if="task.status === 'paused' && task.direction !== 'download'"
+                    type="button"
+                    class="tiny-btn"
+                    :title="t('upload.resume')"
+                    @click="transferQueue.resume(task.id)"
+                  >
+                    <Play :size="12" />
+                  </button>
+                  <button
+                    v-if="task.status === 'uploading'"
+                    type="button"
+                    class="tiny-btn"
+                    :title="t('upload.pause')"
+                    @click="transferQueue.pause(task.id)"
+                  >
+                    <PauseCircle :size="12" />
+                  </button>
+                  <button
+                    type="button"
+                    class="tiny-btn danger"
+                    :title="t('upload.cancel')"
+                    @click="transferQueue.cancel(task.id)"
+                  >
+                    <XCircle :size="12" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -278,6 +446,19 @@ const taskStatusColor = (status: UploadTask['status']) => {
     <div v-else class="fm-empty">
       <p>{{ t('dashboard.missingSession') }}</p>
     </div>
+
+    <!-- Drag-and-drop upload overlay -->
+    <Transition name="fm-fade">
+      <div v-if="isDragging" class="fm-drop-overlay">
+        <div class="fm-drop-card">
+          <Upload :size="36" />
+          <p>{{ t('ssh.dropFilesHere') }}</p>
+          <span>
+            {{ t('sftp.dropUpload', { path: currentRemotePath }) }}
+          </span>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -287,10 +468,10 @@ const taskStatusColor = (status: UploadTask['status']) => {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background-color: #16161a;
-  color: #e8e8e8;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .fm-disconnected {
@@ -298,16 +479,28 @@ const taskStatusColor = (status: UploadTask['status']) => {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 14px;
   font-size: 12px;
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.12);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
 }
 .fm-disconnected .dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #ef4444;
+  background: var(--color-danger);
+}
+.fm-disconnected .retry-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
 .fm-layout {
@@ -323,81 +516,151 @@ const taskStatusColor = (status: UploadTask['status']) => {
   flex-direction: column;
 }
 
+/* ---- Unified toolbar ---- */
 .fm-toolbar {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-secondary);
 }
-.fm-path {
-  flex: 1;
-  min-width: 0;
-}
-.fm-path-text {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: #9d9d9d;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  display: block;
-}
-.fm-toolbar-actions {
+.tb-nav,
+.tb-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex: 0 0 auto;
 }
-.fm-btn {
+.tb-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #aaa;
+  color: var(--color-text-secondary);
   cursor: pointer;
-  font-size: 12px;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  position: relative;
 }
-.fm-btn:hover {
-  background: rgba(255, 255, 255, 0.06);
+.tb-btn:hover {
+  background: var(--color-interactive-hover);
+  color: var(--color-text-primary);
+}
+.tb-btn.active {
+  background: var(--color-interactive-selected);
+  color: var(--color-primary);
+}
+.tb-btn.upload {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  font-weight: 600;
+}
+.tb-btn.upload:hover {
+  background: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  color: var(--color-primary);
+}
+.tb-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--color-primary);
   color: #fff;
-}
-.fm-btn.primary {
-  border-color: rgba(250, 204, 21, 0.3);
-  color: #ffd54a;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
 }
 
+.tb-address {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-elevated);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tb-address:hover {
+  border-color: var(--color-border-primary);
+}
+.tb-address.focused,
+.tb-address.editing {
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+.tb-address-icon {
+  flex: 0 0 auto;
+  color: var(--color-text-tertiary);
+}
+.tb-address input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* ---- Browser area ---- */
 .fm-browser {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 8px 12px;
 }
 
+/* ---- Transfer panel ---- */
 .fm-transfers {
-  width: 260px;
-  flex-shrink: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.06);
+  flex: 0 0 auto;
+  width: 300px;
+  min-width: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--color-border-secondary);
+  background-color: var(--color-bg-secondary);
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  transition: width var(--transition-base), border-color var(--transition-base);
+}
+.fm-transfers.collapsed {
+  width: 0;
+  border-left-width: 0;
+}
+.fm-transfers-inner {
+  width: 300px;
+  min-width: 300px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
 }
 .fm-transfers-header {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border-secondary);
 }
 .fm-transfers-title {
   font-weight: 600;
-  font-size: 12px;
-  color: #bbb;
+  font-size: 13px;
+  color: var(--color-text-primary);
 }
 .fm-transfers-actions {
   display: flex;
@@ -407,18 +670,20 @@ const taskStatusColor = (status: UploadTask['status']) => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 26px;
+  height: 26px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: #777;
+  color: var(--color-text-secondary);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .icon-btn-sm:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--color-interactive-hover);
+  color: var(--color-text-primary);
 }
+
 .fm-transfers-list {
   flex: 1;
   overflow-y: auto;
@@ -433,111 +698,167 @@ const taskStatusColor = (status: UploadTask['status']) => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  color: #555;
+  gap: 10px;
+  color: var(--color-text-placeholder);
 }
 .fm-transfers-empty p {
   margin: 0;
-  font-size: 11px;
+  font-size: 12px;
 }
+
 .fm-task {
-  padding: 8px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
+  padding: 10px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.fm-task.success {
-  border-color: rgba(16, 185, 129, 0.35);
+.fm-task.status-upload {
+  border-left: 3px solid var(--color-primary);
 }
-.fm-task.error {
-  border-color: rgba(239, 68, 68, 0.35);
+.fm-task.status-download {
+  border-left: 3px solid var(--color-accent);
 }
-.fm-task.cancelled {
-  opacity: 0.7;
+.fm-task.status-success {
+  border-left: 3px solid #30d158;
 }
+.fm-task.status-error {
+  border-left: 3px solid var(--color-danger);
+}
+.fm-task.status-paused {
+  border-left: 3px solid #ffd60a;
+}
+.fm-task.status-cancelled {
+  opacity: 0.6;
+}
+
 .fm-task-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
-.fm-task-icon {
-  flex-shrink: 0;
+.fm-task-icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  flex: 0 0 auto;
 }
+.fm-task-icon-wrap.status-upload {
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, transparent);
+}
+.fm-task-icon-wrap.status-download {
+  color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+}
+.fm-task-icon-wrap.status-success {
+  color: #30d158;
+  background: color-mix(in srgb, #30d158 14%, transparent);
+}
+.fm-task-icon-wrap.status-error {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 14%, transparent);
+}
+.fm-task-icon-wrap.status-paused {
+  color: #ffd60a;
+  background: color-mix(in srgb, #ffd60a 14%, transparent);
+}
+.fm-task-icon-wrap.status-cancelled {
+  color: var(--color-text-tertiary);
+  background: var(--color-interactive-hover);
+}
+.fm-task-icon-wrap.status-active {
+  color: var(--color-text-secondary);
+  background: var(--color-interactive-hover);
+}
+
 .fm-task-name {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  color: #ececec;
+  color: var(--color-text-primary);
 }
-.fm-task-time {
-  font-size: 10px;
-  color: #888;
+.fm-task-percent {
+  font-size: 11px;
+  color: var(--color-text-secondary);
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
 .fm-task-progress {
-  height: 4px;
-  border-radius: 2px;
+  height: 5px;
+  border-radius: 3px;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.4);
-  margin-top: 6px;
+  background: var(--color-interactive-hover);
+  margin-top: 8px;
 }
 .fm-task-progress-fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 3px;
+  transition: width 0.2s var(--ease-snappy);
 }
-.fill-uploading {
-  background: #3b82f6;
+.fm-task-progress-fill.status-upload {
+  background: var(--color-primary);
 }
-.fill-downloading {
-  background: #8b5cf6;
+.fm-task-progress-fill.status-download {
+  background: var(--color-accent);
 }
-.fill-paused {
-  background: #facc15;
+.fm-task-progress-fill.status-success {
+  background: #30d158;
 }
-.fill-success {
-  background: #10b981;
+.fm-task-progress-fill.status-error {
+  background: var(--color-danger);
 }
-.fill-error {
-  background: #ef4444;
+.fm-task-progress-fill.status-paused {
+  background: #ffd60a;
+}
+.fm-task-progress-fill.status-active {
+  background: var(--color-text-tertiary);
 }
 .fm-task-meta {
   display: flex;
   justify-content: space-between;
   gap: 8px;
   margin-top: 4px;
-  font-size: 10px;
-  color: #777;
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
 }
 .fm-task-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .tiny-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  height: 22px;
-  padding: 0 6px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #bbb;
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
   cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .tiny-btn:hover {
-  color: #fff;
-  background: rgba(255, 255, 255, 0.09);
+  color: var(--color-text-primary);
+  background: var(--color-interactive-hover);
 }
 .tiny-btn.danger:hover {
-  color: #f87171;
-  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+  border-color: color-mix(in srgb, var(--color-danger) 30%, transparent);
 }
 
 .fm-empty {
@@ -545,10 +866,59 @@ const taskStatusColor = (status: UploadTask['status']) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #6b7280;
+  color: var(--color-text-tertiary);
   font-size: 13px;
 }
 .fm-empty p {
   margin: 0;
+}
+
+/* ---- Drag-and-drop overlay ---- */
+.fm-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  backdrop-filter: blur(2px);
+  pointer-events: auto;
+}
+.fm-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 56px;
+  border: 1px dashed var(--color-primary);
+  border-radius: var(--radius-2xl);
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-xl);
+  text-align: center;
+}
+.fm-drop-card svg {
+  color: var(--color-primary);
+}
+.fm-drop-card p {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.fm-drop-card span {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+}
+
+.fm-fade-enter-active,
+.fm-fade-leave-active {
+  transition: opacity 0.15s var(--ease-snappy);
+}
+.fm-fade-enter-from,
+.fm-fade-leave-to {
+  opacity: 0;
 }
 </style>
