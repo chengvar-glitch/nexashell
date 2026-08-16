@@ -32,10 +32,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Setup bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js (24)
+        uses: actions/setup-node@v4
         with:
-          bun-version: latest
+          node-version: 24
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -51,7 +55,7 @@ jobs:
           workspaces: ./src-tauri -> target
 
       - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
+        run: pnpm install --frozen-lockfile
 
       - name: Build and upload to GitHub Release
         uses: tauri-apps/tauri-action@v0

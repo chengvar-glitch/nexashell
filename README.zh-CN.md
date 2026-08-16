@@ -37,8 +37,8 @@ NexaShell 将 Rust 的安全性与高性能，与现代高生产力 Web 界面�
 ### 环境要求
 
 - [Rust](https://www.rust-lang.org/tools/install)（最新稳定版）
-- [Node.js](https://nodejs.org/)（v18+）— 用于非 bun 原生的工具链
-- [bun](https://bun.sh/)（>=1.0）— 包管理器
+- [Node.js](https://nodejs.org/)（>=18）— pnpm 与前端工具链的运行时
+- [pnpm](https://pnpm.sh/)（>=9）— 包管理器
 
 ### 从源码构建
 
@@ -48,13 +48,13 @@ git clone git@github.com:chengvar-glitch/nexashell.git
 cd nexashell
 
 # 2. 安装依赖
-bun install
+pnpm install
 
 # 3. 开发模式运行（打开 Tauri 窗口）
-bun tauri dev
+pnpm tauri dev
 
 # 4. 生产构建
-bun build && bun tauri build
+pnpm build && pnpm tauri build
 ```
 
 ---
@@ -164,17 +164,17 @@ sequenceDiagram
 
 | 命令 | 用途 |
 |---|---|
-| `bun dev` | Vite 开发服务器（仅 Web，端口 1420） |
-| `bun tauri dev` | 完整原生应用开发模式 |
-| `bun build` | `vue-tsc --noEmit && vite build` |
-| `bun lint` | ESLint（自动修复） |
-| `bun lint:check` | ESLint（不自动修复，适合 CI） |
-| `bun type-check` | `vue-tsc --noEmit` |
-| `bun test` | 前端单元测试（Vitest、happy-dom） |
-| `bun test:coverage` | 前端测试 + 覆盖率报告 |
+| `pnpm dev` | Vite 开发服务器（仅 Web，端口 1420） |
+| `pnpm tauri dev` | 完整原生应用开发模式 |
+| `pnpm build` | `vue-tsc --noEmit && vite build` |
+| `pnpm lint` | ESLint（自动修复） |
+| `pnpm lint:check` | ESLint（不自动修复，适合 CI） |
+| `pnpm type-check` | `vue-tsc --noEmit` |
+| `pnpm test` | 前端单元测试（Vitest、happy-dom） |
+| `pnpm test:coverage` | 前端测试 + 覆盖率报告 |
 | `cargo test` | Rust 单元测试（在 `src-tauri/` 下运行） |
 | `cargo clippy` | Rust 代码检查（CI 中使用 `-D warnings`） |
-| `bun tauri build` | 生产桌面打包（DMG/app、MSI/NSIS、AppImage/deb） |
+| `pnpm tauri build` | 生产桌面打包（macOS 出 DMG，Windows 出 NSIS） |
 
 ---
 
@@ -221,7 +221,7 @@ sequenceDiagram
 | Windows | 🟡 仅 CI 编译（ubuntu 上 `cargo check`/`test`/`clippy`；MSVC/NSIS 路径未实际演练） |
 | Linux | 🟡 已安装 webkit2gtk 依赖的 CI 编译；无运行时验证 |
 
-> 持续集成（`.github/workflows/ci.yml`）：每次 push/PR 执行 lint + 类型检查 + 前端测试（bun）以及 `cargo check` + `test` + `clippy -D warnings`。
+> 持续集成（`.github/workflows/ci.yml`）：每次 push/PR 执行 lint + 类型检查 + 前端测试（pnpm）以及 `cargo check` + `test` + `clippy -D warnings`。
 
 ---
 

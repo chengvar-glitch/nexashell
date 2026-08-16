@@ -17,28 +17,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
       - name: Setup Node.js (24)
         uses: actions/setup-node@v4
         with:
           node-version: 24
 
-      - name: Lint
-        run: bun run lint:check
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
 
-      # 用 node 直接运行 vue-tsc：bun 的 Node 兼容层跑 volar 会漏报类型错误（macOS 上已验证），
-      # node 才能给出与本地开发一致、且可靠的结果。
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint:check
+
+      # pnpm 用系统 node 执行脚本，vue-tsc 正常加载 volar 插件（bun 的兼容层会漏报 .vue 类型错误）
       - name: Type-check
-        run: node node_modules/vue-tsc/bin/vue-tsc.js --noEmit
+        run: pnpm type-check
 
       - name: Unit tests
-        run: bun run test
+        run: pnpm test
 
   backend:
     name: Backend (cargo check + test + clippy)

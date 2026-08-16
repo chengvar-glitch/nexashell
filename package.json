@@ -4,7 +4,7 @@
   "version": "1.10.2",
   "type": "module",
   "engines": {
-    "bun": ">=1.0.0"
+    "node": ">=18"
   },
   "scripts": {
     "prebuild": "node scripts/sync-version.mjs",

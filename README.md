@@ -37,8 +37,8 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable)
-- [Node.js](https://nodejs.org/) (v18+) — for tooling that isn't bun-native
-- [bun](https://bun.sh/) (>=1.0) — package manager
+- [Node.js](https://nodejs.org/) (>=18) — runtime for pnpm and the frontend toolchain
+- [pnpm](https://pnpm.sh/) (>=9) — package manager
 
 ### Build from Source
 
@@ -48,13 +48,13 @@ git clone git@github.com:chengvar-glitch/nexashell.git
 cd nexashell
 
 # 2. Install dependencies
-bun install
+pnpm install
 
 # 3. Run in development mode (opens the Tauri window)
-bun tauri dev
+pnpm tauri dev
 
 # 4. Build for production
-bun build && bun tauri build
+pnpm build && pnpm tauri build
 ```
 
 ---
@@ -164,17 +164,17 @@ sequenceDiagram
 
 | Command | Purpose |
 |---|---|
-| `bun dev` | Vite dev server (web-only, port 1420) |
-| `bun tauri dev` | Full native app dev mode |
-| `bun build` | `vue-tsc --noEmit && vite build` |
-| `bun lint` | ESLint with auto-fix |
-| `bun lint:check` | ESLint without auto-fix (CI-friendly) |
-| `bun type-check` | `vue-tsc --noEmit` |
-| `bun test` | Frontend unit tests (Vitest, happy-dom) |
-| `bun test:coverage` | Frontend tests with coverage report |
+| `pnpm dev` | Vite dev server (web-only, port 1420) |
+| `pnpm tauri dev` | Full native app dev mode |
+| `pnpm build` | `vue-tsc --noEmit && vite build` |
+| `pnpm lint` | ESLint with auto-fix |
+| `pnpm lint:check` | ESLint without auto-fix (CI-friendly) |
+| `pnpm type-check` | `vue-tsc --noEmit` |
+| `pnpm test` | Frontend unit tests (Vitest, happy-dom) |
+| `pnpm test:coverage` | Frontend tests with coverage report |
 | `cargo test` | Rust unit tests (run from `src-tauri/`) |
 | `cargo clippy` | Rust lints (`-D warnings` in CI) |
-| `bun tauri build` | Production desktop bundle (DMG/app, MSI/NSIS, AppImage/deb) |
+| `pnpm tauri build` | Production desktop bundle (DMG on macOS, NSIS on Windows) |
 
 ---
 
@@ -220,7 +220,7 @@ Backend commands are registered in `src-tauri/src/lib.rs` (`~70` invoke handlers
 | Windows | 🟡 CI-compiled (`cargo check`/`test`/`clippy` on ubuntu; MSVC/NSIS paths not exercised) |
 | Linux | 🟡 CI-compiled with webkit2gtk deps; no runtime verification |
 
-> Continuous Integration (`.github/workflows/ci.yml`): lint + type-check + frontend tests (bun) and `cargo check` + `test` + `clippy -D warnings` on every push/PR.
+> Continuous Integration (`.github/workflows/ci.yml`): lint + type-check + frontend tests (pnpm) and `cargo check` + `test` + `clippy -D warnings` on every push/PR.
 
 ---
 

@@ -4,19 +4,19 @@
 
 - **Frontend**: Vue 3 (Composition API, `<script setup>`), TypeScript, Pinia, vue-i18n, xterm.js
 - **Backend**: Rust (Tauri v2), ssh2, rusqlite, AES-GCM encryption
-- **Build**: Vite 6, bun, tauri-cli
-- **Package manager**: bun (>=1.0)
+- **Build**: Vite 6, pnpm, tauri-cli
+- **Package manager**: pnpm (>=9)
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `bun dev` | Vite dev server (web-only, port 1420) |
-| `bun tauri dev` | Full native app dev mode |
-| `bun build` | `vue-tsc --noEmit && vite build` |
-| `bun lint` | ESLint: `eslint src --ext .vue,.js,.ts,.jsx,.tsx --fix` |
-| `bun format` | Prettier (semi, singleQuote, trailingComma es5, arrowParens avoid, 80 width) |
-| `bun tauri build` | Production desktop bundle |
+| `pnpm dev` | Vite dev server (web-only, port 1420) |
+| `pnpm tauri dev` | Full native app dev mode |
+| `pnpm build` | `vue-tsc --noEmit && vite build` |
+| `pnpm lint` | ESLint: `eslint src --ext .vue,.js,.ts,.jsx,.tsx --fix` |
+| `pnpm format` | Prettier (semi, singleQuote, trailingComma es5, arrowParens avoid, 80 width) |
+| `pnpm tauri build` | Production desktop bundle |
 
 ## Architecture
 
@@ -48,7 +48,7 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 ## Testing
 
 - Vitest configured in `vite.config.ts` (happy-dom, globals: true, v8 coverage).
-- Frontend: `bun test` (Vitest), unit tests co-located as `*.test.ts`.
+- Frontend: `pnpm test` (Vitest), unit tests co-located as `*.test.ts`.
 - Rust: `cargo test` (crypto round-trips, legacy export compat, SQL builder).
 - CI/CD: `.github/workflows/ci.yml` (lint + type-check + frontend test + cargo build).
 
@@ -72,12 +72,12 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
   - `fix:` → patch 版本 (+1)
   - `feat:` → minor 版本 (+1)
   - 破坏性变更 → major 版本 (+1)
-- Push 前必须确保代码通过 `bun lint`。
+- Push 前必须确保代码通过 `pnpm lint`。
 
 ### 3. 构建交付 (Build for MacBook)
 - 每次 push **后**，自动执行：
   ```bash
-  bun tauri build
+  pnpm tauri build
   ```
 - 产物路径：`src-tauri/target/release/bundle/dmg/nexashell_<version>_aarch64.dmg`
 - 构建失败则 Agent 必须修复后再 push。
@@ -99,11 +99,11 @@ git tag v<new-version>
 git push origin main --tags
 
 # 4. 构建 MacBook 版本
-bun tauri build
+pnpm tauri build
 ```
 
 ## Gotchas
 
-- Package manager is bun (>=1.0).
+- Package manager is pnpm (>=9).
 - Rust deps in `src-tauri/Cargo.toml`, JS deps in root `package.json`.
 - VSCode extensions: Vue (Volar), Tauri, rust-analyzer.
