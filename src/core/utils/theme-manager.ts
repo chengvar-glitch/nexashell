@@ -1,13 +1,26 @@
 export type ThemeMode = 'auto' | 'light' | 'dark';
 
+export type AccentKey = 'blue' | 'graphite' | 'purple' | 'green' | 'orange';
+
 const THEME_STORAGE_KEY = 'nexashell-theme';
+const ACCENT_STORAGE_KEY = 'nexashell-accent';
+
+const ACCENT_KEYS: AccentKey[] = [
+  'blue',
+  'graphite',
+  'purple',
+  'green',
+  'orange',
+];
 
 class ThemeManager {
   private currentTheme: ThemeMode = 'auto';
+  private currentAccent: AccentKey = 'blue';
   private mediaQuery: MediaQueryList | null = null;
 
   constructor() {
     this.loadTheme();
+    this.loadAccent();
     this.initMediaQuery();
   }
 
@@ -38,6 +51,37 @@ class ThemeManager {
       localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
       // Errors are non-fatal: theme just won't persist
+    }
+  }
+
+  private loadAccent() {
+    try {
+      const saved = localStorage.getItem(ACCENT_STORAGE_KEY);
+      if (saved && ACCENT_KEYS.includes(saved as AccentKey)) {
+        this.currentAccent = saved as AccentKey;
+      }
+    } catch {
+      // Errors are non-fatal: fall back to the default accent silently
+    }
+  }
+
+  private saveAccent(accent: AccentKey) {
+    try {
+      localStorage.setItem(ACCENT_STORAGE_KEY, accent);
+    } catch {
+      // Errors are non-fatal: accent just won't persist
+    }
+  }
+
+  private applyAccent(accent: AccentKey) {
+    const root = document.documentElement;
+
+    // The default 'blue' accent is baseline; clear the attribute so it is
+    // not special-cased and CSS only needs overrides for non-blue accents.
+    if (accent === 'blue') {
+      delete root.dataset.accent;
+    } else {
+      root.dataset.accent = accent;
     }
   }
 
@@ -86,6 +130,24 @@ class ThemeManager {
     return this.currentTheme;
   }
 
+  setAccent(accent: AccentKey) {
+    this.currentAccent = accent;
+    this.saveAccent(accent);
+    this.applyAccent(accent);
+
+    // Dispatch event for other components, keeping 'theme-changed' working
+    // for both mode and accent changes.
+    window.dispatchEvent(
+      new CustomEvent('theme-changed', {
+        detail: { theme: this.currentTheme, accent },
+      })
+    );
+  }
+
+  getAccent(): AccentKey {
+    return this.currentAccent;
+  }
+
   getActualTheme(): 'light' | 'dark' {
     if (this.currentTheme === 'auto') {
       return this.getSystemTheme();
@@ -95,6 +157,7 @@ class ThemeManager {
 
   initialize() {
     this.applyTheme(this.currentTheme);
+    this.applyAccent(this.currentAccent);
   }
 }
 

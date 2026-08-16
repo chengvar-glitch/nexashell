@@ -4,10 +4,12 @@ mod encryption;
 mod ssh;
 mod system;
 mod terminal;
+mod tunnel;
 
 use ssh::SshManager;
 use tauri::Manager;
 use terminal::TerminalManager;
+use tunnel::TunnelManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,6 +28,7 @@ pub fn run() {
         .plugin(log_builder.build())
         .manage(SshManager::default())
         .manage(TerminalManager::default())
+        .manage(TunnelManager::default())
         .setup(|app| {
             if let Err(e) = db::init_db() {
                 log::error!("Database initialization failed: {}", e);
@@ -126,6 +129,20 @@ pub fn run() {
             db::toggle_favorite,
             db::import_export::export_sessions,
             db::import_export::import_sessions,
+            tunnel::start_session_tunnels,
+            tunnel::start_tunnel_rule,
+            tunnel::stop_session_tunnels,
+            tunnel::stop_tunnel_rule,
+            tunnel::list_tunnel_status,
+            db::add_tunnel_rule,
+            db::list_tunnel_rules,
+            db::update_tunnel_rule,
+            db::delete_tunnel_rule,
+            db::delete_tunnel_rules_for_session,
+            db::add_snippet,
+            db::list_snippets,
+            db::update_snippet,
+            db::delete_snippet,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

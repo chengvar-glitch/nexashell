@@ -22,6 +22,7 @@ export const APP_EVENTS = {
   CONNECT_SESSION: 'app:connect-session',
   SPLIT_HORIZONTAL: 'app:split-horizontal',
   SPLIT_VERTICAL: 'app:split-vertical',
+  COMMAND_PALETTE: 'app:command-palette',
 } as const;
 
 export type AppEventType = (typeof APP_EVENTS)[keyof typeof APP_EVENTS];

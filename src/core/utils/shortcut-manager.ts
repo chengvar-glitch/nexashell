@@ -275,4 +275,15 @@ export const PredefinedShortcuts = {
     description: 'Split pane horizontally',
     handler: splitHorizontal,
   },
+  COMMAND_PALETTE: {
+    key: 'p',
+    metaKey: IS_MAC,
+    ctrlKey: !IS_MAC,
+    shiftKey: true,
+    altKey: false,
+    description: 'Open command palette',
+    handler: () => {
+      eventBus.emit(APP_EVENTS.COMMAND_PALETTE);
+    },
+  },
 };

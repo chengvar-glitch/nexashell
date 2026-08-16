@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { sessionApi } from '@/features/session';
+import { tunnelApi } from '@/features/tunnel';
 import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('SESSION_STORE');
@@ -221,6 +222,12 @@ export const useSessionStore = defineStore('session', () => {
           await sessionApi.disconnectSSH(sessionId);
         } catch (error) {
           logger.error('Failed to disconnect SSH session on backend', error);
+        }
+        // Tear down any active port-forwarding tunnels for this session.
+        try {
+          await tunnelApi.stopSessionTunnels(sessionId);
+        } catch (error) {
+          logger.error('Failed to stop session tunnels', error);
         }
       } else if (session.type === 'terminal') {
         try {

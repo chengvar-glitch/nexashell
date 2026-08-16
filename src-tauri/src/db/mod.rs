@@ -292,6 +292,49 @@ pub fn init_db() -> Result<String, String> {
 
     ensure_groups_and_tags(&conn)?;
 
+    // SSH port-forwarding rules persisted per session.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tunnel_rules (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            direction TEXT NOT NULL CHECK (direction IN ('local', 'dynamic')),
+            listen_host TEXT NOT NULL DEFAULT '127.0.0.1',
+            listen_port INTEGER NOT NULL CHECK (listen_port >= 0 AND listen_port <= 65535),
+            target_host TEXT NOT NULL DEFAULT '',
+            target_port INTEGER NOT NULL DEFAULT 0 CHECK (target_port >= 0 AND target_port <= 65535),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tunnel_rules_session ON tunnel_rules(session_id)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
+    // Reusable command snippets (command-palette / snippet library).
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS snippets (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            command TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            sort INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_snippets_sort ON snippets(sort)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)",
         [],
@@ -1142,6 +1185,229 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
             .map_err(|e| e.to_string())?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())
+    })
+}
+
+// ----------------------------------------------------------------------------
+// Tunnel rules (SSH port forwarding) persistence
+// ----------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelRuleRow {
+    pub id: String,
+    pub session_id: String,
+    pub direction: String, // "local" | "dynamic"
+    pub listen_host: String,
+    pub listen_port: i64,
+    pub target_host: String,
+    pub target_port: i64,
+    pub enabled: bool,
+}
+
+#[tauri::command]
+pub fn add_tunnel_rule(
+    session_id: String,
+    direction: String,
+    listen_host: String,
+    listen_port: i64,
+    target_host: String,
+    target_port: i64,
+    enabled: bool,
+) -> Result<String, String> {
+    if direction != "local" && direction != "dynamic" {
+        return Err("direction must be 'local' or 'dynamic'".to_string());
+    }
+    let id = Uuid::new_v4().to_string();
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO tunnel_rules
+                (id, session_id, direction, listen_host, listen_port, target_host, target_port, enabled)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                session_id,
+                direction,
+                listen_host,
+                listen_port,
+                target_host,
+                target_port,
+                enabled as i64
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    })
+}
+
+#[tauri::command]
+pub fn list_tunnel_rules(session_id: String) -> Result<Vec<TunnelRuleRow>, String> {
+    with_db(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, session_id, direction, listen_host, listen_port, target_host, target_port, enabled
+                 FROM tunnel_rules WHERE session_id = ?1 ORDER BY created_at, id",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                Ok(TunnelRuleRow {
+                    id: row.get(0)?,
+                    session_id: row.get(1)?,
+                    direction: row.get(2)?,
+                    listen_host: row.get(3)?,
+                    listen_port: row.get(4)?,
+                    target_host: row.get(5)?,
+                    target_port: row.get(6)?,
+                    enabled: row.get::<_, i64>(7)? != 0,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn update_tunnel_rule(
+    id: String,
+    direction: Option<String>,
+    listen_host: Option<String>,
+    listen_port: Option<i64>,
+    target_host: Option<String>,
+    target_port: Option<i64>,
+    enabled: Option<bool>,
+) -> Result<(), String> {
+    if let Some(ref d) = direction {
+        if d != "local" && d != "dynamic" {
+            return Err("direction must be 'local' or 'dynamic'".to_string());
+        }
+    }
+    let (sql, params_vec) = build_update(
+        "tunnel_rules",
+        vec![
+            direction.map(|v| SetClause { column: "direction", value: Box::new(v) }),
+            listen_host.map(|v| SetClause { column: "listen_host", value: Box::new(v) }),
+            listen_port.map(|v| SetClause { column: "listen_port", value: Box::new(v) }),
+            target_host.map(|v| SetClause { column: "target_host", value: Box::new(v) }),
+            target_port.map(|v| SetClause { column: "target_port", value: Box::new(v) }),
+            enabled.map(|v| SetClause { column: "enabled", value: Box::new(v as i64) }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        "id",
+        Box::new(id),
+    )?;
+    with_db(|conn| exec_update(conn, &sql, &params_vec))
+}
+
+#[tauri::command]
+pub fn delete_tunnel_rule(id: String) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM tunnel_rules WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn delete_tunnel_rules_for_session(session_id: String) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM tunnel_rules WHERE session_id = ?1", params![session_id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+// ----------------------------------------------------------------------------
+// Snippets persistence
+// ----------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct Snippet {
+    pub id: String,
+    pub name: String,
+    pub command: String,
+    pub description: String,
+    pub sort: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[tauri::command]
+pub fn add_snippet(name: String, command: String, description: Option<String>) -> Result<String, String> {
+    let id = Uuid::new_v4().to_string();
+    with_db(|conn| {
+        let sort: i64 = conn
+            .query_row("SELECT COALESCE(MAX(sort), 0) + 1 FROM snippets", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO snippets (id, name, command, description, sort) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, &name, &command, description.unwrap_or_default(), sort],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(id)
+    })
+}
+
+#[tauri::command]
+pub fn list_snippets() -> Result<Vec<Snippet>, String> {
+    with_db(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, name, command, description, sort, created_at, updated_at
+                 FROM snippets ORDER BY sort, created_at",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(Snippet {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    command: row.get(2)?,
+                    description: row.get(3)?,
+                    sort: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+pub fn update_snippet(
+    id: String,
+    name: Option<String>,
+    command: Option<String>,
+    description: Option<String>,
+    sort: Option<i64>,
+) -> Result<(), String> {
+    let (sql, params_vec) = build_update(
+        "snippets",
+        vec![
+            name.map(|v| SetClause { column: "name", value: Box::new(v) }),
+            command.map(|v| SetClause { column: "command", value: Box::new(v) }),
+            description.map(|v| SetClause { column: "description", value: Box::new(v) }),
+            sort.map(|v| SetClause { column: "sort", value: Box::new(v) }),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+        "id",
+        Box::new(id),
+    )?;
+    with_db(|conn| exec_update(conn, &sql, &params_vec))
+}
+
+#[tauri::command]
+pub fn delete_snippet(id: String) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
     })
 }
 

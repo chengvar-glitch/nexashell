@@ -68,6 +68,32 @@
                     <option value="dark">{{ $t('settings.themeDark') }}</option>
                   </select>
                 </div>
+                <div class="setting-item">
+                  <label class="setting-label">{{
+                    $t('settings.accent')
+                  }}</label>
+                  <select
+                    class="setting-select modal-input"
+                    :value="selectedAccent"
+                    @change="handleAccentChange"
+                  >
+                    <option value="blue">
+                      {{ $t('settings.accentBlue') }}
+                    </option>
+                    <option value="graphite">
+                      {{ $t('settings.accentGraphite') }}
+                    </option>
+                    <option value="purple">
+                      {{ $t('settings.accentPurple') }}
+                    </option>
+                    <option value="green">
+                      {{ $t('settings.accentGreen') }}
+                    </option>
+                    <option value="orange">
+                      {{ $t('settings.accentOrange') }}
+                    </option>
+                  </select>
+                </div>
               </div>
 
               <div
@@ -240,7 +266,7 @@ import {
   Languages,
   Zap,
 } from 'lucide-vue-next';
-import { themeManager, type ThemeMode } from '@/core/utils/theme-manager';
+import { themeManager, type ThemeMode, type AccentKey } from '@/core/utils/theme-manager';
 import { useSettingsStore, type CursorStyle } from '@/features/settings';
 import { isMacOSBrowser } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
@@ -269,6 +295,7 @@ const emit = defineEmits<{
 
 const activeMenu = ref('appearance');
 const selectedTheme = ref<ThemeMode>('auto');
+const selectedAccent = ref<AccentKey>('blue');
 const appVersion = ref('0.1.0');
 
 const contentRef = ref<HTMLElement | null>(null);
@@ -425,8 +452,16 @@ const handleThemeChange = (event: Event) => {
   themeManager.setTheme(theme);
 };
 
+const handleAccentChange = (event: Event) => {
+  const target = event.target as HTMLSelectElement;
+  const accent = target.value as AccentKey;
+  selectedAccent.value = accent;
+  themeManager.setAccent(accent);
+};
+
 onMounted(async () => {
   selectedTheme.value = themeManager.getTheme();
+  selectedAccent.value = themeManager.getAccent();
   if (props.visible) {
     initObserver();
   }

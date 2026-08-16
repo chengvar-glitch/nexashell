@@ -199,6 +199,126 @@ body {
   --color-macos-close-hover: #ff6b63;
 }
 
+/*
+ * Accent palettes.
+ * The accent keyword is set on <html> via data-accent (see theme-manager).
+ * Blue is the baseline default (no override needed). These rules are placed
+ * AFTER the light/dark mode blocks so they win on the primary/interactive/
+ * focus vars only. Each palette provides light-mode values (inherited from
+ * :root) plus dark-mode values for both auto (media query) and manual
+ * (`.theme-dark`) dark modes.
+ */
+
+html[data-accent='graphite'] {
+  --color-primary: #8e8e93;
+  --color-primary-hover: #6f6f74;
+  --color-accent: #8e8e93;
+  --color-interactive-selected: rgba(142, 142, 147, 0.14);
+  --focus-ring: 0 0 0 3px rgba(142, 142, 147, 0.16);
+  --focus-ring-intense: 0 0 0 4px rgba(142, 142, 147, 0.25);
+}
+
+html[data-accent='purple'] {
+  --color-primary: #af52de;
+  --color-primary-hover: #8f36c2;
+  --color-accent: #af52de;
+  --color-interactive-selected: rgba(175, 82, 222, 0.14);
+  --focus-ring: 0 0 0 3px rgba(175, 82, 222, 0.16);
+  --focus-ring-intense: 0 0 0 4px rgba(175, 82, 222, 0.25);
+}
+
+html[data-accent='green'] {
+  --color-primary: #34c759;
+  --color-primary-hover: #23953f;
+  --color-accent: #34c759;
+  --color-interactive-selected: rgba(52, 199, 89, 0.14);
+  --focus-ring: 0 0 0 3px rgba(52, 199, 89, 0.16);
+  --focus-ring-intense: 0 0 0 4px rgba(52, 199, 89, 0.25);
+}
+
+html[data-accent='orange'] {
+  --color-primary: #ff9500;
+  --color-primary-hover: #cc7700;
+  --color-accent: #ff9500;
+  --color-interactive-selected: rgba(255, 149, 0, 0.14);
+  --focus-ring: 0 0 0 3px rgba(255, 149, 0, 0.16);
+  --focus-ring-intense: 0 0 0 4px rgba(255, 149, 0, 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  html[data-accent='graphite']:not(.theme-light) {
+    --color-primary: #98989d;
+    --color-primary-hover: #b0b0b5;
+    --color-accent: #98989d;
+    --color-interactive-selected: rgba(152, 152, 157, 0.22);
+    --focus-ring: 0 0 0 3px rgba(152, 152, 157, 0.3);
+    --focus-ring-intense: 0 0 0 4px rgba(152, 152, 157, 0.42);
+  }
+
+  html[data-accent='purple']:not(.theme-light) {
+    --color-primary: #bf5af2;
+    --color-primary-hover: #d18bff;
+    --color-accent: #bf5af2;
+    --color-interactive-selected: rgba(191, 90, 242, 0.22);
+    --focus-ring: 0 0 0 3px rgba(191, 90, 242, 0.3);
+    --focus-ring-intense: 0 0 0 4px rgba(191, 90, 242, 0.42);
+  }
+
+  html[data-accent='green']:not(.theme-light) {
+    --color-primary: #30d158;
+    --color-primary-hover: #63e085;
+    --color-accent: #30d158;
+    --color-interactive-selected: rgba(48, 209, 88, 0.22);
+    --focus-ring: 0 0 0 3px rgba(48, 209, 88, 0.3);
+    --focus-ring-intense: 0 0 0 4px rgba(48, 209, 88, 0.42);
+  }
+
+  html[data-accent='orange']:not(.theme-light) {
+    --color-primary: #ff9f0a;
+    --color-primary-hover: #ffb340;
+    --color-accent: #ff9f0a;
+    --color-interactive-selected: rgba(255, 159, 10, 0.22);
+    --focus-ring: 0 0 0 3px rgba(255, 159, 10, 0.3);
+    --focus-ring-intense: 0 0 0 4px rgba(255, 159, 10, 0.42);
+  }
+}
+
+html[data-accent='graphite'].theme-dark {
+  --color-primary: #98989d;
+  --color-primary-hover: #b0b0b5;
+  --color-accent: #98989d;
+  --color-interactive-selected: rgba(152, 152, 157, 0.22);
+  --focus-ring: 0 0 0 3px rgba(152, 152, 157, 0.3);
+  --focus-ring-intense: 0 0 0 4px rgba(152, 152, 157, 0.42);
+}
+
+html[data-accent='purple'].theme-dark {
+  --color-primary: #bf5af2;
+  --color-primary-hover: #d18bff;
+  --color-accent: #bf5af2;
+  --color-interactive-selected: rgba(191, 90, 242, 0.22);
+  --focus-ring: 0 0 0 3px rgba(191, 90, 242, 0.3);
+  --focus-ring-intense: 0 0 0 4px rgba(191, 90, 242, 0.42);
+}
+
+html[data-accent='green'].theme-dark {
+  --color-primary: #30d158;
+  --color-primary-hover: #63e085;
+  --color-accent: #30d158;
+  --color-interactive-selected: rgba(48, 209, 88, 0.22);
+  --focus-ring: 0 0 0 3px rgba(48, 209, 88, 0.3);
+  --focus-ring-intense: 0 0 0 4px rgba(48, 209, 88, 0.42);
+}
+
+html[data-accent='orange'].theme-dark {
+  --color-primary: #ff9f0a;
+  --color-primary-hover: #ffb340;
+  --color-accent: #ff9f0a;
+  --color-interactive-selected: rgba(255, 159, 10, 0.22);
+  --focus-ring: 0 0 0 3px rgba(255, 159, 10, 0.3);
+  --focus-ring-intense: 0 0 0 4px rgba(255, 159, 10, 0.42);
+}
+
 .btn-base {
   border: none;
   background-color: transparent;

@@ -9,6 +9,7 @@ import AppContent from '@/components/layout/AppContent.vue';
 import SSHConnectionForm from '@/components/connections/SSHConnectionForm.vue';
 import SettingsPanel from '@/components/settings/SettingsPanel.vue';
 import WelcomeScreen from '@/components/common/WelcomeScreen.vue';
+import CommandPalette from '@/components/palette/CommandPalette.vue';
 import {
   shortcutManager,
   PredefinedShortcuts,
@@ -16,6 +17,7 @@ import {
 import { themeManager } from '@/core/utils/theme-manager';
 import { useModal, useTabManagement } from '@/composables';
 import { useSessionStore } from '@/features/session';
+import { tunnelApi } from '@/features/tunnel';
 import type { SavedSession, SavedSessionDisplay } from '@/features/session/types';
 import {
   TAB_MANAGEMENT_KEY,
@@ -134,6 +136,15 @@ const openSettings = (section?: string) => {
 const closeSettings = () => {
   showSettings.value = false;
 };
+
+// Command palette (snippet library) management
+const showCommandPalette = ref(false);
+const openCommandPalette = () => {
+  showCommandPalette.value = true;
+};
+const closeCommandPalette = (value: boolean) => {
+  showCommandPalette.value = value;
+};
 provide(SHOW_SETTINGS_KEY, showSettings);
 
 // Tab management
@@ -155,6 +166,7 @@ onMounted(async () => {
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
   shortcutManager.register(PredefinedShortcuts.SPLIT_VERTICAL);
   shortcutManager.register(PredefinedShortcuts.SPLIT_HORIZONTAL);
+  shortcutManager.register(PredefinedShortcuts.COMMAND_PALETTE);
 
   // All eventBus handlers are collected so they can be removed on unmount,
   // preventing leaks and duplicate handlers during HMR.
@@ -189,6 +201,12 @@ onMounted(async () => {
   offFns.push(
     eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
       openSSHForm();
+    })
+  );
+
+  offFns.push(
+    eventBus.on(APP_EVENTS.COMMAND_PALETTE, () => {
+      openCommandPalette();
     })
   );
 
@@ -456,6 +474,14 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       24 // Default rows
     );
     logger.info('SSH session created successfully', { sessionId });
+
+    // Best-effort auto-start of persisted tunnels for this runtime session.
+    // Failures are non-fatal; the user can still start tunnels from the panel.
+    try {
+      await tunnelApi.startSessionTunnels(sessionId);
+    } catch (e) {
+      logger.warn('Auto-start tunnels failed', e);
+    }
 
     // User cancelled while the backend was connecting — tear down immediately
     if (connectionCancelled) {
@@ -804,6 +830,12 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
 
       <!-- Welcome screen for first launch -->
       <WelcomeScreen v-if="showWelcome" @complete="showWelcome = false" />
+
+      <!-- Command palette (snippet library) -->
+      <CommandPalette
+        :visible="showCommandPalette"
+        @update:visible="closeCommandPalette"
+      />
     </div>
   </div>
 </template>

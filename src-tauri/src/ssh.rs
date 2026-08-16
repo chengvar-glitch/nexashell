@@ -1580,12 +1580,15 @@ impl SshManager {
     /// Open a fully-authenticated SSH session over a new TCP connection and
     /// start its SFTP subsystem. Used for long-running transfers so they do not
     /// hold the shared helper-session lock (which the file browser relies on).
-    fn open_transfer_sftp(
+    /// Open, handshake, verify the host key, and authenticate a *single* SSH
+    /// connection using the given credentials. Shared by the transfer path
+    /// (`open_transfer_sftp`) and the SSH tunneling subsystem.
+    pub(crate) fn connect_authenticated(
         addr: &str,
         host_for_err: &str,
         port: u16,
         auth: &SshAuth,
-    ) -> Result<(Session, ssh2::Sftp), SshError> {
+    ) -> Result<Session, SshError> {
         use std::net::ToSocketAddrs;
 
         let socket_addr = addr
@@ -1626,11 +1629,42 @@ impl SshManager {
 
         verify_host_key(&sess, host_for_err)?;
         Self::authenticate_with(&sess, auth)?;
+        Ok(sess)
+    }
+
+    fn open_transfer_sftp(
+        addr: &str,
+        host_for_err: &str,
+        port: u16,
+        auth: &SshAuth,
+    ) -> Result<(Session, ssh2::Sftp), SshError> {
+        let sess = Self::connect_authenticated(addr, host_for_err, port, auth)?;
 
         let sftp = sess.sftp().map_err(|e| {
             SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
         })?;
         Ok((sess, sftp))
+    }
+
+    /// Return the connection details retained for a live session so the tunnel
+    /// subsystem can open its own authenticated connections on the same host.
+    pub fn session_connection(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<(String, String, u16, SshAuth), SshError> {
+        let channels = self
+            .channels
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        let info = channels
+            .get(session_id)
+            .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+        Ok((
+            info.addr.clone(),
+            info.host_for_err.clone(),
+            info.port,
+            info.auth.clone(),
+        ))
     }
 
     /// Authenticate an SSH session with the given credentials, mirroring the

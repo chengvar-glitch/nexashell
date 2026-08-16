@@ -13,7 +13,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import ServerDashboard from './ServerDashboard.vue';
-import { FolderTree } from 'lucide-vue-next';
+import TunnelManagerPanel from '@/components/tunnel/TunnelManagerPanel.vue';
+import { FolderTree, Waypoints } from 'lucide-vue-next';
 import { openFileManagerWindow } from '@/features/window';
 import { useI18n } from 'vue-i18n';
 import {
@@ -29,6 +30,7 @@ const settingsStore = useSettingsStore();
 
 const showDashboard = ref(false);
 const activeDashboardTab = ref<'system' | 'uploads' | null>('system');
+const showTunnelPanel = ref(false);
 
 import type { ServerStatus, UploadTask } from '@/core/types';
 
@@ -1376,6 +1378,22 @@ const initialize = async (): Promise<void> => {
       <FolderTree :size="14" />
     </button>
 
+    <!-- Open the port-forwarding manager for this session -->
+    <button
+      type="button"
+      class="open-tunnels-btn"
+      :title="t('tunnel.openPanel')"
+      @click="showTunnelPanel = true"
+    >
+      <Waypoints :size="14" />
+    </button>
+
+    <TunnelManagerPanel
+      :session-id="props.sessionId"
+      :visible="showTunnelPanel"
+      @update:visible="showTunnelPanel = $event"
+    />
+
     <!-- Drag and Drop Overlay -->
     <div v-if="isDragging" class="drag-drop-overlay">
       <div class="overlay-content">
@@ -1525,6 +1543,34 @@ const initialize = async (): Promise<void> => {
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .open-files-btn:hover {
+  background: rgba(60, 60, 60, 0.9);
+  color: var(--color-text-primary, #fff);
+  border-color: var(--color-border-primary, #555);
+}
+
+/* Floating "manage port forwarding" button (bottom-right, low-key), sits to
+   the left of the file-manager button. */
+.open-tunnels-btn {
+  position: absolute;
+  right: 54px;
+  bottom: 18px;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border-secondary, #333);
+  border-radius: 8px;
+  background: rgba(45, 45, 45, 0.85);
+  color: var(--color-text-secondary, #9d9d9d);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.open-tunnels-btn:hover {
   background: rgba(60, 60, 60, 0.9);
   color: var(--color-text-primary, #fff);
   border-color: var(--color-border-primary, #555);
