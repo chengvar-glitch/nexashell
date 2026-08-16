@@ -15,6 +15,26 @@ import './styles/common.css';
 // preference.
 themeManager.initialize();
 
+// Suppress the browser's default context menu (Inspect Element / Reload /
+// Back etc.) on non-interactive areas of the file-manager window — the menu
+// is pure noise over the file list. Text inputs, links and buttons keep the
+// native menu (copy/paste). Unlike the main window, this applies in dev too:
+// right-clicking files to inspect is not something this utility window needs.
+window.addEventListener('contextmenu', e => {
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+  const interactiveSelector = [
+    'a',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    '[contenteditable]',
+  ].join(',');
+  if (target.closest(interactiveSelector)) return;
+  e.preventDefault();
+});
+
 const app = createApp(FileManagerWindow);
 
 // Initialize Pinia for state management
