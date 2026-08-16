@@ -626,20 +626,8 @@ defineExpose({
   background: var(--color-interactive-hover);
 }
 .file-row.selected {
-  background: var(--color-interactive-selected);
-}
-.file-row.selected::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 4px;
-  bottom: 4px;
-  width: 3px;
-  border-radius: 3px;
-  background: var(--color-primary);
-}
-.file-row:focus-within {
-  box-shadow: var(--focus-ring);
+  background: var(--color-interactive-hover);
+  color: var(--color-text-primary);
 }
 .file-row.dir {
   cursor: default;
@@ -655,10 +643,10 @@ defineExpose({
   flex: 0 0 auto;
 }
 .file-icon.dir {
-  color: #ffd60a;
+  color: var(--color-primary);
 }
 .file-icon.symlink {
-  color: var(--color-accent);
+  color: var(--color-text-secondary);
 }
 .file-icon.file {
   color: var(--color-text-tertiary);
@@ -697,15 +685,20 @@ defineExpose({
 }
 
 .file-actions {
-  display: none;
+  display: inline-flex;
   align-items: center;
-  gap: 2px;
-  flex: 0 0 auto;
+  gap: 0;
+  flex: 0 0 72px;
+  justify-content: flex-end;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity var(--transition-fast), visibility var(--transition-fast);
 }
 .file-row:hover .file-actions,
 .file-row.selected .file-actions,
 .file-row:focus-within .file-actions {
-  display: inline-flex;
+  visibility: visible;
+  opacity: 1;
 }
 
 .action-btn {
