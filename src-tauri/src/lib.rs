@@ -47,13 +47,15 @@ pub fn run() {
                     if let Ok(ns_window) = window.ns_window() {
                         let ns_window = ns_window as id;
 
+                        // Hide the title-bar text — keeps `titleBarStyle: Overlay`
+                        // (traffic-light buttons still float over content) but
+                        // discards the title text chrome. Window is opaque
+                        // (backgroundColor from tauri.conf.json) so the dark UI
+                        // extends cleanly into every pixel — no white edge from
+                        // transparent-window regions.
                         unsafe {
                             ns_window
                                 .setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-                            ns_window.setOpaque_(NO);
-                            ns_window.setBackgroundColor_(cocoa::appkit::NSColor::clearColor(
-                                cocoa::base::nil,
-                            ));
                             ns_window.setMovableByWindowBackground_(NO);
                             ns_window.setHasShadow_(NO);
                             ns_window.setHasShadow_(YES);

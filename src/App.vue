@@ -845,58 +845,32 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   width: 100vw;
   height: 100vh;
   padding: 0;
-  background: transparent;
+  background-color: var(--color-bg-primary);
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  /* Make the WebView background match the app surface so any pixel not
+   * covered by .app-root is dark, not the white default. */
 }
 
 .app-root {
   position: relative;
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1 1 0;
   width: 100%;
-  border-radius: var(--radius-2xl);
-  overflow: hidden;
   background-color: var(--color-bg-primary);
-  box-shadow:
-    0 0 0 0.5px rgba(0, 0, 0, 0.1),
-    var(--shadow-xl);
   border: none;
   transition: var(--transition-base);
-  /* Use clip-path to force cropping and prevent black edges from rendering overflow */
-  clip-path: inset(0 round var(--radius-2xl));
+  /* Window is now opaque (backgroundColor in tauri.conf.json) so the rounded
+   * clip-path trick is unnecessary. The whole content area is rectangular and
+   * fills the viewport edge-to-edge — no white border at bottom. */
+  overflow: hidden;
 }
 
-.app-root.is-windows {
-  border-radius: 0;
-  clip-path: none;
-}
+/* Previously: fullscreen-mode tweak + dark-theme box-shadow on .app-root.
+ * Both relied on .app-root having rounded corners / clip-path. With the
+ * window now opaque (no clip-path), these tweaks are no-ops and removed. */
 
-/* Fullscreen mode: remove rounded corners and borders */
-@media (display-mode: fullscreen) {
-  .app-root {
-    border-radius: 0;
-    border: none;
-    clip-path: none;
-  }
-}
-
-/* Dark theme optimization */
-@media (prefers-color-scheme: dark) {
-  :root:not(.theme-light) .app-root {
-    box-shadow:
-      0 0 0 0.5px rgba(255, 255, 255, 0.1),
-      var(--shadow-xl);
-  }
-}
-
-:root.theme-dark .app-root {
-  box-shadow:
-    0 0 0 0.5px rgba(255, 255, 255, 0.1),
-    var(--shadow-xl);
-}
 
 /* Modal overlay - removing black overlay for desktop app but keeping focus */
 .modal-overlay {
