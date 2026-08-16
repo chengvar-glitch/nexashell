@@ -1,5 +1,7 @@
 # NexaShell
 
+**English** | [简体中文](README.zh-CN.md)
+
 Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri 2 desktop application.
 
 [![Version](https://img.shields.io/badge/Version-1.10.0-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
