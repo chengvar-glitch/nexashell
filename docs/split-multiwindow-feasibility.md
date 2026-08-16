@@ -4,6 +4,22 @@
 
 ---
 
+## ⏱ 实施状态更新（2026-08-16 · 当前基准 v1.9.7）
+
+| 能力 | 研究结论 | 实施状态 |
+|---|---|---|
+| 分屏 (横/竖/递归/拖拽) | ✅ 高可行 | ✅ **已实现**（v1.2.0 起）：⌘D / ⇧⌘D 拆分、拖拽调宽、右键拆分；每标签页上限 3 面板；SSH pane 复用源会话凭据（非响应式缓存）；v1.2.1–v1.2.3 修复布局塌陷/欢迎语重复/凭据缓存泄漏等 |
+| 多窗口 A (独立实例) | ✅ 高可行 | ✅ **已实现**（v1.7.0 前）：SFTP 文件管理器抽取为独立窗口（`filemanager.html` 独立入口），`capabilities/default.json` 已含 `*` 窗口白名单 |
+| 多窗口 B (标签分离, iTerm2 式) | ✅ 高可行 | ⬜ 未实现 |
+| 多窗口 C (跨窗口会话镜像/接管) | ⚠️ 中 | ⬜ 未实现（暂缓） |
+
+**与当前代码的差异点**（下文"现状架构梳理"基于 v1.1.4，部分已过时）：
+- 窗口已从 `transparent: true` 改为 **`transparent: false`** + `backgroundColor:#1c1c1e`（v1.9.2/v1.9.3 为修底部白边），`clip-path` 圆角方案已废弃
+- 分屏由 `useTabManagement()` 的 `splitTree` 递归结构 + `SplitRenderer.ts` / `PaneContainer.vue` 渲染，`RemoteConnectionView.vue` 已按 pane 实例化
+- `sessionId !== tabId`：分屏后一个标签页含多个 pane（各自独立 session），`tabToSessionMap` 不再是严格 1:1
+
+---
+
 ## 1. 结论摘要
 
 | 能力 | 可行性 | 后端改动 | 前端改动 | 预估工期 |
@@ -150,4 +166,4 @@ Cmd+Q / Cmd+, / Cmd+Shift+T / Cmd+T / Cmd+P / Cmd+W / Esc —— **与 Cmd+D / C
 
 ---
 
-*研究基于 v1.1.4 源码静态分析，未改动任何代码。*
+*研究基于 v1.1.4 源码静态分析，未改动任何代码；实施状态更新于 2026-08-16（v1.9.7）。*

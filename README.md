@@ -1,9 +1,10 @@
 # NexaShell
 
-Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri desktop application.
+Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri 2 desktop application.
 
-[![Version](https://img.shields.io/badge/Version-1.3.1-blue.svg)](https://github.com/chengvar-glitch/nexashell)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-1.9.7-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
+
+> Version is sourced from `src-tauri/Cargo.toml` (single source of truth, synced to `package.json` by `prebuild`). See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
 NexaShell combines the safety and performance of Rust with a modern, high-productivity web-based UI to provide a seamless server management experience.
 
@@ -12,12 +13,20 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 ## 🚀 Key Features
 
 - **Multi-Session Management**: Organize and switch between multiple SSH sessions using a robust tab-based interface.
-- **Session Persistence & Grouping**: Securely store server credentials with support for hierarchical grouping and custom tagging (AES-GCM encrypted).
-- **Hardware-Accelerated Terminal**: Integrated terminal with low-latency rendering powered by `xterm.js` and WebGL.
-- **Integrated SFTP Support**: Built-in file explorer and transfer capabilities for easy remote file manipulation.
-- **Real-time Server Dashboard**: Monitor remote server status (CPU, Memory, Disk) directly from the connection view.
-- **Customizable Workspace**: Support for Dark/Light modes and flexible UI layouts.
-- **Cross-Platform**: Production-ready for macOS (Apple Silicon/Intel), Windows, and Linux.
+- **Split Panes**: Split any terminal tab horizontally or vertically (⌘D / ⇧⌘D), drag to resize, right-click to split, up to **3 panes per tab**. SSH panes reuse the source session's credentials without exposing them to reactive state.
+- **Session Persistence & Grouping**: Securely store server credentials with support for hierarchical grouping and custom tagging (AES-256-GCM encrypted).
+- **Hardware-Accelerated Terminal**: Integrated terminal with low-latency rendering powered by `xterm.js` + WebGL, plus in-terminal search (⌘F).
+- **Terminal Theme System**: One Dark / Modern / Solarized / GitHub presets, following the system light/dark mode by default.
+- **Integrated SFTP Support**: Built-in file explorer with upload (drag & drop, pause/resume/cancel, resume-at-block-boundary), download, mkdir, rename, and delete.
+- **Standalone File Manager Window**: Detached SFTP browsing window per session, opened from the connection view.
+- **SSH Port Forwarding**: Local (`-L`) and dynamic SOCKS5 (`-D`) tunnels, auto-started for persisted rules on connect.
+- **Command Snippet Library**: Reusable command snippets with a quick-launch command palette (⌘⇧P).
+- **Real-time Server Dashboard**: Monitor remote server status (CPU, Memory, Disk, Network, Swap, Load, Uptime) directly from the connection view.
+- **Local Terminal**: Native PTY-backed local shell tabs.
+- **Security Hardening**: Host key verification against `known_hosts`, OS keychain-backed master key with file fallback, CSP, minimal Tauri capabilities.
+- **Session Import/Export**: Encrypted export (random salt, PBKDF2) with backward-compatible decryption of legacy formats.
+- **Customizable Workspace**: Dark/Light modes, multiple accent colors, and a native-feeling macOS overlay title bar.
+- **Cross-Platform**: macOS (Apple Silicon/Intel) is the primary verified platform; Windows and Linux builds are continuously compiled in CI (see [Platform Status](#-platform-status)).
 
 ---
 
@@ -26,69 +35,82 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 ### Prerequisites
 
 - [Rust](https://www.rust-lang.org/tools/install) (latest stable)
-- [Node.js](https://nodejs.org/) (v18+)
-- [bun](https://bun.sh/) (>=1.0)
+- [Node.js](https://nodejs.org/) (v18+) — for tooling that isn't bun-native
+- [bun](https://bun.sh/) (>=1.0) — package manager
 
 ### Build from Source
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/chengvar/nexashell.git
-   cd nexashell
-   ```
+```bash
+# 1. Clone the repository
+git clone git@github.com:chengvar-glitch/nexashell.git
+cd nexashell
 
-2. **Install dependencies**
-   ```bash
-   bun install
-   ```
+# 2. Install dependencies
+bun install
 
-3. **Run in development mode**
-   ```bash
-   bun tauri dev
-   ```
+# 3. Run in development mode (opens the Tauri window)
+bun tauri dev
 
-4. **Build for production**
-   ```bash
-   bun tauri build
-   ```
+# 4. Build for production
+bun build && bun tauri build
+```
 
 ---
 
 ## 🏗️ Architecture Design
 
-NexaShell adopts a **Multi-Process Architecture** powered by [Tauri](https://tauri.app/), separating the UI concerns from the low-level system operations.
+NexaShell adopts a **Multi-Process Architecture** powered by [Tauri 2](https://tauri.app/), separating the UI concerns from the low-level system operations.
 
 ### High-Level Overview
 
 ```mermaid
 graph TD
     subgraph "Frontend Layer (Vue 3)"
-        UI[User Interface Components]
+        UI[UI Components]
         Store[Pinia State Management]
         EB[Event Bus / Shortcuts]
     end
 
     subgraph "Bridge (Tauri IPC)"
-        Invoke[Tauri Invoke/Events]
+        Invoke[Tauri Invoke / Events]
     end
 
     subgraph "Backend Layer (Rust Core)"
-        SM[SshManager]
-        TM[TerminalManager]
-        DB[Database Protocol]
+        SSH[SshManager — ssh.rs]
+        TERM[TerminalManager — terminal.rs]
+        TUN[TunnelManager — tunnel.rs]
+        DB[Database — db/]
         SEC[Encryption Module]
     end
 
-    UI <--> Invoke <--> SM
-    UI <--> Invoke <--> TM
+    UI <--> Invoke <--> SSH
+    UI <--> Invoke <--> TERM
+    UI <--> Invoke <--> TUN
     Store <--> Invoke <--> DB
-    SM <--> SSH[Remote Server via SSH2]
+    SSH <--> Remote[Remote Server via SSH2]
+    TUN <--> Remote
 ```
 
-### 🧩 Layer Responsibilities
+### Backend Modules (`src-tauri/src/`)
 
-- **Frontend (View Layer)**: Built with Vue 3 and TypeScript. Pinia handles session lifecycle, user settings, and UI states. Uses `xterm.js` with WebGL acceleration for GPU-accelerated rendering.
-- **Backend (Service Layer)**: Built on `ssh2-rs` and `tokio`. Handles high-performance, non-blocking SSH communication and local data persistence with AES encryption.
+| Module | Responsibility |
+|---|---|
+| `ssh.rs` (~2,600 lines) | SSH connection lifecycle, blocking I/O with `SO_KEEPALIVE`, batched output events, server status monitoring, SFTP upload/download with per-task control (pause/resume/cancel) |
+| `ssh/hostkey.rs` | Host key verification against the user's `known_hosts` |
+| `db/mod.rs` | SQLite (sessions, groups, tags, tunnel rules, snippets) with WAL, migrations, transactional updates |
+| `db/import_export.rs` | Encrypted session import/export (PBKDF2 + AES-GCM), legacy format compat |
+| `encryption.rs` | AES-256-GCM + PBKDF2 (390k iterations), OS keychain master key with 0600-file fallback, `zeroize` on sensitive buffers |
+| `terminal.rs` | Local PTY via `portable-pty`, batched input writes, resize listeners |
+| `tunnel.rs` | Local port forwarding + SOCKS5 dynamic forwarding over existing SSH sessions |
+| `system.rs` | Platform detection, window controls, file preview helpers |
+
+### Frontend Structure (`src/`)
+
+- `components/` — UI components (connections, layout, file manager, settings, palette…)
+- `features/` — Feature modules with barrel exports: `session`, `tabs`, `tunnel`, `snippet`, `settings`, `window`
+- `composables/` — Reusable logic (`use-tab-management`, `use-sftp`, `use-transfer-queue`, `use-modal`, `use-remote-path`)
+- `core/` — Config, constants, i18n, types, utils (logger, theme manager, shortcut manager, event bus)
+- Two HTML entries: `index.html` (main window) and `filemanager.html` (detached SFTP window)
 
 ---
 
@@ -106,7 +128,7 @@ sequenceDiagram
     U->>F: Input Credentials & Click "Connect"
     F->>F: Validate Inputs
     F->>B: tauri::invoke("connect_ssh", config)
-    B->>B: Initialize SSH2 Session
+    B->>B: Verify host key against known_hosts
     B->>S: TCP Handshake (IP:Port)
     S-->>B: TCP Connected
     B->>S: SSH Key Exchange & Auth
@@ -129,88 +151,74 @@ sequenceDiagram
     PC->>RB: tauri::invoke("send_ssh_input", data)
     RB->>RS: Write to SSH Channel
     RS-->>RB: Stdout/Stderr Data
-    RB->>RB: Buffer & Optimize Output
-    RB->>PC: tauri::emit("ssh_output_event")
+    RB->>RB: Buffer & Optimize Output (batched chunks)
+    RB->>PC: tauri::emit("ssh-output-{sessionId}", chunk)
     PC->>UI: Update Terminal Buffer
 ```
 
 ---
 
-## 🛠️ Installation & Development
+## ⚙️ Development Commands
 
-### Prerequisites
-
-- **Node.js**: (recommended via nvm) and **bun**
-- **Rust toolchain**: (stable) and **cargo**
-- **Tauri CLI dependencies**: Platform-specific (see [Tauri documentation](https://tauri.app/start/prerequisites))
-
-### Quick Setup
-
-```bash
-# Install frontend dependencies
-bun install
-
-# Run native development (opens the Tauri window)
-bun tauri dev
-```
-
-### Development Commands
-
-- **Run Vite dev server** (Web only): `bun dev`
-- **Run full native app**: `bun tauri dev`
-- **Build production bundle**:
-  ```bash
-  bun build
-  bun tauri build
-  ```
-- **Run production build**:
-  ```bash
-  bun build          # Frontend (type-check + Vite build)
-  bun tauri build    # Desktop bundle (DMG/app, MSI/NSIS, AppImage/deb)
-  ```
-- **Lint & type-check**:
-  ```bash
-  bun lint           # ESLint with auto-fix
-  bun lint:check     # ESLint without auto-fix (CI-friendly)
-  bun type-check     # vue-tsc --noEmit
-  ```
-- **Tests**:
-  ```bash
-  bun test           # Run frontend (Vitest) unit tests
-  bun test:coverage  # Frontend tests with coverage report
-  cargo test         # Rust unit tests (run from src-tauri/)
-  ```
+| Command | Purpose |
+|---|---|
+| `bun dev` | Vite dev server (web-only, port 1420) |
+| `bun tauri dev` | Full native app dev mode |
+| `bun build` | `vue-tsc --noEmit && vite build` |
+| `bun lint` | ESLint with auto-fix |
+| `bun lint:check` | ESLint without auto-fix (CI-friendly) |
+| `bun type-check` | `vue-tsc --noEmit` |
+| `bun test` | Frontend unit tests (Vitest, happy-dom) |
+| `bun test:coverage` | Frontend tests with coverage report |
+| `cargo test` | Rust unit tests (run from `src-tauri/`) |
+| `cargo clippy` | Rust lints (`-D warnings` in CI) |
+| `bun tauri build` | Production desktop bundle (DMG/app, MSI/NSIS, AppImage/deb) |
 
 ---
 
-## ⚙️ Technical Details
+## 🔌 Tauri IPC Surface
 
-### Key IPC / Tauri Commands
+Backend commands are registered in `src-tauri/src/lib.rs` (`~70` invoke handlers). Grouped overview:
 
-The backend exposes these Tauri commands and events (implemented in `src-tauri/src/ssh.rs`, `src-tauri/src/db.rs`):
+- **System & Window**: `get_platform`, `get_arch`, `is_macos`/`is_windows`/`is_linux`, `quit_app`, `toggle_maximize`, `minimize_window`, `close_window`, `read_file_preview`, `get_file_size`
+- **SSH Connection**: `connect_ssh`, `disconnect_ssh`, `send_ssh_input`, `get_buffered_ssh_output`, `set_ssh_status_refresh_rate`, `probe_remote_path`
+- **SFTP**: `upload_file_sftp`, `pause_upload`, `resume_upload`, `cancel_upload`, `sftp_list_dir`, `sftp_download_file`, `cancel_download`, `sftp_remove`, `sftp_mkdir`, `sftp_rename`
+- **Local Terminal**: `connect_local`, `disconnect_local`
+- **Sessions**: `add_session`, `save_session`, `save_session_with_credentials`, `update_session_timestamp`, `list_sessions`, `get_session_credentials`, `get_sessions`, `get_sessions_with_relations`, `edit_session`, `delete_session`, `toggle_favorite`
+- **Groups / Tags**: `add_group` / `add_tag`, `list_groups` / `list_tags`, `edit_group` / `edit_tag`, `delete_group` / `delete_tag`, `link_session_group` / `link_session_tag`, `unlink_session_group` / `unlink_session_tag`, `list_groups_for_session` / `list_tags_for_session`
+- **Import/Export**: `export_sessions`, `import_sessions`
+- **Tunnels**: `start_session_tunnels`, `start_tunnel_rule`, `stop_session_tunnels`, `stop_tunnel_rule`, `list_tunnel_status`, plus `add_tunnel_rule`, `list_tunnel_rules`, `update_tunnel_rule`, `delete_tunnel_rule`, `delete_tunnel_rules_for_session`
+- **Snippets**: `add_snippet`, `list_snippets`, `update_snippet`, `delete_snippet`
 
-- **SSH Commands**: `connect_ssh`, `disconnect_ssh`, `send_ssh_input`, `upload_file_sftp`, `probe_remote_path`.
-- **Database Management**: `list_sessions`, `add_session`, `save_session`, `add_group`, `list_groups`.
-- **System**: `get_platform`, `read_file_preview`, `toggle_maximize`.
-
-### Project Structure
-
-- `src/` — Frontend renderer (Vue 3 + TypeScript)
-  - `src/components/` — UI components (SSH form, Terminal, Dashboards)
-  - `src/features/` — Feature modules (session, settings, tabs)
-  - `src/core/` — Core utilities (i18n, theme, logger, event bus)
-- `src-tauri/` — Rust backend
-  - `src-tauri/src/ssh.rs` — SSH manager and channel implementation
-  - `src-tauri/src/db.rs` — SQLite database manager
-  - `src-tauri/src/lib.rs` — Tauri initialization
+**Streaming events** (Tauri `emit`, namespaced per session):
+- `ssh-output-{sessionId}` — terminal output chunks (batched)
+- `ssh-status-{sessionId}` — server dashboard metrics (CPU/mem/disk/…)
+- `ssh-upload-progress-{sessionId}` / `ssh-download-progress-{sessionId}` — SFTP transfer progress
+- `ssh-disconnected-{sessionId}` — session ended (server closed / error)
+- `ssh-input-{sessionId}` / `ssh-resize-{sessionId}` — frontend → backend (keystrokes / PTY size)
 
 ---
 
 ## 🛡️ Security
 
-- **Credential Safety**: All passwords and private keys are encrypted locally before being stored in the SQLite database.
-- **Rust Memory Safety**: The core SSH logic is implemented in memory-safe Rust, preventing common security vulnerabilities.
-- **Sandboxed WebView**: The frontend runs in a restricted context with communication via secure IPC.
+- **Credential Safety**: Passwords and private keys are encrypted with AES-256-GCM before storage; the master key lives in the OS keychain (macOS Keychain / Windows Credential Manager / Linux Secret Service) with a 0600-permissioned file fallback. A corrupted keychain entry is **refused** rather than silently regenerated, so existing credentials are never orphaned.
+- **Host Key Verification**: SSH connections verify the remote host key against `known_hosts` (TOFU, `StrictHostKeyChecking`-style) to prevent MITM attacks.
+- **Memory Hygiene**: Sensitive plaintext is kept out of reactive frontend state (non-reactive credential cache) and zeroized on drop in Rust.
+- **Sandboxed WebView**: Strict CSP (`default-src 'self'`), minimal Tauri capability permissions, `object-src 'none'`.
+- **Rust Memory Safety**: All core SSH/terminal logic is implemented in memory-safe Rust.
+
+---
+
+## 🖥️ Platform Status
+
+| Platform | Status |
+|---|---|
+| macOS (Apple Silicon) | ✅ Primary — fully tested, DMG release builds verified |
+| macOS (Intel) | 🟡 CI-compiled; not actively verified on hardware |
+| Windows | 🟡 CI-compiled (`cargo check`/`test`/`clippy` on ubuntu; MSVC/NSIS paths not exercised) |
+| Linux | 🟡 CI-compiled with webkit2gtk deps; no runtime verification |
+
+> Continuous Integration (`.github/workflows/ci.yml`): lint + type-check + frontend tests (bun) and `cargo check` + `test` + `clippy -D warnings` on every push/PR.
 
 ---
 
