@@ -13,7 +13,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import ServerDashboard from './ServerDashboard.vue';
-import { FolderOpen } from 'lucide-vue-next';
+import { FolderTree } from 'lucide-vue-next';
+import { openFileManagerWindow } from '@/features/window';
 import { useI18n } from 'vue-i18n';
 import {
   useRemotePath,
@@ -27,9 +28,9 @@ const sessionStore = useSessionStore();
 const settingsStore = useSettingsStore();
 
 const showDashboard = ref(false);
-const activeDashboardTab = ref<'system' | 'uploads' | 'files' | null>('system');
+const activeDashboardTab = ref<'system' | 'uploads' | null>('system');
 
-import type { ServerStatus, UploadTask, SftpEntry } from '@/core/types';
+import type { ServerStatus, UploadTask } from '@/core/types';
 
 const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -105,30 +106,9 @@ const {
   detectRemotePath,
 } = useRemotePath();
 
-/**
- * The remote path the SFTP file list should open to: prefer the terminal's
- * last-known absolute CWD, falling back to the remote home when known, then "/".
- */
-const dashboardInitialPath = computed(() => {
-  if (lastKnownAbsolutePath.value.startsWith('/')) {
-    return lastKnownAbsolutePath.value;
-  }
-  if (currentRemotePath.value.startsWith('/')) {
-    return currentRemotePath.value;
-  }
-  return remoteHomeDir.value || '/';
-});
-
-/** Open the file list panel and navigate it to the terminal's current dir. */
-const revealNonce = ref(0);
-const openFilesAtCurrentDir = () => {
-  // Force the Files tab to stay open; toggling from system/uploads never
-  // selects it, so explicitly set it.
-  showDashboard.value = true;
-  activeDashboardTab.value = 'files';
-  // Bump the nonce so an already-open file list remounts and re-navigates to
-  // the latest CWD.
-  revealNonce.value += 1;
+/** Open the standalone file-manager window for this session. */
+const openFileManager = () => {
+  void openFileManagerWindow(props.sessionId);
 };
 
 let terminal: Terminal | null = null;
@@ -158,64 +138,6 @@ const addUploadTask = (fileName: string, direction: 'upload' | 'download' = 'upl
     ...uploadTasks.value,
   ];
   return id;
-};
-
-/**
- * Add a download task to the shared transfer queue and start streaming the
- * remote file to the chosen local path. The save-path dialog runs first.
- */
-const handleSftpDownload = async (entry: SftpEntry) => {
-  try {
-    const { save } = await import('@tauri-apps/plugin-dialog');
-    const localPath = await save({ defaultPath: entry.name });
-    if (!localPath) return; // user cancelled the dialog
-
-    const taskId = addUploadTask(entry.name, 'download');
-    updateUploadTask(taskId, {
-      remotePath: entry.path,
-      localPath,
-      status: 'downloading',
-      progress: 5,
-      message: t('download.preparing'),
-      fileSize: entry.size,
-    });
-
-    try {
-      logger.info('Starting SFTP download', {
-        taskId,
-        remotePath: entry.path,
-        localPath,
-      });
-      invoke('sftp_download_file', {
-        sessionId: props.sessionId,
-        taskId,
-        remotePath: entry.path,
-        localPath,
-      }).catch(err => {
-        const errorMessage =
-          err instanceof Error ? err.message : String(err);
-        updateUploadTask(taskId, {
-          status: 'error',
-          progress: 0,
-          message: `Failed to start: ${errorMessage}`,
-          error: errorMessage,
-        });
-        logger.error('Failed to start download', err);
-      });
-    } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : String(err);
-      updateUploadTask(taskId, {
-        status: 'error',
-        progress: 0,
-        message: `Failed to start: ${errorMessage}`,
-        error: errorMessage,
-      });
-      logger.error('Failed to start download', err);
-    }
-  } catch (err) {
-    logger.error('Save dialog or download setup failed', err);
-  }
 };
 
 const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
@@ -1415,27 +1337,23 @@ const initialize = async (): Promise<void> => {
       :session-id="props.sessionId"
       :history="statusHistory"
       :upload-tasks="uploadTasks"
-      :initial-remote-path="dashboardInitialPath"
-      :files-reveal-key="revealNonce"
       @clear-tasks="clearUploadTasks"
       @toggle="showDashboard = !showDashboard"
       @update:active-tab="activeDashboardTab = $event"
       @pause-task="pauseUploadTask"
       @resume-task="resumeUploadTask"
       @cancel-task="cancelUploadTask"
-      @download-entry="handleSftpDownload"
     />
     <div ref="terminalRef" class="terminal-container" />
 
-    <!-- Quick jump: open the file list at the terminal's current directory -->
+    <!-- Open the standalone file manager for this session -->
     <button
       type="button"
-      class="reveal-files-btn"
-      :class="{ active: showDashboard && activeDashboardTab === 'files' }"
-      :title="t('sftp.openHere')"
-      @click="openFilesAtCurrentDir"
+      class="open-files-btn"
+      :title="t('dashboard.openInWindow')"
+      @click="openFileManager"
     >
-      <FolderOpen :size="14" />
+      <FolderTree :size="14" />
     </button>
 
     <!-- Drag and Drop Overlay -->
@@ -1568,8 +1486,8 @@ const initialize = async (): Promise<void> => {
   position: relative;
 }
 
-/* Floating "open file list at current dir" button (bottom-right, low-key). */
-.reveal-files-btn {
+/* Floating "open standalone file manager" button (bottom-right, low-key). */
+.open-files-btn {
   position: absolute;
   right: 18px;
   bottom: 18px;
@@ -1586,15 +1504,10 @@ const initialize = async (): Promise<void> => {
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
-.reveal-files-btn:hover {
+.open-files-btn:hover {
   background: rgba(60, 60, 60, 0.9);
   color: var(--color-text-primary, #fff);
   border-color: var(--color-border-primary, #555);
-}
-.reveal-files-btn.active {
-  color: var(--color-accent, #facc15);
-  border-color: var(--color-accent, #facc15);
-  background: rgba(250, 204, 21, 0.12);
 }
 
 .terminal-search-box {

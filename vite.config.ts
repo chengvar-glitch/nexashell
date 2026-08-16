@@ -21,6 +21,10 @@ export default defineConfig({
     cssMinify: 'esbuild',
     chunkSizeWarningLimit: 700,
     rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        filemanager: fileURLToPath(new URL('./filemanager.html', import.meta.url)),
+      },
       output: {
         manualChunks: {
           vue: ['vue', 'pinia', 'vue-i18n'],

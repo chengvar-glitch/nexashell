@@ -166,6 +166,12 @@ export default {
     unknown: '未知',
     hideSidebar: '隐藏侧边栏',
     showSidebar: '显示侧边栏',
+    openInWindow: '在新窗口打开文件管理器',
+    disconnected: '会话已断开',
+    missingSession: '此窗口未绑定会话',
+    upload: '上传',
+    transfersToggle: '切换传输面板',
+    closePanel: '关闭面板',
   },
   upload: {
     confirmTitle: '确认上传',

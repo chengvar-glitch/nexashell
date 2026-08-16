@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Folder,
@@ -18,6 +18,7 @@ import {
   FolderPlus,
 } from 'lucide-vue-next';
 import { useSftp, parentOfPath, normalizePath } from '@/composables/use-sftp';
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import type { SftpEntry } from '@/core/types';
 import { formatBytes } from '@/core/types';
 
@@ -27,12 +28,16 @@ interface Props {
   sessionId: string;
   /** Optional path to open on mount (e.g. the terminal's current directory). */
   initialPath?: string;
+  /** Bumping this value triggers a refresh of the current directory. */
+  refreshKey?: number;
 }
 
 const props = defineProps<Props>();
 
 const emit = defineEmits<{
   download: [entry: SftpEntry];
+  /** Fires whenever the browser navigates to a new directory. */
+  'current-path': [path: string];
 }>();
 
 const sessionIdRef = ref(props.sessionId);
@@ -95,11 +100,33 @@ const onMkdir = async () => {
   showMkdir.value = false;
 };
 
-const onRemove = async (entry: SftpEntry) => {
-  const title = entry.isDir
-    ? t('sftp.deleteDirConfirm', { name: entry.name })
-    : t('sftp.deleteFileConfirm', { name: entry.name });
-  if (!window.confirm(title)) return;
+const onRemove = (entry: SftpEntry) => {
+  // Open the styled confirmation dialog (shown below) instead of the native
+  // synchronous window.confirm, keeping the delete flow consistent with the
+  // app's dark theme.
+  entryToDelete.value = entry;
+};
+
+const entryToDelete = ref<SftpEntry | null>(null);
+
+const confirmDeleteVisible = computed(() => entryToDelete.value !== null);
+
+const confirmDeleteTitle = computed(() =>
+  entryToDelete.value
+    ? entryToDelete.value.isDir
+      ? t('sftp.deleteDirConfirm', { name: entryToDelete.value.name })
+      : t('sftp.deleteFileConfirm', { name: entryToDelete.value.name })
+    : ''
+);
+
+const cancelDelete = () => {
+  entryToDelete.value = null;
+};
+
+const confirmDelete = async () => {
+  const entry = entryToDelete.value;
+  entryToDelete.value = null;
+  if (!entry) return;
   const ok = await sftp.remove(entry);
   if (!ok) actionError.value = sftp.error.value;
 };
@@ -144,6 +171,25 @@ onMounted(() => {
 onUnmounted(() => {
   void sftp.dispose();
 });
+
+// Surface navigation to the parent so e.g. the file-manager window can target
+// uploads at the current directory and keep its own state in sync.
+watch(
+  () => sftp.currentPath.value,
+  path => {
+    emit('current-path', path);
+  },
+  { immediate: true }
+);
+
+// Reload the current directory when the parent bumps `refreshKey` (e.g. after
+// finishing an upload into this directory).
+watch(
+  () => props.refreshKey,
+  () => {
+    void sftp.refresh();
+  }
+);
 </script>
 
 <template>
@@ -340,6 +386,18 @@ onUnmounted(() => {
         </template>
       </div>
     </div>
+
+    <!-- Styled delete confirmation dialog -->
+    <ConfirmDialog
+      :visible="confirmDeleteVisible"
+      :title="t('sftp.delete')"
+      :message="confirmDeleteTitle"
+      :confirm-text="t('sftp.delete')"
+      :cancel-text="t('upload.cancel')"
+      :is-danger="true"
+      @confirm="confirmDelete"
+      @cancel="cancelDelete"
+    />
   </div>
 </template>
 

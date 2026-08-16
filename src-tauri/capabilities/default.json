@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capabilities for all windows (main shell and detached dashboard windows)",
+  "windows": ["main", "*"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -13,6 +13,11 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "core:webview:allow-create-webview-window",
+    "core:window:allow-create",
+    "core:window:allow-destroy",
+    "core:window:allow-show",
+    "core:window:allow-set-focus"
   ]
 }

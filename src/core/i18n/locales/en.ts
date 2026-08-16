@@ -167,6 +167,12 @@ export default {
     unknown: 'unknown',
     hideSidebar: 'Hide Sidebar',
     showSidebar: 'Show Sidebar',
+    openInWindow: 'Open file manager in a new window',
+    disconnected: 'Session disconnected',
+    missingSession: 'No session for this window',
+    upload: 'Upload',
+    transfersToggle: 'Toggle transfers panel',
+    closePanel: 'Close panel',
   },
   upload: {
     confirmTitle: 'Confirm Upload',

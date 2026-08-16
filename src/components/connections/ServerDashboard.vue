@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, computed, onErrorCaptured } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { ServerStatus, UploadTask } from '@/core/types';
-import SftpBrowser from './SftpBrowser.vue';
 import {
   formatBytes,
   formatSizeMiB,
@@ -33,20 +32,15 @@ import {
   Play,
   FileUp,
   FileDown,
-  Folder,
   LayoutDashboard,
 } from 'lucide-vue-next';
 
 interface Props {
   show: boolean;
-  activeTab: 'system' | 'uploads' | 'files' | null;
+  activeTab: 'system' | 'uploads' | null;
   sessionId: string;
   history?: ServerStatus[];
   uploadTasks?: UploadTask[];
-  /** Remote working dir of the terminal, used to open the file list there. */
-  initialRemotePath?: string;
-  /** Bumped when the user re-triggers "reveal at current dir" to remount the list. */
-  filesRevealKey?: number;
 }
 
 const props = defineProps<Props>();
@@ -58,19 +52,7 @@ const emit = defineEmits([
   'pause-task',
   'resume-task',
   'cancel-task',
-  'download-entry',
 ]);
-
-// Safety net: if the SFTP browser throws while rendering, contain the error and
-// show a fallback instead of letting it freeze the whole dashboard.
-const filesRenderError = ref('');
-onErrorCaptured((err) => {
-  if (props.activeTab === 'files') {
-    filesRenderError.value =
-      err instanceof Error ? err.message : String(err);
-  }
-  return false; // handled here; stop propagation to the app root
-});
 
 const localHistory = ref<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -97,7 +79,7 @@ const hasActiveUploads = computed(() =>
   )
 );
 
-const toggleTab = (tab: 'system' | 'uploads' | 'files') => {
+const toggleTab = (tab: 'system' | 'uploads') => {
   if (props.activeTab === tab) {
     emit('update:active-tab', null);
   } else {
@@ -960,33 +942,6 @@ watch(
               <span>{{ t('dashboard.clearAll') }}</span>
             </button>
           </div>
-        </div>
-      </div>
-
-      <!-- Files (SFTP) Section -->
-      <div
-        class="accordion-item"
-        :class="{ 'is-active': activeTab === 'files' }"
-      >
-        <button class="accordion-header" @click="toggleTab('files')">
-          <ChevronDown :size="14" class="chevron" />
-          <Folder :size="14" class="section-icon" />
-          <span class="section-title">{{ t('dashboard.files') }}</span>
-        </button>
-
-        <div v-if="activeTab === 'files'" class="accordion-content files-content">
-          <div v-if="filesRenderError" class="files-render-error">
-            <AlertCircle :size="18" />
-            <p>{{ t('sftp.renderError') }}</p>
-            <pre>{{ filesRenderError }}</pre>
-          </div>
-          <SftpBrowser
-            v-else
-            :key="`sftp-${props.filesRevealKey ?? 0}`"
-            :session-id="props.sessionId"
-            :initial-path="props.initialRemotePath"
-            @download="emit('download-entry', $event)"
-          />
         </div>
       </div>
     </div>
