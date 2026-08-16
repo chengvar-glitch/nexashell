@@ -226,6 +226,38 @@
                     </div>
                   </div>
 
+                  <div class="setting-item update-item">
+                    <label class="setting-label">{{
+                      $t('settings.checkForUpdates')
+                    }}</label>
+                    <div class="update-controls">
+                      <span
+                        v-if="updateState !== 'idle'"
+                        class="update-status"
+                        :class="updateStatusClass"
+                      >
+                        {{ updateStatusText }}
+                      </span>
+                      <a
+                        v-if="updateState === 'available'"
+                        :href="releaseUrl"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="update-download-link"
+                      >
+                        {{ $t('settings.downloadUpdate') }}
+                      </a>
+                      <button
+                        v-else
+                        class="update-check-btn"
+                        :disabled="updateState === 'checking'"
+                        @click="handleCheckForUpdates"
+                      >
+                        {{ updateButtonLabel }}
+                      </button>
+                    </div>
+                  </div>
+
                   <div class="about-content">
                     <p class="about-desc">
                       {{ $t('settings.description') }}
@@ -305,6 +337,10 @@ import { TERMINAL_THEME_KEYS } from '@/core/terminal-themes';
 import type { TerminalThemeKey } from '@/core/terminal-themes';
 import { isMacOSBrowser } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
+import {
+  checkForUpdates,
+  RELEASE_PAGE_URL,
+} from '@/core/utils/updater';
 
 const logger = createLogger('SETTINGS_PANEL');
 
@@ -332,6 +368,67 @@ const activeMenu = ref('appearance');
 const selectedTheme = ref<ThemeMode>('auto');
 const selectedAccent = ref<AccentKey>('blue');
 const appVersion = ref('0.1.0');
+
+type UpdateState = 'idle' | 'checking' | 'upToDate' | 'available' | 'error';
+const updateState = ref<UpdateState>('idle');
+const latestVersion = ref('');
+const releaseUrl = ref(RELEASE_PAGE_URL);
+
+const updateStatusText = computed(() => {
+  switch (updateState.value) {
+    case 'checking':
+      return t('settings.checkingForUpdates');
+    case 'upToDate':
+      return t('settings.upToDate');
+    case 'available':
+      return t('settings.updateAvailable', { version: latestVersion.value });
+    case 'error':
+      return t('settings.checkUpdateFailed');
+    default:
+      return '';
+  }
+});
+
+const updateStatusClass = computed(() => {
+  switch (updateState.value) {
+    case 'upToDate':
+      return 'ok';
+    case 'available':
+      return 'available';
+    case 'error':
+      return 'error';
+    default:
+      return '';
+  }
+});
+
+const updateButtonLabel = computed(() => {
+  switch (updateState.value) {
+    case 'checking':
+      return t('settings.checkingForUpdates');
+    case 'upToDate':
+      return t('settings.checkAgain');
+    case 'error':
+      return t('settings.retry');
+    default:
+      return t('settings.checkForUpdates');
+  }
+});
+
+const handleCheckForUpdates = async () => {
+  if (updateState.value === 'checking') return;
+  updateState.value = 'checking';
+  const result = await checkForUpdates(appVersion.value);
+  if (result.status === 'available') {
+    latestVersion.value = result.latestVersion ?? '';
+    releaseUrl.value = result.releaseUrl ?? RELEASE_PAGE_URL;
+    updateState.value = 'available';
+  } else if (result.status === 'upToDate') {
+    updateState.value = 'upToDate';
+  } else {
+    updateState.value = 'error';
+  }
+};
 
 const contentRef = ref<HTMLElement | null>(null);
 const contentRefFallback = ref<HTMLElement | null>(null);
@@ -753,6 +850,77 @@ onUnmounted(() => {
   font-size: 12px;
   color: var(--color-text-primary);
   font-weight: 400;
+}
+
+.update-item {
+  margin-bottom: 12px;
+}
+
+.update-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.update-status {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.update-status.ok {
+  color: #34c759;
+}
+
+.update-status.available {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.update-status.error {
+  color: var(--color-danger);
+}
+
+.update-check-btn {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--color-border-secondary);
+  background-color: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.update-check-btn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.update-check-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.update-download-link {
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-primary);
+  color: #ffffff;
+  text-decoration: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.2s;
+}
+
+.update-download-link:hover {
+  opacity: 0.85;
 }
 
 /* Remove custom input styles - use common modal styles instead */
