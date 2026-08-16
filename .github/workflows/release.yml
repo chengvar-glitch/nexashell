@@ -29,18 +29,9 @@ jobs:
           # Windows：NSIS 安装包
           - platform: windows-latest
             args: --bundles nsis
-          # Linux：deb + AppImage
-          - platform: ubuntu-22.04
-            args: --bundles deb,appimage
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
@@ -77,7 +68,6 @@ jobs:
 
             - **macOS**：`NexaShell_${{ github.ref_name }}_universal.dmg`（Apple Silicon + Intel）
             - **Windows**：`NexaShell_${{ github.ref_name }}_x64-setup.exe`
-            - **Linux**：`.deb` / `.AppImage`
 
             > 未经 Apple/微软签名，首次打开可能提示"无法验证开发者"，右键选择"打开"即可。
           releaseDraft: true # 草稿模式，确认无误后再手动点 Publish
