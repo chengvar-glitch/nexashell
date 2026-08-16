@@ -22,9 +22,9 @@ jobs:
       fail-fast: false # 一个平台失败不阻塞其他平台
       matrix:
         include:
-          # macOS：仅 Apple Silicon (aarch64)
+          # macOS：仅 Apple Silicon (aarch64)，只产出 DMG 安装包
           - platform: macos-latest
-            args: --target aarch64-apple-darwin --bundles app,dmg
+            args: --target aarch64-apple-darwin --bundles dmg
           # Windows：NSIS 安装包
           - platform: windows-latest
             args: --bundles nsis
