@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [1.10.1] - 2026-08-16
+
+### Fixed
+
+- 修复 cargo clippy `collapsible-if` 告警（`db/mod.rs` 隧道规则方向校验），使 CI 的 `clippy -D warnings` 通过
+
 ## [1.10.0] - 2026-08-16
 
 ### Added

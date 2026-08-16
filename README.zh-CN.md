@@ -4,7 +4,7 @@
 
 基于 **Rust** 与 **Vue 3** 构建的轻量级现代终端管理器与 SSH 客户端，以 Tauri 2 桌面应用形式打包分发。
 
-[![Version](https://img.shields.io/badge/Version-1.10.0-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/Version-1.10.1-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
 
 > 版本号以 `src-tauri/Cargo.toml` 为唯一来源（`prebuild` 会自动同步到 `package.json`）。发布历史见 [CHANGELOG.md](./CHANGELOG.md)。
 

@@ -1277,10 +1277,11 @@ pub fn update_tunnel_rule(
     target_port: Option<i64>,
     enabled: Option<bool>,
 ) -> Result<(), String> {
-    if let Some(ref d) = direction {
-        if d != "local" && d != "dynamic" {
-            return Err("direction must be 'local' or 'dynamic'".to_string());
-        }
+    if let Some(ref d) = direction
+        && d != "local"
+        && d != "dynamic"
+    {
+        return Err("direction must be 'local' or 'dynamic'".to_string());
     }
     let (sql, params_vec) = build_update(
         "tunnel_rules",
