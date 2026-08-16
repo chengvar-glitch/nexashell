@@ -1,6 +1,8 @@
 use crate::common::{OutputChunk, SessionId};
 use serde::Serialize;
-use ssh2::{ExtensiblePtyModeOpcode, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session};
+use ssh2::{
+    ExtensiblePtyModeOpcode, FileStat, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session,
+};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -55,6 +57,10 @@ pub enum SshError {
     /// Upload was cancelled by the user before it finished transferring.
     #[error("Upload cancelled by user")]
     UploadCancelled,
+
+    /// Download was cancelled by the user before it finished transferring.
+    #[error("Download cancelled by user")]
+    DownloadCancelled,
 }
 
 // ============================================================================
@@ -108,10 +114,27 @@ pub struct UploadProgress {
     pub error: Option<String>,
 }
 
+/// A single entry returned when listing a remote SFTP directory.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpEntry {
+    pub name: String,
+    /// Fully-qualified remote path for this entry.
+    pub path: String,
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub is_symlink: bool,
+    pub size: u64,
+    /// POSIX-ish permission bits (e.g. 0o755), may be None on some servers.
+    pub perms: Option<u32>,
+    /// Last modification time (unix seconds) if reported.
+    pub mtime: Option<u64>,
+}
+
 /// Authentication credentials retained for establishing secondary sessions
 /// (SFTP, monitoring, path probing) without affecting the interactive shell.
 #[derive(Clone)]
-struct SshAuth {
+pub(crate) struct SshAuth {
     username: String,
     password: String,
     private_key_path: Option<String>,
@@ -135,15 +158,27 @@ pub struct SshChannelInfo {
     pub initial_outputs: Arc<tokio::sync::Mutex<Vec<OutputChunk>>>,
     pub refresh_interval: Arc<AtomicU64>,
 
-    /// Auxiliary blocking session used for SFTP, monitoring, and path probing.
-    /// This runs on its own TCP connection and stays in blocking mode,
-    /// eliminating the blocking-mode race that previously froze terminals
-    /// during file uploads.
+    /// Connection credentials needed to open *additional* SSH sessions for
+    /// long-running SFTP transfers. Keeping these lets each transfer run on its
+    /// own connection so it does not block the shared `helper_sess` (which the
+    /// file browser / monitoring use). Credentials live only for the lifetime of
+    /// the session.
+    pub addr: String,
+    pub host_for_err: String,
+    pub port: u16,
+    pub(crate) auth: SshAuth,
+
+    /// Auxiliary blocking session used for SFTP browsing, monitoring, and path
+    /// probing. This runs on its own TCP connection and stays in blocking mode,
+    /// eliminating the blocking-mode race that previously froze terminals.
     pub helper_sess: Arc<tokio::sync::Mutex<Session>>,
 
     /// Active SFTP upload controls keyed by task id. Entries are inserted when
     /// an upload starts and removed when it terminates (success/error/cancel).
     pub uploads: Arc<RwLock<HashMap<String, Arc<UploadControl>>>>,
+
+    /// Active SFTP download controls keyed by task id, mirroring `uploads`.
+    pub downloads: Arc<RwLock<HashMap<String, Arc<UploadControl>>>>,
 
     pub input_listener_id: Option<tauri::EventId>,
     pub resize_listener_id: Option<tauri::EventId>,
@@ -231,6 +266,11 @@ impl SshManager {
             private_key_path: private_key_path.clone(),
             key_passphrase,
         };
+        // Retain clones so long-running SFTP transfers can open their own
+        // dedicated SSH connection (see `open_transfer_sftp`).
+        let stored_addr = addr.clone();
+        let stored_host = host_for_err.clone();
+        let stored_auth = auth.clone();
 
         // 1. Establish both sessions (interactive + helper) on separate TCP
         //    connections. Blocking work runs on spawn_blocking.
@@ -253,6 +293,7 @@ impl SshManager {
         let sess_arc = Arc::new(tokio::sync::Mutex::new(main_sess));
         let helper_arc = Arc::new(tokio::sync::Mutex::new(helper_sess));
         let uploads_map = Arc::new(RwLock::new(HashMap::new()));
+        let downloads_map = Arc::new(RwLock::new(HashMap::new()));
 
         let (input_listener_id, resize_listener_id) = if let Some(h) = &app_handle {
             let input_id = Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
@@ -295,8 +336,13 @@ impl SshManager {
                     stop_flag,
                     initial_outputs,
                     refresh_interval,
+                    addr: stored_addr,
+                    host_for_err: stored_host,
+                    port,
+                    auth: stored_auth,
                     helper_sess: helper_arc,
                     uploads: uploads_map,
+                    downloads: downloads_map,
                     input_listener_id,
                     resize_listener_id,
                     app_handle: app_handle.clone(),
@@ -1046,6 +1092,14 @@ impl SshManager {
                 }
             }
 
+            // Cancel any in-flight SFTP downloads the same way.
+            if let Ok(downloads) = info.downloads.read() {
+                for control in downloads.values() {
+                    control.cancel.store(true, Ordering::SeqCst);
+                    control.paused.1.notify_all();
+                }
+            }
+
             if let Some(ref app_handle) = info.app_handle {
                 if let Some(input_id) = info.input_listener_id.take() {
                     app_handle.unlisten(input_id);
@@ -1086,12 +1140,12 @@ impl SshManager {
         }
     }
 
-    /// Uploads a file via SFTP using the dedicated helper session.
+    /// Uploads a file via SFTP on its own dedicated SSH connection.
     ///
     /// The SFTP subsystem and remote file are opened **once** before the chunk
-    /// loop, which is dramatically faster than re-opening on every 512KB
-    /// chunk. Because the helper session runs in blocking mode on its own
-    /// TCP connection, there is no race with the interactive I/O task.
+    /// loop, which is dramatically faster than re-opening on every 512KB chunk.
+    /// Running on a dedicated connection (not the shared helper session) means a
+    /// long upload does not block the file browser / monitoring.
     pub fn upload_file_sftp(
         &self,
         app_handle: tauri::AppHandle,
@@ -1100,7 +1154,7 @@ impl SshManager {
         local_path: String,
         remote_path: String,
     ) -> Result<(), SshError> {
-        let (helper_sess, stop_flag, uploads) = {
+        let (addr, host_for_err, port, auth, stop_flag, uploads) = {
             let channels = self
                 .channels
                 .read()
@@ -1109,7 +1163,10 @@ impl SshManager {
                 .get(&session_id)
                 .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
             (
-                info.helper_sess.clone(),
+                info.addr.clone(),
+                info.host_for_err.clone(),
+                info.port,
+                info.auth.clone(),
                 info.stop_flag.clone(),
                 info.uploads.clone(),
             )
@@ -1155,13 +1212,12 @@ impl SshManager {
                 let mut last_progress_emit = std::time::Instant::now();
                 let mut last_progress_bytes: u64 = 0;
 
-                // Open SFTP subsystem and remote file ONCE. The file handle and
-                // the localized SFTP file pointer stay open across pause spans,
-                // so resume simply continues writing at the same offset.
-                let sess = helper_sess.blocking_lock();
-                let sftp = sess.sftp().map_err(|e| {
-                    SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
-                })?;
+                // Open SFTP subsystem and remote file ONCE on the dedicated
+                // transfer connection. The file handle and the localized SFTP
+                // file pointer stay open across pause spans, so resume simply
+                // continues writing at the same offset. (`sess` is kept alive
+                // because the Sftp borrows from it.)
+                let (sess, sftp) = Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
 
                 let mut remote_file = sftp
                     .open_mode(
@@ -1324,11 +1380,10 @@ impl SshManager {
                 Err(SshError::UploadCancelled) => {
                     log::info!("[SFTP {}] upload cancelled by user", sid);
                     // Delete the partial remote file left behind by the
-                    // interrupted transfer (best-effort). The blocking session
-                    // lock is already released once the closure unwound.
+                    // interrupted transfer (best-effort) on a fresh connection.
                     {
-                        let sess = helper_sess.blocking_lock();
-                        if let Ok(sftp) = sess.sftp() {
+                        let conn = Self::open_transfer_sftp(&addr, &host_for_err, port, &auth);
+                        if let Ok((_sess, sftp)) = conn {
                             let _ = sftp.unlink(Path::new(&remote_path));
                         }
                     }
@@ -1502,6 +1557,571 @@ impl SshManager {
         }
         Ok(())
     }
+
+    // ==========================================================================
+    // SFTP directory listing & file operations
+    // ==========================================================================
+
+    /// Resolve the `helper_sess` for a session, failing with SessionNotFound.
+    fn helper_session(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Arc<tokio::sync::Mutex<Session>>, SshError> {
+        let channels = self
+            .channels
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        let info = channels
+            .get(session_id)
+            .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+        Ok(info.helper_sess.clone())
+    }
+
+    /// Open a fully-authenticated SSH session over a new TCP connection and
+    /// start its SFTP subsystem. Used for long-running transfers so they do not
+    /// hold the shared helper-session lock (which the file browser relies on).
+    fn open_transfer_sftp(
+        addr: &str,
+        host_for_err: &str,
+        port: u16,
+        auth: &SshAuth,
+    ) -> Result<(Session, ssh2::Sftp), SshError> {
+        use std::net::ToSocketAddrs;
+
+        let socket_addr = addr
+            .to_socket_addrs()
+            .map_err(|e| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: format!("Failed to resolve address: {}", e),
+            })?
+            .next()
+            .ok_or_else(|| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: "No addresses found".to_string(),
+            })?;
+
+        let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(
+            |e| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: e.to_string(),
+            },
+        )?;
+        let sock = socket2::SockRef::from(&tcp);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(Duration::from_secs(15))
+            .with_interval(Duration::from_secs(5));
+        let _ = sock.set_tcp_keepalive(&keepalive);
+
+        let mut sess = Session::new().map_err(|e| {
+            SshError::OperationFailed(format!("Failed to create session: {}", e))
+        })?;
+        sess.set_timeout(60_000);
+        sess.set_tcp_stream(tcp);
+        sess.handshake()
+            .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
+        sess.set_timeout(0);
+
+        verify_host_key(&sess, host_for_err)?;
+        Self::authenticate_with(&sess, auth)?;
+
+        let sftp = sess.sftp().map_err(|e| {
+            SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+        })?;
+        Ok((sess, sftp))
+    }
+
+    /// Authenticate an SSH session with the given credentials, mirroring the
+    /// logic in `establish_sessions`.
+    fn authenticate_with(sess: &Session, auth: &SshAuth) -> Result<(), SshError> {
+        let mut authenticated = false;
+        if let Some(ref key_path) = auth.private_key_path {
+            let path = Path::new(key_path);
+            if path.exists() {
+                let key_result = if let Some(ref passphrase) = auth.key_passphrase {
+                    sess.userauth_pubkey_file(&auth.username, None, path, Some(passphrase))
+                } else {
+                    sess.userauth_pubkey_file(&auth.username, None, path, None)
+                };
+                match key_result {
+                    Ok(()) => authenticated = sess.authenticated(),
+                    Err(e) => {
+                        log::warn!(
+                            "Public key auth failed for '{}': {}; trying password",
+                            auth.username,
+                            e
+                        );
+                    }
+                }
+            } else {
+                log::warn!("Private key file not found: {}", key_path);
+            }
+        }
+
+        if !authenticated {
+            sess.userauth_password(&auth.username, &auth.password).map_err(|e| {
+                SshError::AuthenticationFailed(format!("Authentication failed: {}", e))
+            })?;
+        }
+
+        if !sess.authenticated() {
+            return Err(SshError::AuthenticationFailed(
+                "Authentication failed".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Join a remote path segment onto a base path, collapsing duplicate
+    /// slashes while preserving a leading slash for absolute paths.
+    fn join_remote_path(base: &str, name: &str) -> String {
+        if base == "/" {
+            format!("/{}", name)
+        } else if base.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", base.trim_end_matches('/'), name)
+        }
+    }
+
+    /// List the entries in a remote directory via the helper SFTP session.
+    pub async fn sftp_list_dir(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Vec<SftpEntry>, SshError> {
+        let helper_sess = self.helper_session(session_id)?;
+        let path = path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let sess = helper_sess.blocking_lock();
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            let entries = sftp.readdir(Path::new(&path)).map_err(|e| {
+                SshError::OperationFailed(format!("Failed to list {}: {}", path, e))
+            })?;
+
+            let mut result = Vec::with_capacity(entries.len());
+            for (pathbuf, stat) in entries {
+                let name = pathbuf
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if name == "." || name == ".." {
+                    continue;
+                }
+                let full_path = Self::join_remote_path(&path, &name);
+                result.push(SftpEntry {
+                    name,
+                    path: full_path,
+                    is_dir: stat.is_dir(),
+                    is_file: stat.is_file(),
+                    is_symlink: is_symlink(&stat),
+                    size: stat.size.unwrap_or(0),
+                    perms: stat.perm,
+                    mtime: stat.mtime,
+                });
+            }
+            Ok(result)
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Remove a remote file (`is_dir == false`) or an empty directory.
+    pub async fn sftp_remove(
+        &self,
+        session_id: &SessionId,
+        remote_path: &str,
+        is_dir: bool,
+    ) -> Result<(), SshError> {
+        let helper_sess = self.helper_session(session_id)?;
+        let remote_path = remote_path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let sess = helper_sess.blocking_lock();
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            if is_dir {
+                sftp.rmdir(Path::new(&remote_path)).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to remove directory {}: {}",
+                        remote_path, e
+                    ))
+                })
+            } else {
+                sftp.unlink(Path::new(&remote_path)).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to remove file {}: {}",
+                        remote_path, e
+                    ))
+                })
+            }
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Create a remote directory.
+    pub async fn sftp_mkdir(
+        &self,
+        session_id: &SessionId,
+        remote_path: &str,
+    ) -> Result<(), SshError> {
+        let helper_sess = self.helper_session(session_id)?;
+        let remote_path = remote_path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let sess = helper_sess.blocking_lock();
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            sftp.mkdir(Path::new(&remote_path), 0o755).map_err(|e| {
+                SshError::OperationFailed(format!(
+                    "Failed to create directory {}: {}",
+                    remote_path, e
+                ))
+            })
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Rename (or move) a remote file or directory.
+    pub async fn sftp_rename(
+        &self,
+        session_id: &SessionId,
+        old_path: &str,
+        new_path: &str,
+    ) -> Result<(), SshError> {
+        let helper_sess = self.helper_session(session_id)?;
+        let old_path = old_path.to_string();
+        let new_path = new_path.to_string();
+
+        tokio::task::spawn_blocking(move || {
+            let sess = helper_sess.blocking_lock();
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            sftp.rename(Path::new(&old_path), Path::new(&new_path), None).map_err(|e| {
+                SshError::OperationFailed(format!(
+                    "Failed to rename {} to {}: {}",
+                    old_path, new_path, e
+                ))
+            })
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    // ==========================================================================
+    // SFTP download
+    // ==========================================================================
+
+    /// Look up the per-task download control for a session/task, if present.
+    fn download_control(
+        &self,
+        session_id: &SessionId,
+        task_id: &str,
+    ) -> Result<Option<Arc<UploadControl>>, SshError> {
+        let channels = self
+            .channels
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        let info = channels
+            .get(session_id)
+            .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+        let downloads = info
+            .downloads
+            .read()
+            .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+        Ok(downloads.get(task_id).cloned())
+    }
+
+    /// Stream a remote file down to a local path, emitting progress events on
+    /// `ssh-download-progress-{sid}`. The download runs on its **own dedicated
+    /// SSH connection** (see `open_transfer_sftp`) so it never holds the shared
+    /// helper-session lock — the file browser stays responsive mid-transfer.
+    pub fn download_file_sftp(
+        &self,
+        app_handle: tauri::AppHandle,
+        session_id: SessionId,
+        task_id: String,
+        remote_path: String,
+        local_path: String,
+    ) -> Result<(), SshError> {
+        let (addr, host_for_err, port, auth, stop_flag, downloads) = {
+            let channels = self
+                .channels
+                .read()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            let info = channels
+                .get(&session_id)
+                .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?;
+            (
+                info.addr.clone(),
+                info.host_for_err.clone(),
+                info.port,
+                info.auth.clone(),
+                info.stop_flag.clone(),
+                info.downloads.clone(),
+            )
+        };
+
+        let watcher_app = app_handle.clone();
+        let watcher_sid = session_id.as_ref().to_string();
+        let watcher_task_id = task_id.clone();
+
+        // Register the per-task control so cancel commands can find it.
+        let control: Arc<UploadControl> = Arc::new(UploadControl::default());
+        {
+            let mut downloads = downloads
+                .write()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            downloads.insert(task_id.clone(), control.clone());
+        }
+        // Clean up the control entry once the download terminates.
+        let downloads_cleanup = downloads.clone();
+        let cleanup_task_id = task_id.clone();
+
+        let download_handle = tokio::task::spawn_blocking(move || {
+            let sid = session_id.as_ref().to_string();
+            let download_start = std::time::Instant::now();
+            let event_name = format!("ssh-download-progress-{}", sid);
+            let control = control.clone();
+
+            let result: Result<u64, SshError> = (|| {
+                // Dedicated connection for this transfer.
+                let (sess, sftp) =
+                    Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
+
+                let mut remote_file = sftp
+                    .open_mode(
+                        Path::new(&remote_path),
+                        OpenFlags::READ,
+                        0o644,
+                        OpenType::File,
+                    )
+                    .map_err(|e| {
+                        SshError::OperationFailed(format!(
+                            "Failed to open remote file {}: {}",
+                            remote_path, e
+                        ))
+                    })?;
+
+                let total_bytes = remote_file
+                    .stat()
+                    .map(|s| s.size.unwrap_or(0))
+                    .unwrap_or(0);
+
+                // Create parent directory & local file once before the loop.
+                if let Some(parent) = Path::new(&local_path).parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                let mut local_file = std::fs::File::create(&local_path).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to create local file {}: {}",
+                        local_path, e
+                    ))
+                })?;
+
+                let mut buffer = [0u8; 1024 * 512];
+                let mut total_written: u64 = 0;
+                let mut last_progress_emit = std::time::Instant::now();
+                let mut last_progress_bytes: u64 = 0;
+
+                loop {
+                    if control.cancel.load(Ordering::SeqCst) {
+                        return Err(SshError::DownloadCancelled);
+                    }
+                    if stop_flag.load(Ordering::SeqCst) {
+                        return Err(SshError::OperationFailed(
+                            "Download aborted: session disconnected".to_string(),
+                        ));
+                    }
+
+                    let n = remote_file.read(&mut buffer).map_err(|e| {
+                        SshError::OperationFailed(format!("Failed to read remote file: {}", e))
+                    })?;
+                    if n == 0 {
+                        break;
+                    }
+                    local_file.write_all(&buffer[..n]).map_err(|e| {
+                        SshError::OperationFailed(format!("Failed to write local file: {}", e))
+                    })?;
+                    total_written += n as u64;
+
+                    let time_elapsed =
+                        last_progress_emit.elapsed() >= std::time::Duration::from_millis(100);
+                    let bytes_moved =
+                        total_written.saturating_sub(last_progress_bytes) >= 1024 * 1024;
+                    if !time_elapsed && !bytes_moved {
+                        continue;
+                    }
+                    last_progress_emit = std::time::Instant::now();
+                    last_progress_bytes = total_written;
+
+                    let elapsed = download_start.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        total_written as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    let progress = if total_bytes > 0 {
+                        (total_written as f64 / total_bytes as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    let _ = app_handle.emit(
+                        &event_name,
+                        UploadProgress {
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
+                            progress,
+                            uploaded_bytes: total_written,
+                            total_bytes,
+                            status: "downloading".to_string(),
+                            message: format!(
+                                "Downloading... ({:.1} MB/s)",
+                                speed / 1024.0 / 1024.0
+                            ),
+                            speed,
+                            error: None,
+                        },
+                    );
+                }
+
+                local_file.flush().map_err(|e| {
+                    SshError::OperationFailed(format!("Failed to flush local file: {}", e))
+                })?;
+                drop(local_file);
+                drop(remote_file);
+                drop(sftp);
+                drop(sess);
+
+                Ok(total_written)
+            })();
+
+            match result {
+                Ok(total_bytes) => {
+                    let elapsed = download_start.elapsed().as_secs_f64();
+                    let speed = if elapsed > 0.0 {
+                        total_bytes as f64 / elapsed
+                    } else {
+                        0.0
+                    };
+                    let _ = app_handle.emit(
+                        &event_name,
+                        UploadProgress {
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
+                            progress: 100.0,
+                            uploaded_bytes: total_bytes,
+                            total_bytes,
+                            status: "success".to_string(),
+                            message: "Download completed successfully".to_string(),
+                            speed,
+                            error: None,
+                        },
+                    );
+                }
+                Err(SshError::DownloadCancelled) => {
+                    log::info!("[SFTP {}] download cancelled by user", sid);
+                    // Best-effort: remove the partial local file.
+                    let _ = std::fs::remove_file(&local_path);
+                    let _ = app_handle.emit(
+                        &event_name,
+                        UploadProgress {
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
+                            progress: 0.0,
+                            uploaded_bytes: 0,
+                            total_bytes: 0,
+                            status: "cancelled".to_string(),
+                            message: "Download cancelled".to_string(),
+                            speed: 0.0,
+                            error: None,
+                        },
+                    );
+                }
+                Err(e) => {
+                    log::error!("[SFTP {}] download failed: {}", sid, e);
+                    let _ = app_handle.emit(
+                        &event_name,
+                        UploadProgress {
+                            task_id: task_id.clone(),
+                            session_id: sid.clone(),
+                            progress: 0.0,
+                            uploaded_bytes: 0,
+                            total_bytes: 0,
+                            status: "error".to_string(),
+                            message: format!("Download failed: {}", e),
+                            speed: 0.0,
+                            error: Some(e.to_string()),
+                        },
+                    );
+                }
+            }
+
+            // Drop the per-task control reference so stale entries do not
+            // accumulate for terminated downloads.
+            if let Ok(mut downloads) = downloads_cleanup.write() {
+                downloads.remove(&cleanup_task_id);
+            }
+        });
+
+        tokio::spawn(async move {
+            if let Err(join_err) = download_handle.await {
+                log::error!("[SFTP download] task panicked: {}", join_err);
+                let _ = watcher_app.emit(
+                    &format!("ssh-download-progress-{}", watcher_sid),
+                    UploadProgress {
+                        task_id: watcher_task_id,
+                        session_id: watcher_sid,
+                        progress: 0.0,
+                        uploaded_bytes: 0,
+                        total_bytes: 0,
+                        status: "error".to_string(),
+                        message: "Download aborted: internal task failure".to_string(),
+                        speed: 0.0,
+                        error: Some(join_err.to_string()),
+                    },
+                );
+            }
+        });
+
+        Ok(())
+    }
+
+    /// Cancel a running SFTP download. The partial local file is removed by the
+    /// download loop once the cancel flag is observed.
+    pub fn cancel_download(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
+        if let Some(control) = self.download_control(session_id, task_id)? {
+            control.cancel.store(true, Ordering::SeqCst);
+            let (lock, cvar) = &*control.paused;
+            let mut paused = lock.lock().unwrap();
+            *paused = false;
+            cvar.notify_all();
+        }
+        Ok(())
+    }
+}
+
+/// Detect whether a `FileStat` represents a symbolic link from its permission
+/// bits (S_IFLNK = 0o120000). `FileStat` exposes `file_type()` but not a
+/// dedicated symlink accessor, so we decode the POSIX file-type bits here.
+fn is_symlink(stat: &FileStat) -> bool {
+    const S_IFMT: u32 = 0o170000;
+    const S_IFLNK: u32 = 0o120000;
+    match stat.perm {
+        Some(perm) => (perm & S_IFMT) == S_IFLNK,
+        None => false,
+    }
 }
 
 // ============================================================================
@@ -1635,6 +2255,92 @@ pub fn cancel_upload(
     state.cancel_upload(&SessionId::from(sessionId), &taskId)
 }
 
+/// List a remote directory via SFTP.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_list_dir(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    path: String,
+) -> Result<Vec<SftpEntry>, SshError> {
+    state.sftp_list_dir(&SessionId::from(sessionId), &path).await
+}
+
+/// Asynchronously stream a remote file to a local path, emitting progress.
+///
+/// MUST be `async`: `download_file_sftp` calls `tokio::task::spawn_blocking`,
+/// which panics ("no reactor running") if invoked from a synchronous Tauri
+/// command on the main thread. `async` lets Tauri run it inside its Tokio
+/// runtime, exactly like uploads.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_download_file(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    taskId: String,
+    remotePath: String,
+    localPath: String,
+) -> Result<(), SshError> {
+    state.download_file_sftp(
+        app_handle,
+        SessionId::from(sessionId),
+        taskId,
+        remotePath,
+        localPath,
+    )
+}
+
+/// Cancel a running SFTP download by task id.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn cancel_download(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    taskId: String,
+) -> Result<(), SshError> {
+    state.cancel_download(&SessionId::from(sessionId), &taskId)
+}
+
+/// Remove a remote file or empty directory.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_remove(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    remotePath: String,
+    isDir: bool,
+) -> Result<(), SshError> {
+    state
+        .sftp_remove(&SessionId::from(sessionId), &remotePath, isDir)
+        .await
+}
+
+/// Create a remote directory.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_mkdir(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    remotePath: String,
+) -> Result<(), SshError> {
+    state.sftp_mkdir(&SessionId::from(sessionId), &remotePath).await
+}
+
+/// Rename (or move) a remote file or directory.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_rename(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+    oldPath: String,
+    newPath: String,
+) -> Result<(), SshError> {
+    state
+        .sftp_rename(&SessionId::from(sessionId), &oldPath, &newPath)
+        .await
+}
+
 #[cfg(test)]
 mod upload_control_tests {
     use super::*;
@@ -1698,8 +2404,9 @@ mod upload_control_tests {
         assert!(!*lock.lock().unwrap());
     }
 
-    /// Build a SshManager with a single registered session carrying an uploads
-    /// map, so pause/resume/cancel can be exercised against the real lookup.
+    /// Build a SshManager with a single registered session carrying upload and
+    /// download maps, so pause/resume/cancel can be exercised against the real
+    /// lookup.
     fn manager_with_session() -> (SshManager, SessionId, Arc<UploadControl>) {
         use ssh2::Session as SshSession;
         use tokio::sync::mpsc;
@@ -1708,6 +2415,10 @@ mod upload_control_tests {
         let control = Arc::new(<UploadControl>::default());
         let uploads = Arc::new(RwLock::new(HashMap::from([(
             "task-1".to_string(),
+            control.clone(),
+        )])));
+        let downloads = Arc::new(RwLock::new(HashMap::from([(
+            "dl-task-1".to_string(),
             control.clone(),
         )])));
         let (tx, _rx) = mpsc::unbounded_channel::<String>();
@@ -1719,8 +2430,18 @@ mod upload_control_tests {
             stop_flag: Arc::new(AtomicBool::new(false)),
             initial_outputs: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             refresh_interval: Arc::new(AtomicU64::new(3000)),
+            addr: "127.0.0.1:22".to_string(),
+            host_for_err: "127.0.0.1:22".to_string(),
+            port: 22,
+            auth: SshAuth {
+                username: "test".to_string(),
+                password: "".to_string(),
+                private_key_path: None,
+                key_passphrase: None,
+            },
             helper_sess: Arc::new(tokio::sync::Mutex::new(SshSession::new().unwrap())),
             uploads,
+            downloads,
             input_listener_id: None,
             resize_listener_id: None,
             app_handle: None,
@@ -1812,4 +2533,54 @@ mod upload_control_tests {
         );
     }
 
+    // ---------------------------------------------------------------------
+    // Download control
+    // ---------------------------------------------------------------------
+
+    /// cancel on a registered download task sets the cancel flag.
+    #[test]
+    fn cancel_registered_download() {
+        let (manager, sid, control) = manager_with_session();
+        manager.cancel_download(&sid, "dl-task-1").unwrap();
+        assert!(
+            control.cancel.load(Ordering::SeqCst),
+            "cancel_download should set the flag"
+        );
+    }
+
+    /// cancel on an unknown download task id is a no-op that still returns Ok.
+    #[test]
+    fn cancel_unknown_download_is_noop() {
+        let (manager, sid, _control) = manager_with_session();
+        manager.cancel_download(&sid, "missing").unwrap();
+    }
+
+    /// cancel on an unknown session returns SessionNotFound.
+    #[test]
+    fn cancel_download_unknown_session_error() {
+        let (manager, _sid, _control) = manager_with_session();
+        let ghost = SessionId::from("ghost");
+        let err = manager.cancel_download(&ghost, "dl-task-1").unwrap_err();
+        assert!(matches!(err, SshError::SessionNotFound(_)));
+    }
+
+    /// disconnect_ssh also cancels in-flight downloads.
+    #[test]
+    fn disconnect_cancels_downloads() {
+        let (manager, sid, control) = manager_with_session();
+        manager.disconnect_ssh(&sid).unwrap();
+        assert!(
+            control.cancel.load(Ordering::SeqCst),
+            "disconnect should cancel in-flight downloads too"
+        );
+    }
+
+    /// Remote path joining collapses duplicate slashes and preserves the root.
+    #[test]
+    fn join_remote_path_handles_root_and_trailing_slash() {
+        assert_eq!(SshManager::join_remote_path("/", "home"), "/home");
+        assert_eq!(SshManager::join_remote_path("/a/b", "c"), "/a/b/c");
+        assert_eq!(SshManager::join_remote_path("/a/b/", "c"), "/a/b/c");
+        assert_eq!(SshManager::join_remote_path("", "file"), "file");
+    }
 }

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
+import { ref, onMounted, onUnmounted, watch, nextTick, computed, onErrorCaptured } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { ServerStatus, UploadTask } from '@/core/types';
+import SftpBrowser from './SftpBrowser.vue';
 import {
   formatBytes,
   formatSizeMiB,
@@ -31,15 +32,21 @@ import {
   PauseCircle,
   Play,
   FileUp,
+  FileDown,
+  Folder,
   LayoutDashboard,
 } from 'lucide-vue-next';
 
 interface Props {
   show: boolean;
-  activeTab: 'system' | 'uploads' | null;
+  activeTab: 'system' | 'uploads' | 'files' | null;
   sessionId: string;
   history?: ServerStatus[];
   uploadTasks?: UploadTask[];
+  /** Remote working dir of the terminal, used to open the file list there. */
+  initialRemotePath?: string;
+  /** Bumped when the user re-triggers "reveal at current dir" to remount the list. */
+  filesRevealKey?: number;
 }
 
 const props = defineProps<Props>();
@@ -51,7 +58,19 @@ const emit = defineEmits([
   'pause-task',
   'resume-task',
   'cancel-task',
+  'download-entry',
 ]);
+
+// Safety net: if the SFTP browser throws while rendering, contain the error and
+// show a fallback instead of letting it freeze the whole dashboard.
+const filesRenderError = ref('');
+onErrorCaptured((err) => {
+  if (props.activeTab === 'files') {
+    filesRenderError.value =
+      err instanceof Error ? err.message : String(err);
+  }
+  return false; // handled here; stop propagation to the app root
+});
 
 const localHistory = ref<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -71,11 +90,14 @@ const uploadTasksData = computed(() => props.uploadTasks || []);
 
 const hasActiveUploads = computed(() =>
   uploadTasksData.value.some(
-    t => t.status === 'uploading' || t.status === 'pending'
+    t =>
+      t.status === 'uploading' ||
+      t.status === 'downloading' ||
+      t.status === 'pending'
   )
 );
 
-const toggleTab = (tab: 'system' | 'uploads') => {
+const toggleTab = (tab: 'system' | 'uploads' | 'files') => {
   if (props.activeTab === tab) {
     emit('update:active-tab', null);
   } else {
@@ -118,6 +140,8 @@ const getTaskStatusColor = (status: UploadTask['status']) => {
       return '#facc15'; // Amber
     case 'uploading':
       return '#3b82f6'; // Blue
+    case 'downloading':
+      return '#8b5cf6'; // Purple
     case 'pending':
       return '#f97316'; // Orange
     default:
@@ -137,6 +161,8 @@ const getTaskStatusIcon = (status: UploadTask['status']) => {
       return PauseCircle;
     case 'uploading':
       return Activity;
+    case 'downloading':
+      return FileDown;
     case 'pending':
       return Clock;
     default:
@@ -818,7 +844,11 @@ watch(
                       class="task-path"
                       :title="task.remotePath"
                     >
-                      {{ t('dashboard.to') }}: {{ task.remotePath }}
+                      {{
+                        task.direction === 'download'
+                          ? `${t('dashboard.from')}: ${task.remotePath}`
+                          : `${t('dashboard.to')}: ${task.remotePath}`
+                      }}
                     </span>
                   </div>
                 </div>
@@ -836,7 +866,11 @@ watch(
                 </div>
                 <span class="progress-text">{{ task.progress }}%</span>
               </div>
-              <div v-if="task.fileSize" class="task-metrics">
+              <div
+                v-if="task.fileSize"
+                class="task-metrics"
+                :class="{ 'is-download': task.direction === 'download' }"
+              >
                 <div class="metric">
                   <HardDrive :size="10" class="metric-icon" />
                   <span class="metric-value">{{
@@ -850,7 +884,11 @@ watch(
                   }}</span>
                 </div>
                 <div
-                  v-if="task.status === 'uploading' && task.eta"
+                  v-if="
+                    (task.status === 'uploading' ||
+                      task.status === 'downloading') &&
+                    task.eta
+                  "
                   class="metric"
                 >
                   <Clock :size="10" class="metric-icon" />
@@ -869,11 +907,21 @@ watch(
                 {{ task.message }}
               </p>
 
-              <!-- Upload actions: pause for uploading, resume for paused,
-                   cancel for both. -->
-              <div v-if="task.status === 'uploading' || task.status === 'paused'" class="task-actions">
+              <!-- Transfer actions: pause for uploading, resume for paused,
+                   cancel for both. Downloads only support cancel. -->
+              <div
+                v-if="
+                  task.status === 'uploading' ||
+                  task.status === 'downloading' ||
+                  task.status === 'paused'
+                "
+                class="task-actions"
+              >
                 <button
-                  v-if="task.status === 'paused'"
+                  v-if="
+                    task.status === 'paused' &&
+                    task.direction !== 'download'
+                  "
                   type="button"
                   class="task-action-btn"
                   :title="t('upload.resume')"
@@ -912,6 +960,33 @@ watch(
               <span>{{ t('dashboard.clearAll') }}</span>
             </button>
           </div>
+        </div>
+      </div>
+
+      <!-- Files (SFTP) Section -->
+      <div
+        class="accordion-item"
+        :class="{ 'is-active': activeTab === 'files' }"
+      >
+        <button class="accordion-header" @click="toggleTab('files')">
+          <ChevronDown :size="14" class="chevron" />
+          <Folder :size="14" class="section-icon" />
+          <span class="section-title">{{ t('dashboard.files') }}</span>
+        </button>
+
+        <div v-if="activeTab === 'files'" class="accordion-content files-content">
+          <div v-if="filesRenderError" class="files-render-error">
+            <AlertCircle :size="18" />
+            <p>{{ t('sftp.renderError') }}</p>
+            <pre>{{ filesRenderError }}</pre>
+          </div>
+          <SftpBrowser
+            v-else
+            :key="`sftp-${props.filesRevealKey ?? 0}`"
+            :session-id="props.sessionId"
+            :initial-path="props.initialRemotePath"
+            @download="emit('download-entry', $event)"
+          />
         </div>
       </div>
     </div>

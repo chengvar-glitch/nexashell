@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import ServerDashboard from './ServerDashboard.vue';
+import { FolderOpen } from 'lucide-vue-next';
 import { useI18n } from 'vue-i18n';
 import {
   useRemotePath,
@@ -26,9 +27,9 @@ const sessionStore = useSessionStore();
 const settingsStore = useSettingsStore();
 
 const showDashboard = ref(false);
-const activeDashboardTab = ref<'system' | 'uploads' | null>('system');
+const activeDashboardTab = ref<'system' | 'uploads' | 'files' | null>('system');
 
-import type { ServerStatus, UploadTask } from '@/core/types';
+import type { ServerStatus, UploadTask, SftpEntry } from '@/core/types';
 
 const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -104,6 +105,32 @@ const {
   detectRemotePath,
 } = useRemotePath();
 
+/**
+ * The remote path the SFTP file list should open to: prefer the terminal's
+ * last-known absolute CWD, falling back to the remote home when known, then "/".
+ */
+const dashboardInitialPath = computed(() => {
+  if (lastKnownAbsolutePath.value.startsWith('/')) {
+    return lastKnownAbsolutePath.value;
+  }
+  if (currentRemotePath.value.startsWith('/')) {
+    return currentRemotePath.value;
+  }
+  return remoteHomeDir.value || '/';
+});
+
+/** Open the file list panel and navigate it to the terminal's current dir. */
+const revealNonce = ref(0);
+const openFilesAtCurrentDir = () => {
+  // Force the Files tab to stay open; toggling from system/uploads never
+  // selects it, so explicitly set it.
+  showDashboard.value = true;
+  activeDashboardTab.value = 'files';
+  // Bump the nonce so an already-open file list remounts and re-navigates to
+  // the latest CWD.
+  revealNonce.value += 1;
+};
+
 let terminal: Terminal | null = null;
 let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
@@ -113,8 +140,8 @@ let disposeIMEFix: (() => void) | null = null;
 
 const uploadTasks = shallowRef<UploadTask[]>([]);
 
-const addUploadTask = (fileName: string): string => {
-  const id = `upload-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+const addUploadTask = (fileName: string, direction: 'upload' | 'download' = 'upload'): string => {
+  const id = `transfer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   // Replace the array reference so the dashboard's `props.uploadTasks`
   // reference changes and the task list re-renders (in-place unshift keeps
   // the same reference, so the list never updates).
@@ -122,6 +149,7 @@ const addUploadTask = (fileName: string): string => {
     {
       id,
       fileName,
+      direction,
       status: 'pending',
       progress: 0,
       message: 'Preparing...',
@@ -130,6 +158,64 @@ const addUploadTask = (fileName: string): string => {
     ...uploadTasks.value,
   ];
   return id;
+};
+
+/**
+ * Add a download task to the shared transfer queue and start streaming the
+ * remote file to the chosen local path. The save-path dialog runs first.
+ */
+const handleSftpDownload = async (entry: SftpEntry) => {
+  try {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const localPath = await save({ defaultPath: entry.name });
+    if (!localPath) return; // user cancelled the dialog
+
+    const taskId = addUploadTask(entry.name, 'download');
+    updateUploadTask(taskId, {
+      remotePath: entry.path,
+      localPath,
+      status: 'downloading',
+      progress: 5,
+      message: t('download.preparing'),
+      fileSize: entry.size,
+    });
+
+    try {
+      logger.info('Starting SFTP download', {
+        taskId,
+        remotePath: entry.path,
+        localPath,
+      });
+      invoke('sftp_download_file', {
+        sessionId: props.sessionId,
+        taskId,
+        remotePath: entry.path,
+        localPath,
+      }).catch(err => {
+        const errorMessage =
+          err instanceof Error ? err.message : String(err);
+        updateUploadTask(taskId, {
+          status: 'error',
+          progress: 0,
+          message: `Failed to start: ${errorMessage}`,
+          error: errorMessage,
+        });
+        logger.error('Failed to start download', err);
+      });
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error ? err.message : String(err);
+      updateUploadTask(taskId, {
+        status: 'error',
+        progress: 0,
+        message: `Failed to start: ${errorMessage}`,
+        error: errorMessage,
+      });
+      logger.error('Failed to start download', err);
+    }
+  } catch (err) {
+    logger.error('Save dialog or download setup failed', err);
+  }
 };
 
 const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
@@ -153,10 +239,11 @@ const removeUploadTask = (id: string) => {
 };
 
 const clearUploadTasks = () => {
-  // Only clear completed and error tasks, keep uploading/pending/paused tasks
+  // Only clear completed and error tasks, keep in-flight tasks
   uploadTasks.value = uploadTasks.value.filter(
     task =>
       task.status === 'uploading' ||
+      task.status === 'downloading' ||
       task.status === 'pending' ||
       task.status === 'paused'
   );
@@ -252,6 +339,7 @@ let unlistenDrag: UnlistenFn | null = null;
 let unlistenDragEnter: UnlistenFn | null = null;
 let unlistenDragLeave: UnlistenFn | null = null;
 let unlistenUpload: UnlistenFn | null = null;
+let unlistenDownload: UnlistenFn | null = null;
 let pendingResizeTimer: ReturnType<typeof setTimeout> | null = null;
 let handleTerminalContextMenu: ((e: MouseEvent) => void) | null = null;
 
@@ -456,18 +544,20 @@ const resumeUploadTask = async (taskId: string) => {
   }
 };
 
-/** Cancel a running or paused upload. */
+/** Cancel a running or paused upload/download task. */
 const cancelUploadTask = async (taskId: string) => {
+  const task = uploadTasks.value.find(t => t.id === taskId);
+  const isDownload = task?.direction === 'download';
   // Optimistically remove the task so the list is clean instantly. If the
   // backend cancellation fails, surface an error entry so the user knows.
   removeUploadTask(taskId);
   try {
-    await invoke('cancel_upload', {
+    await invoke(isDownload ? 'cancel_download' : 'cancel_upload', {
       sessionId: props.sessionId,
       taskId,
     });
   } catch (err) {
-    logger.error('Failed to cancel upload', err);
+    logger.error('Failed to cancel transfer', err);
     const previous = uploadTasks.value.find(t => t.id === taskId);
     // Re-insert a terminal error entry (the cancelled-pending remote file may
     // be left behind if the backend cancellation truly failed).
@@ -948,6 +1038,7 @@ const cleanupResources = async (): Promise<void> => {
   if (unlistenDragEnter) await unlistenDragEnter();
   if (unlistenDragLeave) await unlistenDragLeave();
   if (unlistenUpload) await unlistenUpload();
+  if (unlistenDownload) await unlistenDownload();
 };
 
 /**
@@ -982,6 +1073,40 @@ const initialize = async (): Promise<void> => {
       if (payload.sessionId === props.sessionId) {
         updateUploadTask(payload.taskId, {
           status: payload.status,
+          progress: Math.floor(payload.progress),
+          message: payload.message,
+          uploadedBytes: payload.uploadedBytes,
+          fileSize: payload.totalBytes,
+          speed: payload.speed,
+          error: payload.error || undefined,
+          eta:
+            payload.speed > 0
+              ? (payload.totalBytes - payload.uploadedBytes) / payload.speed
+              : undefined,
+        });
+      }
+    }
+  );
+
+  // Listen for session-specific download progress
+  unlistenDownload = await listen<UploadProgressPayload>(
+    `ssh-download-progress-${props.sessionId}`,
+    event => {
+      const payload = event.payload;
+      if (payload.sessionId === props.sessionId) {
+        // Map the backend "downloading" status to the transfer queue, and
+        // retain the original direction on the queued task so the cancel
+        // routing and the queue rendering stay correct.
+        const nextStatus =
+          payload.status === 'success' ||
+          payload.status === 'error' ||
+          payload.status === 'cancelled' ||
+          payload.status === 'downloading'
+            ? payload.status
+            : 'downloading';
+        updateUploadTask(payload.taskId, {
+          direction: 'download',
+          status: nextStatus as UploadTask['status'],
           progress: Math.floor(payload.progress),
           message: payload.message,
           uploadedBytes: payload.uploadedBytes,
@@ -1290,14 +1415,28 @@ const initialize = async (): Promise<void> => {
       :session-id="props.sessionId"
       :history="statusHistory"
       :upload-tasks="uploadTasks"
+      :initial-remote-path="dashboardInitialPath"
+      :files-reveal-key="revealNonce"
       @clear-tasks="clearUploadTasks"
       @toggle="showDashboard = !showDashboard"
       @update:active-tab="activeDashboardTab = $event"
       @pause-task="pauseUploadTask"
       @resume-task="resumeUploadTask"
       @cancel-task="cancelUploadTask"
+      @download-entry="handleSftpDownload"
     />
     <div ref="terminalRef" class="terminal-container" />
+
+    <!-- Quick jump: open the file list at the terminal's current directory -->
+    <button
+      type="button"
+      class="reveal-files-btn"
+      :class="{ active: showDashboard && activeDashboardTab === 'files' }"
+      :title="t('sftp.openHere')"
+      @click="openFilesAtCurrentDir"
+    >
+      <FolderOpen :size="14" />
+    </button>
 
     <!-- Drag and Drop Overlay -->
     <div v-if="isDragging" class="drag-drop-overlay">
@@ -1427,6 +1566,35 @@ const initialize = async (): Promise<void> => {
   padding: 10px;
   box-sizing: border-box;
   position: relative;
+}
+
+/* Floating "open file list at current dir" button (bottom-right, low-key). */
+.reveal-files-btn {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  z-index: 90;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border-secondary, #333);
+  border-radius: 8px;
+  background: rgba(45, 45, 45, 0.85);
+  color: var(--color-text-secondary, #9d9d9d);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.reveal-files-btn:hover {
+  background: rgba(60, 60, 60, 0.9);
+  color: var(--color-text-primary, #fff);
+  border-color: var(--color-border-primary, #555);
+}
+.reveal-files-btn.active {
+  color: var(--color-accent, #facc15);
+  border-color: var(--color-accent, #facc15);
+  background: rgba(250, 204, 21, 0.12);
 }
 
 .terminal-search-box {

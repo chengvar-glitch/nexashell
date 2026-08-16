@@ -26,7 +26,16 @@ export interface UploadTask {
   id: string;
   fileName: string;
   remotePath?: string;
-  status: 'pending' | 'uploading' | 'paused' | 'success' | 'error' | 'cancelled';
+  localPath?: string;
+  direction?: 'upload' | 'download';
+  status:
+    | 'pending'
+    | 'uploading'
+    | 'downloading'
+    | 'paused'
+    | 'success'
+    | 'error'
+    | 'cancelled';
   progress: number;
   message: string;
   timestamp: number;
@@ -36,6 +45,18 @@ export interface UploadTask {
   startTime?: number;
   speed?: number;
   eta?: number;
+}
+
+/** A single entry returned when listing a remote SFTP directory. */
+export interface SftpEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isFile: boolean;
+  isSymlink: boolean;
+  size: number;
+  perms?: number;
+  mtime?: number;
 }
 
 /** Format a byte count into a human-readable string (e.g. "1.2 MB"). */

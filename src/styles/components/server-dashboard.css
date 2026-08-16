@@ -332,6 +332,7 @@
   flex: 1;
   order: -1; /* Open item is always at the top */
   overflow: hidden;
+  min-height: 0; /* allow the active item to shrink so its content can scroll */
 }
 
 .accordion-item:not(.is-active) {
@@ -435,6 +436,53 @@
 
 .accordion-content.uploads-content {
   gap: 8px;
+}
+
+/* SFTP browser fills the available panel height and scrolls internally. */
+.accordion-item.is-active .accordion-content.files-content {
+  /* `auto` both clips (so a tall list can't overlap the accordion headers
+     below) and provides a fallback scroll if the inner flex sizing fails. */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.accordion-content.files-content {
+  gap: 4px;
+  flex: 1;
+  min-height: 0;
+}
+
+.sftp-browser,
+.accordion-item.is-active .files-content .sftp-browser {
+  flex: 1;
+  min-height: 0;
+}
+
+.files-render-error {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #ef4444;
+  text-align: center;
+  padding: 16px;
+}
+.files-render-error p {
+  margin: 0;
+  font-size: 12px;
+}
+.files-render-error pre {
+  margin: 0;
+  max-width: 100%;
+  overflow: auto;
+  font-size: 10px;
+  color: #9d9d9d;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .metric-section {
@@ -718,6 +766,12 @@
 .progress-fill-uploading {
   background-color: #3b82f6;
   box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.progress-fill-downloading {
+  background-color: #8b5cf6;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
   animation: pulse 2s ease-in-out infinite;
 }
 

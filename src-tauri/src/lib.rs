@@ -22,6 +22,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(log_builder.build())
         .manage(SshManager::default())
         .manage(TerminalManager::default())
@@ -90,6 +91,12 @@ pub fn run() {
             ssh::resume_upload,
             ssh::cancel_upload,
             ssh::set_ssh_status_refresh_rate,
+            ssh::sftp_list_dir,
+            ssh::sftp_download_file,
+            ssh::cancel_download,
+            ssh::sftp_remove,
+            ssh::sftp_mkdir,
+            ssh::sftp_rename,
             terminal::connect_local,
             terminal::disconnect_local,
             db::add_session,
