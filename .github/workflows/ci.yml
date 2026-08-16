@@ -29,13 +29,16 @@ jobs:
 
       - name: Type-check
         run: |
-          echo "bun: $(bun --version)"
-          echo "vue-tsc: $(bunx --bun vue-tsc --version 2>&1 || true)"
-          echo "typescript: $(bun -e 'console.log(require("typescript/package.json").version)' 2>&1)"
+          set +e
+          echo "::error::DIAG bun=$(bun --version)"
+          echo "::error::DIAG vue-tsc=$(bunx --bun vue-tsc --version 2>&1 || echo N/A)"
+          echo "::error::DIAG typescript=$(bun -e 'console.log(require("typescript/package.json").version)' 2>&1)"
           bun run type-check --pretty false 2>&1
-          exit_code=$?
-          echo "VUE_TSC_EXIT=$exit_code"
-          exit $exit_code
+          rc=$?
+          echo "::error::DIAG VUE_TSC_EXIT=$rc"
+          bunx --bun tsc --noEmit --pretty false 2>&1
+          echo "::error::DIAG PLAIN_TSC_EXIT=$?"
+          exit $rc
 
       - name: Unit tests
         run: bun run test
