@@ -283,8 +283,8 @@ const startRefreshTimer = (): void => {
     if (props.sessionId) {
       void tunnelApi
         .listTunnelStatus(props.sessionId)
-        .then(statuses => {
-          statuses.value = statuses;
+        .then(list => {
+          statuses.value = list;
         })
         .catch(e => logger.warn('Failed to refresh tunnel status', e));
     }

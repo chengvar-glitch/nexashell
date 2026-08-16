@@ -135,6 +135,7 @@ const draft = ref<SnippetDraft>({ name: '', command: '', description: '' });
 const activeSessionHint = ref('');
 
 interface TabLike {
+  id: string;
   type: string;
   panes?: Array<{ id: string; type?: string }>;
 }

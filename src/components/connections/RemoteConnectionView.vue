@@ -287,7 +287,7 @@ interface UploadProgressPayload {
   progress: number;
   uploadedBytes: number;
   totalBytes: number;
-  status: 'uploading' | 'paused' | 'success' | 'error' | 'cancelled';
+  status: 'uploading' | 'paused' | 'downloading' | 'success' | 'error' | 'cancelled';
   message: string;
   speed: number;
   error?: string;
