@@ -326,32 +326,24 @@ onMounted(async () => {
     }) as (...args: unknown[]) => void)
   );
 
-  // Global right-click handling: prevent browser default menu in production
-  // but only when clicking on empty areas (not on interactive components)
+  // Global right-click handling: suppress the browser's default context menu
+  // (Inspect Element / Reload etc.) across the whole window — it reads as
+  // "web" on a desktop app. Only text-editing elements keep the native menu
+  // (copy/paste, incl. password fields) and the terminal keeps its own custom
+  // menu (its handler runs closer to the target and preventDefaults first).
+  // Unlike before, this applies in dev too — the menu is noise everywhere.
   __globalContextMenuHandler = (e: MouseEvent) => {
-    // Keep default menu in dev for debugging (Inspect Element)
-    if (import.meta.env.DEV) return;
-
     const target = e.target as HTMLElement | null;
     if (!target) return;
 
-    // Elements that should keep native/context menu
+    // Elements that should keep a native/context menu
     const interactiveSelector = [
       'a',
-      'button',
       'input',
       'textarea',
       'select',
       '[contenteditable]',
-      '.session-card',
-      '.session-grid',
-      '.search-container',
-      '.search-input',
-      '.terminal-container',
-      '.modal-content',
-      '.dropdown-menu',
-      '.connect-hint',
-      '.favorite-btn',
+      '.terminal-container', // owns its own right-click menu
     ].join(',');
 
     if (target.closest(interactiveSelector)) {

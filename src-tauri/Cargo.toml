@@ -1,6 +1,6 @@
 [package]
 name = "NexaShell"
-version = "1.9.6"
+version = "1.9.7"
 description = "This is a modern SSH client."
 authors = ["ChengVar <chengver@gmail.com>"]
 edition = "2024"

@@ -1,7 +1,7 @@
 {
   "name": "nexashell",
   "private": true,
-  "version": "1.9.6",
+  "version": "1.9.7",
   "type": "module",
   "engines": {
     "bun": ">=1.0.0"
