@@ -343,6 +343,10 @@ onBeforeUnmount(() => {
   // Cancel any pending connection timers before the component is destroyed
   clearPendingTimeouts();
   clearSuccessTimeouts();
+  if (connectionTimerInterval) {
+    clearInterval(connectionTimerInterval);
+    connectionTimerInterval = null;
+  }
 
   // Clean up all sessions using Pinia store
   sessionStore.cleanupAllSessions().catch(error => {

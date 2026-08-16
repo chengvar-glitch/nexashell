@@ -34,27 +34,45 @@ import type { ServerStatus, UploadTask } from '@/core/types';
 
 const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
+// Always keep the most recent snapshot so state isn't lost while the panel is
+// hidden, but only rebuild the chart history array while the dashboard is
+// visible (avoids re-allocation + full SVG recompute every poll when closed).
+const latestStatus = shallowRef<ServerStatus | null>(null);
 let statusUnlisten: UnlistenFn | null = null;
+let lastStatusSession = '';
 
 const setupStatusListener = async () => {
   if (statusUnlisten) statusUnlisten();
-  statusHistory.value = []; // Clear history for new session
+  // Reset history only when the session changed (first mount or a new
+  // session); re-activating the same tab keeps its existing buffer.
+  if (lastStatusSession !== props.sessionId) {
+    statusHistory.value = [];
+    latestStatus.value = null;
+    lastStatusSession = props.sessionId;
+  }
   if (!props.sessionId) return;
 
   statusUnlisten = await listen<ServerStatus>(
     `ssh-status-${props.sessionId}`,
     event => {
-      // Replace the array reference (instead of in-place push) so the child
-      // ServerDashboard's `props.history` reference actually changes and its
-      // computed metrics re-evaluate. With shallowRef + `triggerRef`, an
-      // in-place push keeps the same array reference, so the dashboard never
-      // repaints and the status center stays blank/zeros.
+      latestStatus.value = event.payload;
+      if (!showDashboard.value) return;
       const next = statusHistory.value.concat(event.payload);
       statusHistory.value =
         next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
     }
   );
 };
+
+// When the sidebar is reopened, backfill the visible history from the latest
+// snapshot so the charts don't start empty after being hidden.
+watch(showDashboard, shown => {
+  if (shown && latestStatus.value) {
+    const next = statusHistory.value.concat(latestStatus.value);
+    statusHistory.value =
+      next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
+  }
+});
 
 // Terminal configuration constants - Now acting as defaults or base
 const TERMINAL_CONFIG = {
@@ -657,23 +675,16 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
     }
 
     if (props.tabType !== 'terminal') {
-      if (sessionExists) {
-        // The session was already connected before this component mounted
-        // (App.vue connects first, then mounts the tab). The welcome banner
-        // was streamed before our listener existed — recover it from the
-        // backend's initial-output buffer. Poll briefly: on very fast
-        // connections the buffer may still be filling up.
-        for (let attempt = 0; attempt < 12; attempt++) {
-          if (await writeBufferedOutput()) return;
-          await new Promise(resolve => setTimeout(resolve, 300));
-        }
-      } else {
-        // Fresh connection: wait for the backend to complete its ~2s
-        // initial buffering phase so the full welcome sequence is captured,
-        // then replay it (live events already wrote most of it; this covers
-        // any gap).
-        await new Promise(resolve => setTimeout(resolve, 2100));
-        await writeBufferedOutput();
+      // The welcome banner / MOTD is buffered by the backend for a short
+      // window after connect. Poll the buffer instead of sleeping a fixed
+      // amount so we return as soon as content is ready (and never block on a
+      // magic timer). `writeBufferedOutput` dedupes against live events.
+      const maxAttempts = 14;
+      let attempts = 0;
+      while (attempts < maxAttempts) {
+        if (await writeBufferedOutput()) break;
+        attempts += 1;
+        await new Promise(resolve => setTimeout(resolve, 200));
       }
     }
   } catch (error) {
@@ -887,13 +898,22 @@ onActivated(() => {
         });
       }
     }
+    // Re-establish the metrics listener that was torn down on deactivate.
+    void setupStatusListener();
   });
   window.addEventListener('resize', handleResize);
 });
 
-// Handle deactivation (KeepAlive) — stop listening to resize
+// Handle deactivation (KeepAlive) — stop listening to resize, and drop the
+// periodic status-metrics listener for this hidden tab so its per-poll chart
+// recomputation doesn't keep churning in the background. (Terminal output is
+// intentionally left flowing to keep the buffer in sync.)
 onDeactivated(() => {
   window.removeEventListener('resize', handleResize);
+  if (statusUnlisten) {
+    statusUnlisten();
+    statusUnlisten = null;
+  }
 });
 
 /**

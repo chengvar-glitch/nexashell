@@ -965,3 +965,16 @@
   border-radius: 50%;
   flex-shrink: 0;
 }
+
+/* Respect reduced-motion: turn off decorative loop animations, keeping the
+   static glow look but without continuous paint/repaint for sensitive users. */
+@media (prefers-reduced-motion: reduce) {
+  .header-icon-wrapper,
+  .icon-glow,
+  .toggle-handle::after,
+  .toggle-handle.has-active,
+  .progress-fill-uploading,
+  .progress-fill-downloading {
+    animation: none !important;
+  }
+}
