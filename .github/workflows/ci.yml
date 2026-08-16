@@ -28,7 +28,14 @@ jobs:
         run: bun run lint:check
 
       - name: Type-check
-        run: bun run type-check
+        run: |
+          echo "bun: $(bun --version)"
+          echo "vue-tsc: $(bunx --bun vue-tsc --version 2>&1 || true)"
+          echo "typescript: $(bun -e 'console.log(require("typescript/package.json").version)' 2>&1)"
+          bun run type-check --pretty false 2>&1
+          exit_code=$?
+          echo "VUE_TSC_EXIT=$exit_code"
+          exit $exit_code
 
       - name: Unit tests
         run: bun run test
