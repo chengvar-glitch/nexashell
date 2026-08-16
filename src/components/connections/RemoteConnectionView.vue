@@ -867,6 +867,14 @@ function applyTerminalTheme() {
     themeManager.getActualTheme()
   );
   terminal.options.theme = toXtermTheme(theme);
+  // Keep the area around the terminal screen theme-colored. fit() floors the
+  // row count, so the screen is a few px shorter than the container; the
+  // leftover strip sits on the container background (the xterm viewport is
+  // transparent, see CSS) — paint it with the theme background so light
+  // themes don't show a black/white bar at the bottom.
+  if (terminalRef.value) {
+    terminalRef.value.style.backgroundColor = theme.background;
+  }
 }
 
 // Watch for the terminal theme setting, and re-apply on app light/dark changes
@@ -1137,6 +1145,10 @@ const initialize = async (): Promise<void> => {
   }
 
   terminal.open(terminalRef.value);
+
+  // Paint the container background with the terminal theme color (keeps the
+  // strip below the fitted screen invisible in any theme).
+  applyTerminalTheme();
 
   disposeIMEFix = attachMacWebKitIMESymbolFix(terminal);
 
@@ -1751,6 +1763,32 @@ const initialize = async (): Promise<void> => {
   width: 100%;
   height: 100%;
   transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/*
+ * Make the xterm element fill the whole container. fit() floors the row
+ * count, so the terminal screen is usually a few px shorter than the
+ * container; with height:100% the .xterm-viewport covers the whole area.
+ *
+ * The viewport's default background is hardcoded #000 in xterm.css, which
+ * shows as a black bar below the screen in light themes — make it
+ * transparent so the container background (painted with the terminal theme
+ * background by applyTerminalTheme) shows through instead.
+ *
+ * The padding insets the terminal screen from the pane edges so the first
+ * character of a row doesn't hug the border. It must live on the .xterm
+ * element (not the container): FitAddon subtracts the terminal element's own
+ * padding when computing cols/rows, so the screen always fits inside the
+ * padding — padding on the measured container would be ignored and the last
+ * row could overflow past the bottom edge.
+ */
+.terminal-container :deep(.xterm) {
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.terminal-container :deep(.xterm-viewport) {
+  background-color: transparent;
 }
 
 /* Pre-upload confirmation dialog */

@@ -258,6 +258,7 @@ export default {
   pane: {
     splitHorizontal: 'Split Horizontally',
     splitVertical: 'Split Vertically',
+    splitLimit: 'Split limit reached — a tab can contain at most 3 panes',
   },
   tunnel: {
     title: 'Port Forwarding',

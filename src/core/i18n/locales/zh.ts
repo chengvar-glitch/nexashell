@@ -257,6 +257,7 @@ export default {
   pane: {
     splitHorizontal: '水平拆分',
     splitVertical: '垂直拆分',
+    splitLimit: '已达到拆分上限，每个标签页最多 3 个面板',
   },
   tunnel: {
     title: '端口转发',

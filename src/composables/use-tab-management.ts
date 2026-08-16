@@ -7,7 +7,7 @@
 
 import { ref } from 'vue';
 import { v4 as uuidv4 } from 'uuid';
-import { type Tab, type Pane, type PaneConnect, type SplitNode, type SplitDirection, DEFAULT_TAB } from '@/features/tabs';
+import { type Tab, type Pane, type PaneConnect, type SplitNode, type SplitDirection, type SplitPaneResult, DEFAULT_TAB, MAX_PANES_PER_TAB } from '@/features/tabs';
 import { useSessionStore } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
 
@@ -46,9 +46,22 @@ export function useTabManagement() {
     }
   };
 
-  const replacePaneNode = (node: SplitNode, paneId: string, direction: SplitDirection, newConnect?: PaneConnect): SplitNode => {
+  /**
+   * Replace the pane `paneId` with a split node whose second child is the
+   * NEW pane. `newPaneId` MUST be the same id splitActivePane uses for
+   * `tab.panes` and the credential cache — generating a fresh id here would
+   * render a pane whose session id has no cached credentials, so the second
+   * split's new pane would try to authenticate with an empty password and
+   * end up with no input/output.
+   */
+  const replacePaneNode = (
+    node: SplitNode,
+    paneId: string,
+    direction: SplitDirection,
+    newPaneId: string,
+    newConnect?: PaneConnect
+  ): SplitNode => {
     if (node.kind === 'pane' && node.paneId === paneId) {
-      const newPaneId = uuidv4();
       return {
         kind: 'split',
         direction,
@@ -62,7 +75,9 @@ export function useTabManagement() {
     if (node.kind === 'split') {
       return {
         ...node,
-        children: node.children.map(child => replacePaneNode(child, paneId, direction, newConnect)),
+        children: node.children.map(child =>
+          replacePaneNode(child, paneId, direction, newPaneId, newConnect)
+        ),
       };
     }
     return node;
@@ -97,11 +112,23 @@ export function useTabManagement() {
     };
   };
 
-  const splitActivePane = (direction: SplitDirection) => {
+  const splitActivePane = (direction: SplitDirection): SplitPaneResult => {
     const tab = tabs.value.find(t => t.id === activeTabId.value);
-    if (!tab || !tab.panes || tab.panes.length === 0 || tab.type === 'home') return;
+    if (!tab || !tab.panes || tab.panes.length === 0 || tab.type === 'home') {
+      return 'unavailable';
+    }
     const sourcePaneId = activePaneId.value;
-    if (!sourcePaneId) return;
+    if (!sourcePaneId) return 'unavailable';
+
+    // Per-tab pane cap: refuse further splits once the tab is full.
+    if (tab.panes.length >= MAX_PANES_PER_TAB) {
+      logger.warn('Split blocked: pane limit reached', {
+        tabId: tab.id,
+        panes: tab.panes.length,
+        max: MAX_PANES_PER_TAB,
+      });
+      return 'limit';
+    }
 
     const sessionStore = useSessionStore();
     const newPaneId = uuidv4();
@@ -118,7 +145,7 @@ export function useTabManagement() {
       const creds = sessionStore.getCachedCredentials(sourcePaneId);
       if (!cp || !creds) {
         logger.warn('No connection info for splitting SSH pane', { paneId: sourcePaneId });
-        return;
+        return 'unavailable';
       }
       sessionStore.cacheCredentials(newPaneId, {
         password: creds.password,
@@ -149,11 +176,18 @@ export function useTabManagement() {
         sizes: [50, 50],
       };
     } else {
-      tab.splitTree = replacePaneNode(tab.splitTree, sourcePaneId, direction, connect);
+      tab.splitTree = replacePaneNode(
+        tab.splitTree,
+        sourcePaneId,
+        direction,
+        newPaneId,
+        connect
+      );
     }
     tab.panes.push(newPane);
 
     activePaneId.value = newPaneId;
+    return 'ok';
   };
 
   // Re-entrancy guard: rapid repeated closes (e.g. double-click) would

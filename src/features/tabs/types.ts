@@ -24,6 +24,10 @@ export type SplitNode =
   | { kind: 'pane'; paneId: string; connect?: PaneConnect }
   | { kind: 'split'; direction: SplitDirection; children: SplitNode[]; sizes: number[] };
 
+/** Outcome of a split request: performed, blocked by the pane cap, or
+ *  unavailable for other reasons (e.g. home tab, missing credentials). */
+export type SplitPaneResult = 'ok' | 'limit' | 'unavailable';
+
 export interface Pane {
   id: string;
   type: 'terminal' | 'ssh';
@@ -47,7 +51,9 @@ export interface TabManagement {
   setActivePane: (id: string) => void;
   addTab: (tab: Tab) => void;
   closeTab: (id: string) => Promise<void>;
-  splitActivePane: (direction: SplitDirection) => void;
+  /** Splits the active pane. Returns 'ok' when a pane was created, 'limit'
+   *  when the per-tab pane cap blocks it, or 'unavailable' otherwise. */
+  splitActivePane: (direction: SplitDirection) => SplitPaneResult;
   closePane: (tabId: string, paneId: string) => Promise<void>;
   getActiveTab: () => Tab | undefined;
 }

@@ -147,6 +147,18 @@ const closeCommandPalette = (value: boolean) => {
 };
 provide(SHOW_SETTINGS_KEY, showSettings);
 
+// Transient toast for blocked actions (e.g. the per-tab split limit).
+const toastMessage = ref('');
+let toastTimer: ReturnType<typeof setTimeout> | null = null;
+const showToast = (message: string) => {
+  toastMessage.value = message;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toastMessage.value = '';
+    toastTimer = null;
+  }, 2200);
+};
+
 // Tab management
 const tabManagement = useTabManagement();
 provide(TAB_MANAGEMENT_KEY, tabManagement);
@@ -188,13 +200,17 @@ onMounted(async () => {
 
   offFns.push(
     eventBus.on(APP_EVENTS.SPLIT_VERTICAL, () => {
-      tabManagement.splitActivePane('vertical');
+      if (tabManagement.splitActivePane('vertical') === 'limit') {
+        showToast(t('pane.splitLimit'));
+      }
     })
   );
 
   offFns.push(
     eventBus.on(APP_EVENTS.SPLIT_HORIZONTAL, () => {
-      tabManagement.splitActivePane('horizontal');
+      if (tabManagement.splitActivePane('horizontal') === 'limit') {
+        showToast(t('pane.splitLimit'));
+      }
     })
   );
 
@@ -364,6 +380,10 @@ onBeforeUnmount(() => {
   if (connectionTimerInterval) {
     clearInterval(connectionTimerInterval);
     connectionTimerInterval = null;
+  }
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
   }
 
   // Clean up all sessions using Pinia store
@@ -836,6 +856,13 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
         :visible="showCommandPalette"
         @update:visible="closeCommandPalette"
       />
+
+      <!-- Transient toast (blocked actions, e.g. split pane limit) -->
+      <Transition name="toast">
+        <div v-if="toastMessage" class="app-toast" role="status">
+          {{ toastMessage }}
+        </div>
+      </Transition>
     </div>
   </div>
 </template>
@@ -913,6 +940,40 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
     opacity: 1;
     transform: scale(1) translateY(0);
   }
+}
+
+/* Transient toast — bottom-center, above all content */
+.app-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 20000;
+  padding: 9px 16px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-primary);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--color-text-primary);
+  max-width: 80vw;
+  text-align: center;
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.2s var(--ease-snappy),
+    transform 0.2s var(--ease-snappy);
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>
 <style>
