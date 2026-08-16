@@ -80,8 +80,6 @@ const handleConnect = (data: Record<string, unknown>) => {
   overflow: hidden;
   background-color: var(--color-bg-secondary);
   position: relative;
-  border-radius: 0 0 var(--radius-2xl) var(--radius-2xl);
-  overflow: hidden;
   border: none;
 }
 

@@ -308,11 +308,6 @@ const handleMaximize = async () => {
   position: relative;
   top: 0;
   z-index: 100;
-  border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
-}
-
-.window-title-bar.is-windows {
-  border-radius: 0 !important;
 }
 
 .window-title-bar.is-windows .right-section {
@@ -322,7 +317,6 @@ const handleMaximize = async () => {
 
 .window-title-bar.fullscreen-mode {
   /* Adjust layout in fullscreen mode, remove traffic light buttons spacing */
-  border-radius: 0;
   /* Reserve space for native system title bar in fullscreen mode */
   padding-top: env(safe-area-inset-top, 0);
 }
