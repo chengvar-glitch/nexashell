@@ -5,7 +5,18 @@
 
 ## [Unreleased]
 
+## [1.10.2] - 2026-08-16
+
+### Fixed
+
+- 修复 vue-tsc 类型检查发现的 3 处真实类型错误（此前本地 bun 运行 vue-tsc 会漏报）：
+  - `TunnelManagerPanel.vue`：定时刷新回调参数 `statuses` 遮蔽外层 ref，`statuses.value` 误作用于数组
+  - `CommandPalette.vue`：`TabLike` 接口缺少 `id` 字段
+  - `RemoteConnectionView.vue`：下载进度事件 payload 的 `status` 类型缺少 `'downloading'`，导致比较无重叠
+- 发布构建仅保留 macOS（Apple Silicon，aarch64）与 Windows（NSIS），去掉 Linux 与 macOS Intel（universal）
+
 ## [1.10.1] - 2026-08-16
+
 
 ### Fixed
 

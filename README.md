@@ -4,7 +4,7 @@
 
 Lightweight, modern terminal manager and SSH client built with **Rust** and **Vue 3**, packaged as a Tauri 2 desktop application.
 
-[![Version](https://img.shields.io/badge/Version-1.10.1-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/Version-1.10.2-blue.svg)](https://github.com/chengvar-glitch/nexashell) [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE) [![CI](https://img.shields.io/badge/CI-lint%20%2B%20typecheck%20%2B%20tests%20%2B%20clippy-blue)](.github/workflows/ci.yml)
 
 > Version is sourced from `src-tauri/Cargo.toml` (single source of truth, synced to `package.json` by `prebuild`). See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
