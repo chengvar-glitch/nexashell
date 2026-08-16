@@ -73,6 +73,6 @@ jobs:
             - **Windows**：`NexaShell_${{ github.ref_name }}_x64-setup.exe`
 
             > 未经 Apple/微软签名，首次打开可能提示"无法验证开发者"，右键选择"打开"即可。
-          releaseDraft: true # 草稿模式，确认无误后再手动点 Publish
+          releaseDraft: false # 全自动发布：构建完成后直接公开，无需手动 Publish
           prerelease: false
           args: ${{ matrix.args }}
