@@ -23,9 +23,9 @@ jobs:
       fail-fast: false # 一个平台失败不阻塞其他平台
       matrix:
         include:
-          # macOS：universal 包（同时支持 Apple Silicon + Intel）
+          # macOS：仅 Apple Silicon (aarch64)
           - platform: macos-latest
-            args: --target universal-apple-darwin --bundles app,dmg
+            args: --target aarch64-apple-darwin --bundles app,dmg
           # Windows：NSIS 安装包
           - platform: windows-latest
             args: --bundles nsis
@@ -41,10 +41,10 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # 只有 macOS universal 构建需要双架构 target
+      # macOS 构建需要 aarch64 target
       - name: Add macOS targets
         if: matrix.platform == 'macos-latest'
-        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+        run: rustup target add aarch64-apple-darwin
 
       - name: Cache Rust
         uses: swatinem/rust-cache@v2
@@ -66,7 +66,7 @@ jobs:
 
             自动构建产物，选择对应平台的安装包下载：
 
-            - **macOS**：`NexaShell_${{ github.ref_name }}_universal.dmg`（Apple Silicon + Intel）
+            - **macOS**：`NexaShell_${{ github.ref_name }}_aarch64.dmg`（Apple Silicon）
             - **Windows**：`NexaShell_${{ github.ref_name }}_x64-setup.exe`
 
             > 未经 Apple/微软签名，首次打开可能提示"无法验证开发者"，右键选择"打开"即可。

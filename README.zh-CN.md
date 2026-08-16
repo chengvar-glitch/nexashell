@@ -28,7 +28,7 @@ NexaShell 将 Rust 的安全性与高性能，与现代高生产力 Web 界面�
 - **安全加固**：基于 `known_hosts` 的主机密钥校验、操作系统钥匙串主密钥（含文件回退）、CSP、最小化 Tauri 能力权限。
 - **会话导入/导出**：加密导出（随机盐 + PBKDF2），并兼容解密旧版格式。
 - **可定制工作区**：深色/浅色模式、多种强调色、macOS 原生感应的悬浮标题栏。
-- **跨平台**：macOS（Apple Silicon / Intel）为主要验证平台；Windows 与 Linux 构建在 CI 中持续编译（见 [平台状态](#平台状态)）。
+- **跨平台**：macOS（Apple Silicon）为主要验证平台；Windows 构建在 CI 中持续编译（见 [平台状态](#平台状态)）。
 
 ---
 
@@ -216,8 +216,8 @@ sequenceDiagram
 
 | 平台 | 状态 |
 |---|---|
-| macOS（Apple Silicon） | ✅ 主要平台 — 完整测试，DMG 发布构建已验证 |
-| macOS（Intel） | 🟡 仅 CI 编译；未在真机上主动验证 |
+| macOS（Apple Silicon） | ✅ 支持 — 完整测试，DMG 发布构建已验证 |
+| macOS（Intel） | ❌ 不支持（发布构建仅面向 `aarch64`） |
 | Windows | 🟡 仅 CI 编译（ubuntu 上 `cargo check`/`test`/`clippy`；MSVC/NSIS 路径未实际演练） |
 | Linux | 🟡 已安装 webkit2gtk 依赖的 CI 编译；无运行时验证 |
 

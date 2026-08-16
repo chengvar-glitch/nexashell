@@ -28,7 +28,7 @@ NexaShell combines the safety and performance of Rust with a modern, high-produc
 - **Security Hardening**: Host key verification against `known_hosts`, OS keychain-backed master key with file fallback, CSP, minimal Tauri capabilities.
 - **Session Import/Export**: Encrypted export (random salt, PBKDF2) with backward-compatible decryption of legacy formats.
 - **Customizable Workspace**: Dark/Light modes, multiple accent colors, and a native-feeling macOS overlay title bar.
-- **Cross-Platform**: macOS (Apple Silicon/Intel) is the primary verified platform; Windows and Linux builds are continuously compiled in CI (see [Platform Status](#-platform-status)).
+- **Cross-Platform**: macOS (Apple Silicon) is the primary verified platform; Windows builds are continuously compiled in CI (see [Platform Status](#-platform-status)).
 
 ---
 
@@ -215,8 +215,8 @@ Backend commands are registered in `src-tauri/src/lib.rs` (`~70` invoke handlers
 
 | Platform | Status |
 |---|---|
-| macOS (Apple Silicon) | ✅ Primary — fully tested, DMG release builds verified |
-| macOS (Intel) | 🟡 CI-compiled; not actively verified on hardware |
+| macOS (Apple Silicon) | ✅ Supported — fully tested, DMG release builds verified |
+| macOS (Intel) | ❌ Not supported (release builds target `aarch64` only) |
 | Windows | 🟡 CI-compiled (`cargo check`/`test`/`clippy` on ubuntu; MSVC/NSIS paths not exercised) |
 | Linux | 🟡 CI-compiled with webkit2gtk deps; no runtime verification |
 
