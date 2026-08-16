@@ -30,14 +30,14 @@ jobs:
       - name: Type-check
         run: |
           set +e
+          echo "::error::DIAG node=$(node --version 2>&1)"
           echo "::error::DIAG bun=$(bun --version)"
-          echo "::error::DIAG vue-tsc=$(bunx --bun vue-tsc --version 2>&1 || echo N/A)"
           echo "::error::DIAG typescript=$(bun -e 'console.log(require("typescript/package.json").version)' 2>&1)"
           bun run type-check --pretty false 2>&1
           rc=$?
-          echo "::error::DIAG VUE_TSC_EXIT=$rc"
-          bunx --bun tsc --noEmit --pretty false 2>&1
-          echo "::error::DIAG PLAIN_TSC_EXIT=$?"
+          echo "::error::DIAG VUE_TSC_EXIT(bun)=$rc"
+          node node_modules/vue-tsc/bin/vue-tsc.js --noEmit --pretty false 2>&1
+          echo "::error::DIAG VUE_TSC_EXIT(node)=$?"
           exit $rc
 
       - name: Unit tests
