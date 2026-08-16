@@ -27,20 +27,10 @@ jobs:
       - name: Lint
         run: bun run lint:check
 
+      # 用 node 直接运行 vue-tsc：bun 的 Node 兼容层跑 volar 会漏报类型错误（macOS 上已验证），
+      # node 才能给出与本地开发一致、且可靠的结果。
       - name: Type-check
-        run: |
-          set +e
-          echo "::error::DIAG node=$(node --version 2>&1)"
-          echo "::error::DIAG bun=$(bun --version)"
-          node node_modules/vue-tsc/bin/vue-tsc.js --noEmit --pretty false > /tmp/vtsc.log 2>&1
-          rc=$?
-          echo "::error::DIAG VUE_TSC_EXIT(node)=$rc"
-          if [ -s /tmp/vtsc.log ]; then
-            head -40 /tmp/vtsc.log | sed 's/^/::error::VTSCOUT /'
-          else
-            echo "::error::DIAG VUE_TSC_OUTPUT_EMPTY"
-          fi
-          exit $rc
+        run: node node_modules/vue-tsc/bin/vue-tsc.js --noEmit
 
       - name: Unit tests
         run: bun run test
