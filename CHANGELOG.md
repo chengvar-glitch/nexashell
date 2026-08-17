@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-08-17
+
+### Added
+
+- TUI SFTP 文件浏览器：已连接会话 `ctrl+x s` 打开全屏浏览器
+  - 目录浏览（目录优先、忽略 . / ..、显示大小与本地时间），回车进目录、左键/退格上一级、home 回 home、r 刷新
+  - 文件下载到本地工作目录、选中文件 `u` 上传（同名路径）、`n` 内嵌输入新建目录、`x x` 双击确认删除
+- 每项 SFTP 操作走独立认证连接（复用 `connect_authenticated`），与交互/监控会话隔离；异步回调刷新列表与状态
+
+### Changed
+
+- `ssh.rs` 新增 `SftpEntry` 与 `sftp_list_dir` / `sftp_download_file` / `sftp_upload_file` / `sftp_mkdir` / `sftp_remove`；新增 `UiEvent::Sftp` 事件路由
+- 顶部菜单文案随焦点变化（回看/复制/命令/断开）
+
 ## [1.16.0] - 2026-08-17
 
 ### Added

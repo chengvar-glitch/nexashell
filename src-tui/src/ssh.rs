@@ -141,6 +141,17 @@ pub struct TunnelState {
     pub accepted: Arc<std::sync::atomic::AtomicU32>,
 }
 
+/// One remote directory entry returned by the SFTP browser.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SftpEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    /// Unix timestamp (seconds); `None` when the server reports none.
+    pub modified: Option<i64>,
+}
+
 fn build_pty_modes() -> PtyModes {
     let mut modes = PtyModes::new();
 
@@ -1080,6 +1091,228 @@ impl SshManager {
             self.stop_tunnel(&id);
         }
     }
+
+    // ==========================================================================
+    // SFTP file browser
+    // ==========================================================================
+    // Every operation opens a fresh authenticated connection and tears it down
+    // afterwards, so browsing never contends with the interactive session or
+    // the monitoring helper (same isolation strategy as the desktop app).
+
+    /// List a remote directory.
+    pub async fn sftp_list_dir(
+        &self,
+        session_id: &SessionId,
+        path: &str,
+    ) -> Result<Vec<SftpEntry>, SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let path = path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            let entries = sftp_readdir(&sftp, &path)?;
+            Ok(entries)
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Stream a remote file to a local path. Returns bytes transferred.
+    pub async fn sftp_download_file(
+        &self,
+        session_id: &SessionId,
+        remote_path: &str,
+        local_path: &str,
+    ) -> Result<u64, SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let remote_path = remote_path.to_string();
+        let local_path = local_path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            let mut remote = sftp
+                .open(remote_path.as_str())
+                .map_err(|e| {
+                    SshError::OperationFailed(format!("SFTP open {}: {}", remote_path, e))
+                })?;
+            let mut local = std::fs::File::create(&local_path).map_err(|e| {
+                SshError::OperationFailed(format!("Create {}: {}", local_path, e))
+            })?;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut total = 0u64;
+            loop {
+                let n = remote.read(&mut buf).map_err(|e| {
+                    SshError::OperationFailed(format!("SFTP read: {}", e))
+                })?;
+                if n == 0 {
+                    break;
+                }
+                local.write_all(&buf[..n]).map_err(|e| {
+                    SshError::OperationFailed(format!("Local write: {}", e))
+                })?;
+                total += n as u64;
+            }
+            Ok(total)
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Stream a local file to a remote path. Returns bytes transferred.
+    pub async fn sftp_upload_file(
+        &self,
+        session_id: &SessionId,
+        local_path: &str,
+        remote_path: &str,
+    ) -> Result<u64, SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let local_path = local_path.to_string();
+        let remote_path = remote_path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            let mut local = std::fs::File::open(&local_path).map_err(|e| {
+                SshError::OperationFailed(format!("Open {}: {}", local_path, e))
+            })?;
+            let mut remote = sftp
+                .create(Path::new(&remote_path))
+                .map_err(|e| {
+                    SshError::OperationFailed(format!("SFTP create {}: {}", remote_path, e))
+                })?;
+            let mut buf = vec![0u8; 64 * 1024];
+            let mut total = 0u64;
+            loop {
+                let n = local.read(&mut buf).map_err(|e| {
+                    SshError::OperationFailed(format!("Local read: {}", e))
+                })?;
+                if n == 0 {
+                    break;
+                }
+                remote.write_all(&buf[..n]).map_err(|e| {
+                    SshError::OperationFailed(format!("SFTP write: {}", e))
+                })?;
+                total += n as u64;
+            }
+            Ok(total)
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Make a remote directory.
+    pub async fn sftp_mkdir(
+        &self,
+        session_id: &SessionId,
+        remote_path: &str,
+    ) -> Result<(), SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let remote_path = remote_path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+                        sftp.mkdir(Path::new(&remote_path), 0o755).map_err(|e| {
+                SshError::OperationFailed(format!("SFTP mkdir {}: {}", remote_path, e))
+            })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Delete a remote file or (non-recursively) directory.
+    pub async fn sftp_remove(
+        &self,
+        session_id: &SessionId,
+        remote_path: &str,
+    ) -> Result<(), SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let remote_path = remote_path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            let path = Path::new(&remote_path);
+            let is_file = sftp.stat(path).map(|st| st.is_file()).unwrap_or(false);
+            let removed = if is_file {
+                sftp.unlink(path).is_ok()
+            } else {
+                sftp.rmdir(path).is_ok()
+            };
+            if !removed {
+                return Err(SshError::OperationFailed(format!(
+                    "SFTP remove {}: not a file or empty directory",
+                    remote_path
+                )));
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Rename (or move) a remote path.
+    #[allow(dead_code)] // mirror API; rename action comes in a later revision
+    pub async fn sftp_rename(
+        &self,
+        session_id: &SessionId,
+        from: &str,
+        to: &str,
+    ) -> Result<(), SshError> {
+        let (a, h, p, auth) = self.session_connection(session_id)?;
+        let from = from.to_string();
+        let to = to.to_string();
+        tokio::task::spawn_blocking(move || {
+            let sess = Self::connect_authenticated(&a, &h, p, &auth)?;
+            let sftp = sess.sftp().map_err(|e| {
+                SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
+            })?;
+            sftp.rename(Path::new(&from), Path::new(&to), None).map_err(|e| {
+                SshError::OperationFailed(format!("SFTP rename {} -> {}: {}", from, to, e))
+            })?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+}
+
+/// List a remote directory with the ssh2 `Sftp::readdir` API.
+fn sftp_readdir(sftp: &ssh2::Sftp, path: &str) -> Result<Vec<SftpEntry>, SshError> {
+    let entries_v = sftp.readdir(Path::new(path)).map_err(|e| {
+        SshError::OperationFailed(format!("SFTP readdir {}: {}", path, e))
+    })?;
+    let mut entries: Vec<SftpEntry> = Vec::with_capacity(entries_v.len());
+    for (pb, stat) in entries_v {
+        let name = pb
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        entries.push(SftpEntry {
+            name,
+            is_dir: stat.is_dir(),
+            size: stat.size.unwrap_or(0),
+            modified: stat.mtime.map(|m| m as i64),
+        });
+    }
+    // Directories first, then case-insensitive by name.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(entries)
 }
 
 /// Accept loop for a running tunnel: accepts local connections and hands each

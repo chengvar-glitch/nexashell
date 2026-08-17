@@ -81,7 +81,7 @@ cargo run --manifest-path src-tui/Cargo.toml
 | Session edit / delete / favorite toggle | ✅ | ✅ | `ctrl+x e` / `ctrl+x d` / `ctrl+x f` on the home list | 
 | Command snippets | ✅ | ✅ | shown in the command palette (`ctrl+p`); inserts into the active terminal or copies to clipboard |
 | Tunnel rules (start/stop) | ✅ | ✅ | `ctrl+x u` or palette `tunnels`; local `-L` + dynamic SOCKS5 `-D`, per-rule start/stop with connection counter |
-| SFTP file browser | ✅ | ⏳ planned | — |
+| SFTP file browser | ✅ | ✅ | `ctrl+x s` on a connected session; browse/cd, download, upload, mkdir, delete |
 | Local (PTY) terminal | ✅ | ⏳ planned | — |
 | Import/export, group/tag management | ✅ | ⏳ planned | — |
 

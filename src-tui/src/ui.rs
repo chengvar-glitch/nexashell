@@ -1,7 +1,7 @@
 use crate::common::{OutputChunk, SessionId};
 use crate::db;
 use crate::db::{Group, SessionWithRelations, TunnelRuleRow};
-use crate::ssh::{ServerStatus, SshEventSink, SshManager};
+use crate::ssh::{ServerStatus, SftpEntry, SshError, SshEventSink, SshManager};
 use crate::term::{Selection, TerminalPane};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -32,6 +32,22 @@ pub enum UiEvent {
     },
     ConnectResult {
         session_id: String,
+        result: Result<(), String>,
+    },
+    Sftp {
+        session_id: String,
+        kind: SftpUiEventKind,
+    },
+}
+
+/// Result payload for SFTP browser operations.
+pub enum SftpUiEventKind {
+    List {
+        path: String,
+        result: Result<Vec<SftpEntry>, String>,
+    },
+    Op {
+        message: String,
         result: Result<(), String>,
     },
 }
@@ -272,6 +288,22 @@ pub struct TunnelPanel {
     pub message: Option<String>,
 }
 
+/// Full-screen SFTP browser state for one session.
+pub struct SftpBrowser {
+    pub session_id: String,
+    /// Current remote directory shown to the user ("" renders as the home dir).
+    pub path: String,
+    pub entries: Vec<SftpEntry>,
+    pub selected: usize,
+    pub local_dir: String,
+    pub message: Option<String>,
+    pub busy: bool,
+    /// Inline input for mkdir (`Some` = collecting a name).
+    pub mkdir_input: Option<String>,
+    /// Pending delete confirmation (name awaiting second press).
+    pub pending_delete: Option<String>,
+}
+
 #[derive(PartialEq, Eq)]
 pub enum Page {
     Home,
@@ -300,6 +332,7 @@ pub struct App {
     pub command_bar: Option<CommandBar>,
     pub copy_mode: Option<CopySelection>,
     pub tunnel_panel: Option<TunnelPanel>,
+    pub sftp: Option<SftpBrowser>,
 
     pub leader: Option<Instant>,
     pub quit: bool,
@@ -334,6 +367,7 @@ impl App {
             command_bar: None,
             copy_mode: None,
             tunnel_panel: None,
+            sftp: None,
             leader: None,
             quit: false,
             viewport: Rect::new(0, 0, 80, 24),
@@ -420,6 +454,42 @@ impl App {
                     }
                 }
             }
+            UiEvent::Sftp { session_id, kind } => {
+                let Some(panel) = self.sftp.as_mut() else {
+                    return;
+                };
+                if panel.session_id != session_id {
+                    return;
+                }
+                match kind {
+                    SftpUiEventKind::List { path, result } => {
+                        panel.busy = false;
+                        match result {
+                            Ok(entries) => {
+                                panel.path = path;
+                                panel.entries = entries;
+                                panel.selected = 0;
+                                panel.pending_delete = None;
+                            }
+                            Err(e) => panel.message = Some(format!("List failed: {}", e)),
+                        }
+                    }
+                    SftpUiEventKind::Op { message, result } => {
+                        panel.busy = false;
+                        let ok = result.is_ok();
+                        match result {
+                            Ok(()) => panel.message = Some(message),
+                            Err(e) => {
+                                panel.message = Some(format!("{} failed: {}", message, e))
+                            }
+                        }
+                        // Refresh the listing after successful mutations.
+                        if ok {
+                            self.sftp_request_list();
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -486,6 +556,10 @@ impl App {
             self.tunnel_panel_key(key);
             return;
         }
+        if self.sftp.is_some() {
+            self.sftp_key(key);
+            return;
+        }
 
         let is_ctrl_x = key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('x');
@@ -531,6 +605,7 @@ impl App {
             }
             'l' => self.go_home(),
             'u' => self.open_tunnel_panel(),
+            's' => self.open_sftp_panel(),
             'c' if matches!(self.page, Page::Terminal) => self.enter_copy_mode(),
             't' if matches!(self.page, Page::Terminal) => self.switch_tab(1),
             'd' if matches!(self.page, Page::Terminal) => {
@@ -1052,9 +1127,340 @@ impl App {
     }
 
     // ------------------------------------------------------------------
-    // Actions
+    // SFTP browser
     // ------------------------------------------------------------------
 
+    fn open_sftp_panel(&mut self) {
+        let Some(session_id) = self
+            .terminals
+            .get(self.active_term)
+            .map(|t| t.session_id.clone())
+        else {
+            self.dialog = Some(Dialog::Notice(
+                "Connect to a session first, then open the file browser".into(),
+            ));
+            return;
+        };
+        let local_dir = std::env::current_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| ".".to_string());
+        self.sftp = Some(SftpBrowser {
+            session_id,
+            path: String::new(),
+            entries: Vec::new(),
+            selected: 0,
+            local_dir,
+            message: None,
+            busy: false,
+            mkdir_input: None,
+            pending_delete: None,
+        });
+        self.sftp_request_list();
+    }
+
+    fn sftp_request_list(&mut self) {
+        let (session_id, path, busy) = match self.sftp.as_ref() {
+            Some(p) => (
+                p.session_id.clone(),
+                if p.path.is_empty() { ".".to_string() } else { p.path.clone() },
+                p.busy,
+            ),
+            None => return,
+        };
+        if busy {
+            return;
+        }
+        if let Some(p) = self.sftp.as_mut() {
+            p.busy = true;
+            p.message = None;
+        }
+        let manager = self.manager.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let res = manager
+                .sftp_list_dir(&SessionId::from(session_id.clone()), &path)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = tx.send(UiEvent::Sftp {
+                session_id: session_id.clone(),
+                kind: SftpUiEventKind::List { path, result: res },
+            });
+        });
+    }
+
+    fn sftp_run_op(&mut self, message: String, op: SftpOp) {
+        let (session_id, busy) = match self.sftp.as_ref() {
+            Some(p) => (p.session_id.clone(), p.busy),
+            None => return,
+        };
+        if busy {
+            return;
+        }
+        if let Some(p) = self.sftp.as_mut() {
+            p.busy = true;
+            p.message = None;
+        }
+        let manager = self.manager.clone();
+        let tx = self.tx.clone();
+        tokio::spawn(async move {
+            let result: Result<(), SshError> = match op {
+                SftpOp::Download { remote, local } => manager
+                    .sftp_download_file(&SessionId::from(session_id.clone()), &remote, &local)
+                    .await
+                    .map(|_| ()),
+                SftpOp::Upload { local, remote } => manager
+                    .sftp_upload_file(&SessionId::from(session_id.clone()), &local, &remote)
+                    .await
+                    .map(|_| ()),
+                SftpOp::Mkdir { remote } => manager
+                    .sftp_mkdir(&SessionId::from(session_id.clone()), &remote)
+                    .await,
+                SftpOp::Remove { remote } => manager
+                    .sftp_remove(&SessionId::from(session_id.clone()), &remote)
+                    .await,
+            };
+            let _ = tx.send(UiEvent::Sftp {
+                session_id,
+                kind: SftpUiEventKind::Op {
+                    message,
+                    result: result.map_err(|e| e.to_string()),
+                },
+            });
+        });
+    }
+
+    fn sftp_request_into(&mut self, path: String) {
+        if let Some(panel) = self.sftp.as_mut() {
+            panel.path = path;
+        }
+        self.sftp_request_list();
+    }
+
+    fn sftp_key(&mut self, key: KeyEvent) {
+        let mut sftp = match self.sftp.take() {
+            Some(p) => p,
+            None => return,
+        };
+
+        // Inline mkdir input mode.
+        if sftp.mkdir_input.is_some() {
+            let mut close = false;
+            match key.code {
+                KeyCode::Esc => close = true,
+                KeyCode::Enter => {
+                    let name = sftp.mkdir_input.take().unwrap_or_default();
+                    let name = name.trim().to_string();
+                    if name.is_empty() {
+                        close = true;
+                    } else {
+                        let remote = sftp_join(&sftp.path, &name);
+                        self.sftp = Some(sftp);
+                        self.sftp_run_op(
+                            format!("Created directory {remote}"),
+                            SftpOp::Mkdir { remote },
+                        );
+                        return;
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(input) = &mut sftp.mkdir_input {
+                        input.pop();
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(input) = &mut sftp.mkdir_input {
+                        input.push(c);
+                    }
+                }
+                _ => {}
+            }
+            if close {
+                sftp.mkdir_input = None;
+            }
+            self.sftp = Some(sftp);
+            return;
+        }
+
+        if sftp.busy {
+            self.sftp = Some(sftp);
+            return;
+        }
+
+        match key.code {
+            KeyCode::Esc => {}
+            KeyCode::Up => {
+                if !sftp.entries.is_empty() {
+                    sftp.selected = (sftp.selected + sftp.entries.len() - 1) % sftp.entries.len();
+                }
+            }
+            KeyCode::Down => {
+                if !sftp.entries.is_empty() {
+                    sftp.selected = (sftp.selected + 1) % sftp.entries.len();
+                }
+            }
+            KeyCode::Enter | KeyCode::Right => {
+                if let Some(entry) = sftp.entries.get(sftp.selected) {
+                    let is_dir = entry.is_dir;
+                    let e_name = entry.name.clone();
+                    let e_size = entry.size;
+                    sftp.pending_delete = None;
+                    if is_dir {
+                        let next = sftp_join(&sftp.path, &e_name);
+                        self.sftp = Some(sftp);
+                        self.sftp_request_into(next);
+                        return;
+                    }
+                    let remote = sftp_join(&sftp.path, &e_name);
+                    let local = sftp_join_local(&sftp.local_dir, &e_name);
+                    self.sftp = Some(sftp);
+                    self.sftp_run_op(
+                        format!("Downloaded {} ({})", e_name, format_size(e_size)),
+                        SftpOp::Download { remote, local },
+                    );
+                    return;
+                }
+            }
+            KeyCode::Left | KeyCode::Backspace => {
+                let up = sftp_up(&sftp.path);
+                sftp.pending_delete = None;
+                self.sftp = Some(sftp);
+                self.sftp_request_into(up);
+                return;
+            }
+            KeyCode::Char('h') => {
+                sftp.pending_delete = None;
+                self.sftp = Some(sftp);
+                self.sftp_request_into(String::new());
+                return;
+            }
+            KeyCode::Char('r') => {
+                sftp.pending_delete = None;
+                let cur = sftp.path.clone();
+                self.sftp = Some(sftp);
+                self.sftp_request_into(cur);
+                return;
+            }
+            KeyCode::Char('n') => {
+                sftp.mkdir_input = Some(String::new());
+            }
+            KeyCode::Char('x') => {
+                if let Some(entry) = sftp.entries.get(sftp.selected) {
+                    let name = entry.name.clone();
+                    if let Some(pending) = sftp.pending_delete.as_ref()
+                        && pending == &name
+                    {
+                        let remote = sftp_join(&sftp.path, &name);
+                        sftp.pending_delete = None;
+                        self.sftp = Some(sftp);
+                        self.sftp_run_op(
+                            format!("Deleted {remote}"),
+                            SftpOp::Remove { remote },
+                        );
+                        return;
+                    }
+                    sftp.pending_delete = Some(name);
+                    sftp.message = Some("press x again to confirm delete".into());
+                }
+            }
+            KeyCode::Char('u') => {
+                if let Some(entry) = sftp.entries.get(sftp.selected) {
+                    let e_name = entry.name.clone();
+                    let local = sftp_join_local(&sftp.local_dir, &e_name);
+                    let remote = sftp_join(&sftp.path, &e_name);
+                    sftp.pending_delete = None;
+                    self.sftp = Some(sftp);
+                    self.sftp_run_op(
+                        format!("Uploaded {} to {remote}", e_name),
+                        SftpOp::Upload { local, remote },
+                    );
+                    return;
+                }
+            }
+            _ => {}
+        }
+        self.sftp = Some(sftp);
+    }
+}
+
+#[derive(Clone)]
+enum SftpOp {
+    Download { remote: String, local: String },
+    Upload { local: String, remote: String },
+    Mkdir { remote: String },
+    Remove { remote: String },
+}
+
+fn sftp_join(path: &str, name: &str) -> String {
+    if path.is_empty() {
+        name.to_string()
+    } else if path.ends_with('/') {
+        format!("{path}{name}")
+    } else {
+        format!("{path}/{name}")
+    }
+}
+
+fn sftp_join_local(dir: &str, name: &str) -> String {
+    let sep = std::path::MAIN_SEPARATOR;
+    if dir.ends_with(sep) {
+        format!("{dir}{name}")
+    } else {
+        format!("{dir}{sep}{name}")
+    }
+}
+
+fn sftp_up(path: &str) -> String {
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    match trimmed.rfind('/') {
+        Some(i) => trimmed[..i].to_string(),
+        None => String::new(),
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+/// Format a duration-since-epoch as a short "YYYY-MM-DD HH:MM" local string.
+fn format_time(dt: std::time::SystemTime) -> String {
+    let secs = dt
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let hh = rem / 3600;
+    let mm = (rem % 3600) / 60;
+    // Civil-from-days (Howard Hinnant's algorithm): convert days since epoch
+    // to a (year, month, day) triple without external date crates.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+    format!("{y:04}-{m:02}-{d:02} {hh:02}:{mm:02}")
+}
+
+impl App {
     pub fn open_command_bar(&mut self) {
         let mut items = vec![
             CommandItem {
@@ -1196,6 +1602,7 @@ impl App {
         self.page = Page::Home;
         self.copy_mode = None;
         self.tunnel_panel = None;
+        self.sftp = None;
         self.last_term_size = None;
     }
 
@@ -1482,8 +1889,120 @@ impl App {
         if let Some(p) = &self.tunnel_panel {
             self.draw_tunnel_panel(frame, p);
         }
+        if let Some(b) = &self.sftp {
+            self.draw_sftp_browser(frame, b);
+        }
         if let Some(d) = &self.dialog {
             Self::draw_dialog(frame, d, &self.theme);
+        }
+    }
+
+    fn draw_sftp_browser(&self, frame: &mut Frame, panel: &SftpBrowser) {
+        let theme = &self.theme;
+        let area = frame.area();
+
+        // Header
+        {
+            let mut header = format!(
+                " SFTP — session {} · {}  (local: {}) ",
+                panel.session_id,
+                if panel.path.is_empty() { "(home)" } else { &panel.path },
+                panel.local_dir
+            );
+            if panel.busy {
+                header.push('…');
+            }
+            let buf = frame.buffer_mut();
+            buf.set_string(
+                area.x,
+                area.y,
+                &header,
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            );
+            let hint = " enter: cd/download · left: up · n:mkdir·x:del·u:upload·h:home·r:refresh · esc: close ";
+            buf.set_string(
+                area.x + area.width.saturating_sub(hint.len() as u16),
+                area.y,
+                hint,
+                Style::default().fg(theme.accent),
+            );
+        }
+
+        let list_area = Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(3),
+        );
+
+        let items: Vec<ListItem> = panel
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let sel = i == panel.selected;
+                let dir_mark = if e.is_dir { "[d]" } else { "   " };
+                let size = if e.is_dir {
+                    String::new()
+                } else {
+                    format_size(e.size)
+                };
+                let modified = e
+                    .modified
+                    .map(|ts| {
+                        let dt = std::time::UNIX_EPOCH + std::time::Duration::from_secs(ts as u64);
+                        format_time(dt)
+                    })
+                    .unwrap_or_default();
+                let name = if sel {
+                    format!("▶ {} {}", dir_mark, e.name)
+                } else {
+                    format!("  {} {}", dir_mark, e.name)
+                };
+                let line = format!("{name:<60} {size:>10} {modified}", name = name, size = size, modified = modified);
+                ListItem::new(Line::from(Span::styled(line, Style::default().fg(theme.fg))))
+            })
+            .collect();
+
+        let msg = if let Some(m) = &panel.message {
+            m.clone()
+        } else if panel.entries.is_empty() && !panel.busy {
+            "(empty directory)".to_string()
+        } else {
+            String::new()
+        };
+
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border))
+                .title(" files "),
+        );
+        let mut state = ListState::default();
+        state.select(Some(panel.selected.min(panel.entries.len().saturating_sub(1))));
+        frame.render_stateful_widget(list, list_area, &mut state);
+
+        if !msg.is_empty() {
+            let buf = frame.buffer_mut();
+            buf.set_string(
+                list_area.x,
+                list_area.y + 1,
+                &msg,
+                Style::default().fg(theme.dim),
+            );
+        }
+
+        // mkdir input line
+        if let Some(input) = &panel.mkdir_input {
+            let input_y = area.y + area.height.saturating_sub(1);
+            let label = format!(" mkdir> {}▏", input);
+            let buf = frame.buffer_mut();
+            buf.set_string(
+                area.x,
+                input_y,
+                &label,
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            );
         }
     }
 
