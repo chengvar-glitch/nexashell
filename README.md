@@ -76,7 +76,7 @@ cargo run --manifest-path src-tui/Cargo.toml
 | New session (password / key auth) | ✅ | ✅ | `ctrl+p` → `new`, or `ctrl+x n` |
 | SSH terminal (vt100 emulation) | ✅ | ✅ | bracketed paste, resize sync, live status bar |
 | Server status (CPU/mem/latency/load) | ✅ | ✅ | helper-session monitoring |
-| Terminal scrollback / copy mode | ✅ | ⏳ planned | — |
+| Terminal scrollback / copy mode | ✅ | ✅ | `PgUp`/`PgDn`/`Home`/`End` + mouse wheel scroll; `ctrl+x c` copy mode, `enter`/`ctrl+c` copies |
 | Multi-session tabs | ✅ | ⏳ planned | — |
 | Session edit / delete / favorite toggle | ✅ | ⏳ planned | — |
 | Command snippets | ✅ | ⏳ planned | — |

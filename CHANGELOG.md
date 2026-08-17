@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-17
+
+### Added
+
+- TUI 终端滚动回看：`PgUp`/`PgDn`/`Home`/`End` 与鼠标滚轮在终端页面本地滚动历史输出（10k 行环形缓冲，独立于 vt100 的屏内视图；vt100 0.15 的滚动视口偏移超过一屏高度会下溢，因此历史由 TUI 自行按行捕获，滚动区以暗色渲染）
+- TUI 复制模式：`ctrl+x c` 进入，方向键扩展选区，`enter`/`ctrl+c` 复制到系统剪贴板（arboard），`esc` 退出；选区在滚动视图中按可见坐标高亮
+- 终端页顶部提示条显示当前回看行数与快捷键提示（`ctrl+x c` 复制）
+
+### Changed
+
+- `term.rs` 新增 scroll 视图（`scroll_up`/`scroll_down`/`scroll_top`/`scroll_to_bottom`/`selection_text`）并配套 8 个单元测试（滚动、钳制、跨 feed 换行捕获、视图钉住、选区提取）
+
 ## [1.12.1] - 2026-08-17
 
 ### Added

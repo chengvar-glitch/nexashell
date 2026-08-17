@@ -6,7 +6,9 @@ mod ssh;
 mod term;
 mod ui;
 
-use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, Event, KeyEvent, KeyEventKind, MouseEventKind,
+};
 use ratatui::crossterm::execute;
 use std::io::stdout;
 use std::sync::Arc;
@@ -72,7 +74,15 @@ fn run_tui(
                 Event::Resize(_, _) => {
                     // The next draw re-syncs the terminal pane size.
                 }
-                Event::Mouse(_) => {}
+                Event::Mouse(mouse) => {
+                    // Mouse capture is enabled so wheel scrolling can move the
+                    // terminal scrollback view; other mouse events are ignored.
+                    match mouse.kind {
+                        MouseEventKind::ScrollUp => app.mouse_scroll(true),
+                        MouseEventKind::ScrollDown => app.mouse_scroll(false),
+                        _ => {}
+                    }
+                }
                 _ => {}
             }
         }

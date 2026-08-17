@@ -2,7 +2,7 @@ use crate::common::{OutputChunk, SessionId};
 use crate::db;
 use crate::db::{Group, SessionWithRelations};
 use crate::ssh::{ServerStatus, SshEventSink, SshManager};
-use crate::term::TerminalPane;
+use crate::term::{Selection, TerminalPane};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -225,6 +225,16 @@ pub struct TerminalSession {
     pub disconnect_reason: Option<String>,
 }
 
+/// Copy-mode selection anchor + cursor over the visible grid coordinates.
+#[derive(Debug, Clone, Copy)]
+pub struct CopySelection {
+    pub anchor_row: u16,
+    pub anchor_col: u16,
+    pub cursor_row: u16,
+    pub cursor_col: u16,
+}
+
+#[derive(PartialEq, Eq)]
 pub enum Page {
     Home,
     Terminal,
@@ -250,6 +260,7 @@ pub struct App {
     pub connecting: bool,
     pub dialog: Option<Dialog>,
     pub command_bar: Option<CommandBar>,
+    pub copy_mode: Option<CopySelection>,
 
     pub leader: Option<Instant>,
     pub quit: bool,
@@ -282,6 +293,7 @@ impl App {
             connecting: false,
             dialog: None,
             command_bar: None,
+            copy_mode: None,
             leader: None,
             quit: false,
             viewport: Rect::new(0, 0, 80, 24),
@@ -419,6 +431,10 @@ impl App {
             self.dialog_key(key);
             return;
         }
+        if self.copy_mode.is_some() {
+            self.copy_mode_key(key);
+            return;
+        }
 
         let is_ctrl_x = key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('x');
@@ -460,6 +476,7 @@ impl App {
                 self.leader = None;
             }
             'l' => self.go_home(),
+            'c' if matches!(self.page, Page::Terminal) => self.enter_copy_mode(),
             'd' if matches!(self.page, Page::Terminal) => {
                 self.disconnect_current();
                 self.go_home();
@@ -531,6 +548,27 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('p') if ctrl => self.open_command_bar(),
+            // Local scrollback navigation happens on the terminal page; these
+            // keys are not forwarded to the remote shell (same convention as
+            // tmux scrolling / local scrollback in common SSH clients).
+            KeyCode::PageUp => self.scroll_terminal(true, 1),
+            KeyCode::PageDown => self.scroll_terminal(false, 1),
+            KeyCode::Home => self.scroll_terminal_top(),
+            KeyCode::End => self.scroll_terminal_bottom(),
+            KeyCode::Esc => {
+                // Esc returns to the live screen before being sent remotely.
+                let scrolled = self
+                    .terminal
+                    .as_ref()
+                    .is_some_and(|t| !t.pane.is_at_bottom());
+                if scrolled {
+                    self.scroll_terminal_bottom();
+                } else if let Some(t) = &self.terminal {
+                    let _ = self
+                        .manager
+                        .send_ssh_input(&SessionId::from(t.session_id.clone()), "\x1b".into());
+                }
+            }
             _ => {
                 if let (Some(seq), Some(t)) = (key_to_escape(key), &self.terminal) {
                     let _ = self
@@ -538,6 +576,159 @@ impl App {
                         .send_ssh_input(&SessionId::from(t.session_id.clone()), seq);
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Scrollback view helpers
+    // ------------------------------------------------------------------
+
+    fn scroll_terminal(&mut self, up: bool, pages: u16) {
+        let page_rows = self
+            .viewport
+            .height
+            .saturating_sub(2)
+            .max(1) as usize
+            * pages as usize;
+        self.scroll_terminal_lines(up, page_rows as u16);
+    }
+
+    fn scroll_terminal_lines(&mut self, up: bool, lines: u16) {
+        let Some(t) = &mut self.terminal else {
+            return;
+        };
+        if up {
+            t.pane.scroll_up(lines as usize);
+        } else {
+            t.pane.scroll_down(lines as usize);
+        }
+    }
+
+    fn scroll_terminal_top(&mut self) {
+        if let Some(t) = &mut self.terminal {
+            t.pane.scroll_top();
+        }
+    }
+
+    fn scroll_terminal_bottom(&mut self) {
+        if let Some(t) = &mut self.terminal {
+            t.pane.scroll_to_bottom();
+        }
+    }
+
+    pub fn mouse_scroll(&mut self, up: bool) {
+        if self.page != Page::Terminal
+            || self.command_bar.is_some()
+            || self.dialog.is_some()
+            || self.copy_mode.is_some()
+        {
+            return;
+        }
+        self.scroll_terminal_lines(up, 3);
+    }
+
+    // ------------------------------------------------------------------
+    // Copy mode
+    // ------------------------------------------------------------------
+
+    fn enter_copy_mode(&mut self) {
+        let Some(t) = &self.terminal else {
+            return;
+        };
+        // Start the selection at the live cursor position (or screen bottom).
+        let (crow, ccol) = t.pane.cursor_position();
+        self.copy_mode = Some(CopySelection {
+            anchor_row: crow,
+            anchor_col: ccol,
+            cursor_row: crow,
+            cursor_col: ccol,
+        });
+    }
+
+    fn exit_copy_mode(&mut self) {
+        self.copy_mode = None;
+    }
+
+    fn copy_selection(&mut self) {
+        let Some(sel) = self.copy_mode.take() else {
+            return;
+        };
+        let Some(t) = &self.terminal else {
+            return;
+        };
+        let (_, cols) = t.pane.size();
+        let sel = normalize_selection(sel, cols);
+        let text = t.pane.selection_text(sel);
+        if !text.is_empty() {
+            copy_to_clipboard(&text);
+        }
+        self.copy_mode = None;
+    }
+
+    fn copy_mode_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let (max_row, max_col) = {
+            let (r, c) = self
+                .terminal
+                .as_ref()
+                .map_or((0, 0), |t| t.pane.size());
+            (r.saturating_sub(1), c.saturating_sub(1))
+        };
+
+        enum Act {
+            Copy,
+            Exit,
+            Scroll(bool, bool), // (up, page-sized scroll)
+            None,
+        }
+        let act = match &mut self.copy_mode {
+            None => Act::None,
+            Some(sel) => match key.code {
+                KeyCode::Esc => Act::Exit,
+                KeyCode::Enter => Act::Copy,
+                KeyCode::Char('c') if ctrl => Act::Copy,
+                KeyCode::Left => {
+                    sel.cursor_col = sel.cursor_col.saturating_sub(1);
+                    Act::None
+                }
+                KeyCode::Right => {
+                    sel.cursor_col = sel.cursor_col.saturating_add(1).min(max_col);
+                    Act::None
+                }
+                KeyCode::Up if sel.cursor_row == 0 => Act::Scroll(true, false),
+                KeyCode::Up => {
+                    sel.cursor_row -= 1;
+                    Act::None
+                }
+                KeyCode::Down if sel.cursor_row == max_row => Act::Scroll(false, false),
+                KeyCode::Down => {
+                    sel.cursor_row += 1;
+                    Act::None
+                }
+                KeyCode::Home => {
+                    sel.cursor_col = 0;
+                    Act::None
+                }
+                KeyCode::End => {
+                    sel.cursor_col = max_col;
+                    Act::None
+                }
+                KeyCode::PageUp => Act::Scroll(true, true),
+                KeyCode::PageDown => Act::Scroll(false, true),
+                _ => Act::None,
+            },
+        };
+        match act {
+            Act::Copy => self.copy_selection(),
+            Act::Exit => self.exit_copy_mode(),
+            Act::Scroll(up, page) => {
+                if page {
+                    self.scroll_terminal(up, 1);
+                } else {
+                    self.scroll_terminal_lines(up, 1);
+                }
+            }
+            Act::None => {}
         }
     }
 
@@ -1143,18 +1334,31 @@ impl App {
             if self.connecting {
                 line.push_str("  (connecting…)");
             }
+            if let Some(t) = &self.terminal
+                && !t.pane.is_at_bottom()
+                && self.copy_mode.is_none()
+            {
+                line.push_str(&format!(
+                    "  ⤒ {} lines back ",
+                    t.pane.scroll_offset()
+                ));
+            }
             buf.set_string(
                 area.x,
                 area.y,
                 &line,
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             );
-            let hint = " ctrl+p commands · ctrl+x d disconnect ";
+            let hint = if self.copy_mode.is_some() {
+                " copy: arrows move · enter/copy  esc: exit "
+            } else {
+                " ctrl+p commands · ctrl+x c copy · ctrl+x d disconnect "
+            };
             buf.set_string(
                 area.x + area.width.saturating_sub(hint.len() as u16),
                 area.y,
                 hint,
-                Style::default().fg(theme.dim),
+                Style::default().fg(theme.accent),
             );
         }
 
@@ -1173,7 +1377,17 @@ impl App {
                 }
                 self.last_term_size = Some((w, h));
             }
-            t.pane.render(term_area, frame.buffer_mut(), true, t.connected);
+            let selection = self.copy_mode.map(|cm| {
+                let (_, cols) = t.pane.size();
+                normalize_selection(cm, cols)
+            });
+            t.pane.render(
+                term_area,
+                frame.buffer_mut(),
+                true,
+                t.connected,
+                selection,
+            );
         }
 
         // Status bar
@@ -1524,6 +1738,45 @@ fn delete_word_backward(s: &mut String, cursor: &mut usize) {
     let orig = char_boundary(s, *cursor);
     s.drain(new_idx..orig);
     *cursor = new_idx;
+}
+
+// ----------------------------------------------------------------------------
+// Copy-mode helpers
+// ----------------------------------------------------------------------------
+
+/// Convert an anchor + cursor pair into a normalized (start, end) selection
+/// over row-major (linear) coordinates.
+fn normalize_selection(sel: CopySelection, cols: u16) -> Selection {
+    let idx = |r: u16, c: u16| u32::from(r) * u32::from(cols) + u32::from(c);
+    let (start, end) = if idx(sel.anchor_row, sel.anchor_col) <= idx(sel.cursor_row, sel.cursor_col)
+    {
+        (
+            (sel.anchor_row, sel.anchor_col),
+            (sel.cursor_row, sel.cursor_col),
+        )
+    } else {
+        (
+            (sel.cursor_row, sel.cursor_col),
+            (sel.anchor_row, sel.anchor_col),
+        )
+    };
+    Selection {
+        start_row: start.0,
+        start_col: start.1,
+        end_row: end.0,
+        end_col: end.1 + 1, // exclusive end column
+    }
+}
+
+fn copy_to_clipboard(text: &str) {
+    match arboard::Clipboard::new() {
+        Ok(mut clip) => {
+            if let Err(e) = clip.set_text(text.to_string()) {
+                log::warn!("Failed to copy to clipboard: {}", e);
+            }
+        }
+        Err(e) => log::warn!("Clipboard unavailable: {}", e),
+    }
 }
 
 // ============================================================================
