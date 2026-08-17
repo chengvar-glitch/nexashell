@@ -6,6 +6,7 @@ node_modules/
 /dist-electron/
 # Tauri build artifacts
 /src-tauri/target/
+/src-tui/target/
 
 # IDE files
 .vscode/
