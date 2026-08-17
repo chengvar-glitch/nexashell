@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-08-17
+
+### Added
+
+- TUI 会话管理：首页选中会话 `ctrl+x e` 编辑（表单预填，密码留空则保留已存凭据）、`ctrl+x f` 切换收藏、`ctrl+x d` 删除（二次确认，同时关闭对应已开终端）
+- TUI 命令片段：`ctrl+p` 命令面板列出 snippets，选中后插入当前活动终端（可再编辑）或复制到剪贴板
+- 修复对话框关闭逻辑：此前 Esc/Enter 会保持对话框打开、任意其他键反而关闭；现统一为 Esc 关闭、Enter 提交、其余键忽略
+
+### Changed
+
+- `NewSessionForm` 增加 `editing` 状态（编辑模式标签改为「留空=保留已存凭据」），新增 `Dialog::ConfirmDelete`；`dialog_key` 重写为 keep 标志语义
+
 ## [1.14.0] - 2026-08-17
 
 ### Added

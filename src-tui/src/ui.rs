@@ -130,6 +130,9 @@ pub struct FormField {
 pub struct NewSessionForm {
     pub fields: Vec<FormField>,
     pub focus: usize,
+    /// Editing an existing session (id set); blank password fields then mean
+    /// "keep the stored credential" instead of "no credential".
+    pub editing: Option<String>,
 }
 
 impl NewSessionForm {
@@ -145,13 +148,38 @@ impl NewSessionForm {
                 FormField { label: "key passphrase (blank = none)", value: String::new(), cursor: 0, masked: true },
             ],
             focus: 0,
+            editing: None,
         }
+    }
+
+    pub fn new_edit(session: &db::Session, password: Option<String>) -> Self {
+        let mut form = Self::new();
+        form.editing = Some(session.id.clone());
+        form.fields[0].value = session.server_name.clone();
+        form.fields[1].value = session.addr.clone();
+        form.fields[2].value = session.port.to_string();
+        form.fields[3].value = session.username.clone();
+        if let Some(p) = password {
+            form.fields[4].value = p;
+        }
+        if let Some(ref kp) = session.private_key_path {
+            form.fields[5].value = kp.clone();
+        }
+        form.fields[4].label = "password (blank = keep stored)";
+        form.fields[5].label = "private key path (blank = password auth)";
+        form.fields[6].label = "key passphrase (blank = keep stored)";
+        for f in &mut form.fields {
+            f.cursor = f.value.chars().count();
+        }
+        form.focus = 0;
+        form
     }
 }
 
 pub enum Dialog {
     Password(PasswordDialog),
     NewSession(NewSessionForm),
+    ConfirmDelete { session_id: String, name: String },
     Help,
     Quit,
     Notice(String),
@@ -161,7 +189,8 @@ impl Dialog {
     pub fn title(&self) -> &str {
         match self {
             Dialog::Password(d) => &d.title,
-            Dialog::NewSession(_) => "New session",
+            Dialog::NewSession(_) => "Session",
+            Dialog::ConfirmDelete { .. } => "Delete session",
             Dialog::Help => "Help",
             Dialog::Quit => "Quit",
             Dialog::Notice(_) => "Notice",
@@ -479,6 +508,9 @@ impl App {
             'n' if matches!(self.page, Page::Home) => {
                 self.dialog = Some(Dialog::NewSession(NewSessionForm::new()))
             }
+            'e' if matches!(self.page, Page::Home) => self.edit_selected(),
+            'f' if matches!(self.page, Page::Home) => self.toggle_favorite_selected(),
+            'd' if matches!(self.page, Page::Home) => self.delete_selected(),
             'r' if matches!(self.page, Page::Home) => {
                 self.refresh_sessions();
                 self.leader = None;
@@ -804,9 +836,10 @@ impl App {
             None => return,
         };
 
+        let mut keep = true;
         match &mut dlg {
             Dialog::Password(p) => match key.code {
-                KeyCode::Esc => {}
+                KeyCode::Esc => keep = false,
                 KeyCode::Enter => {
                     let password = std::mem::take(&mut p.input);
                     p.cursor = 0;
@@ -833,7 +866,7 @@ impl App {
                 _ => {}
             },
             Dialog::NewSession(f) => match key.code {
-                KeyCode::Esc => {}
+                KeyCode::Esc => keep = false,
                 KeyCode::Tab => {
                     f.focus = (f.focus + 1) % f.fields.len();
                 }
@@ -882,21 +915,33 @@ impl App {
                 }
                 _ => {}
             },
+            Dialog::ConfirmDelete { session_id, .. } => match key.code {
+                KeyCode::Enter => {
+                    let sid = session_id.clone();
+                    let _ = db::delete_session(sid);
+                    self.refresh_sessions();
+                    keep = false;
+                }
+                KeyCode::Esc => keep = false,
+                _ => {}
+            },
             Dialog::Quit => match key.code {
                 KeyCode::Enter => self.quit = true,
-                KeyCode::Esc => {}
-                _ => return,
+                KeyCode::Esc => keep = false,
+                _ => {}
             },
             Dialog::Notice(_) => match key.code {
-                KeyCode::Esc | KeyCode::Enter => {}
-                _ => return,
+                KeyCode::Esc | KeyCode::Enter => keep = false,
+                _ => {}
             },
             Dialog::Help => match key.code {
-                KeyCode::Esc | KeyCode::Enter => {}
-                _ => return,
+                KeyCode::Esc | KeyCode::Enter => keep = false,
+                _ => {}
             },
         }
-        self.dialog = Some(dlg);
+        if keep {
+            self.dialog = Some(dlg);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -943,11 +988,41 @@ impl App {
         }
         for s in &self.sessions {
             let sess = &s.session;
+            let open = self
+                .terminals
+                .iter()
+                .any(|t| t.session_id == sess.id);
             items.push(CommandItem {
                 id: format!("connect:{}", sess.id),
-                label: format!("connect · {} ({})", sess.server_name, sess.addr),
+                label: format!(
+                    "connect{} · {} ({})",
+                    if open { " [open]" } else { "" },
+                    sess.server_name,
+                    sess.addr
+                ),
                 desc: format!("{}@{}", sess.username, sess.addr),
             });
+        }
+        if let Ok(snippets) = db::list_snippets()
+            && !snippets.is_empty()
+        {
+            items.push(CommandItem {
+                id: "snippets-header".into(),
+                label: "— snippets —".into(),
+                desc: "insert into active terminal / copy to clipboard".into(),
+            });
+            for s in snippets {
+                let desc = if s.description.is_empty() {
+                    s.command.clone()
+                } else {
+                    format!("{} — {}", s.description, s.command)
+                };
+                items.push(CommandItem {
+                    id: format!("snippet:{}", s.id),
+                    label: s.name,
+                    desc,
+                });
+            }
         }
         self.command_bar = Some(CommandBar::new(items));
     }
@@ -959,6 +1034,17 @@ impl App {
             }
             return;
         }
+        if item.id == "snippets-header" {
+            return;
+        }
+        if let Some(sid) = item.id.strip_prefix("snippet:") {
+            if let Ok(snippets) = db::list_snippets()
+                && let Some(s) = snippets.iter().find(|s| s.id == sid)
+            {
+                self.run_snippet(s);
+            }
+            return;
+        }
         match item.id.as_str() {
             "sessions" => self.go_home(),
             "new" => self.dialog = Some(Dialog::NewSession(NewSessionForm::new())),
@@ -967,10 +1053,27 @@ impl App {
             "quit" => self.dialog = Some(Dialog::Quit),
             "disconnect" => {
                 self.disconnect_current();
-                self.go_home();
             }
             _ => {}
         }
+    }
+
+    /// Insert a snippet into the active terminal (editable, no trailing Enter),
+    /// or copy it to the clipboard when no terminal is open.
+    fn run_snippet(&mut self, snippet: &db::Snippet) {
+        if let Some(t) = self.terminals.get(self.active_term)
+            && t.connected
+        {
+            let _ = self.manager.send_ssh_input(
+                &SessionId::from(t.session_id.clone()),
+                snippet.command.clone(),
+            );
+            return;
+        }
+        copy_to_clipboard(&snippet.command);
+        self.dialog = Some(Dialog::Notice(
+            "No active terminal; snippet copied to clipboard".into(),
+        ));
     }
 
     fn go_home(&mut self) {
@@ -1113,6 +1216,7 @@ impl App {
     }
 
     fn save_session_form(&mut self, form: NewSessionForm) {
+        let editing = form.editing.clone();
         let values: Vec<String> = form.fields.into_iter().map(|f| f.value).collect();
         let name = values[0].trim().to_string();
         let host = values[1].trim().to_string();
@@ -1131,6 +1235,8 @@ impl App {
 
         let auth_type = if key_path.is_empty() { "password" } else { "key" };
         let private_key_path = if key_path.is_empty() { None } else { Some(key_path) };
+        // Blank credential fields keep the stored credential when editing; for
+        // new sessions they mean "no credential".
         let password = if password.is_empty() { None } else { Some(password) };
         let key_passphrase = if key_passphrase.is_empty() {
             None
@@ -1139,7 +1245,7 @@ impl App {
         };
 
         let res = db::save_session_with_credentials(
-            None,
+            editing,
             host,
             port,
             name,
@@ -1160,6 +1266,66 @@ impl App {
                 self.dialog = Some(Dialog::Notice(format!("Failed to save session: {}", e)));
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Session management actions
+    // ------------------------------------------------------------------
+
+    fn selected_session(&self) -> Option<SessionWithRelations> {
+        self.filtered_sessions()
+            .get(self.selected)
+            .copied()
+            .map(|idx| self.sessions[idx].clone())
+    }
+
+    fn edit_selected(&mut self) {
+        let Some(sess) = self.selected_session() else {
+            return;
+        };
+        let sid = sess.session.id.clone();
+        let (_, password, _) =
+            db::get_session_credentials(sid.clone()).unwrap_or((sid, None, None));
+        self.dialog = Some(Dialog::NewSession(NewSessionForm::new_edit(
+            &sess.session,
+            password,
+        )));
+    }
+
+    fn toggle_favorite_selected(&mut self) {
+        let Some(sess) = self.selected_session() else {
+            return;
+        };
+        let _ = db::toggle_favorite(sess.session.id.clone(), !sess.session.is_favorite);
+        self.refresh_sessions();
+    }
+
+    fn delete_selected(&mut self) {
+        let Some(sess) = self.selected_session() else {
+            return;
+        };
+        // Close the terminal too if this session is currently open.
+        if let Some(idx) = self
+            .terminals
+            .iter()
+            .position(|t| t.session_id == sess.session.id)
+        {
+            if let Some(t) = self.terminals.get(idx) {
+                let _ = self
+                    .manager
+                    .disconnect_ssh(&SessionId::from(t.session_id.clone()));
+            }
+            self.terminals.remove(idx);
+            if !self.terminals.is_empty() {
+                self.active_term = self.active_term.saturating_sub(1).min(self.terminals.len() - 1);
+            } else {
+                self.active_term = 0;
+            }
+        }
+        self.dialog = Some(Dialog::ConfirmDelete {
+            session_id: sess.session.id.clone(),
+            name: sess.session.server_name.clone(),
+        });
     }
 
     // ------------------------------------------------------------------
@@ -1678,6 +1844,19 @@ impl App {
                     Rect::new(inner.x, hint_y, inner.width, 1),
                 );
             }
+            Dialog::ConfirmDelete { name, .. } => {
+                frame.render_widget(
+                    Paragraph::new(Line::from(vec![
+                        Span::raw(format!("Delete session \"{}\"?  ", name)),
+                        Span::styled(
+                            "enter: delete   esc: cancel",
+                            Style::default().fg(theme.dim),
+                        ),
+                    ]))
+                    .style(Style::default().fg(theme.fg)),
+                    Rect::new(inner.x, inner.y, inner.width, 1),
+                );
+            }
             Dialog::Help => {
                 let lines = [
                     "Home page",
@@ -1688,11 +1867,11 @@ impl App {
                     "  ctrl+p      command palette",
                     "Terminal page",
                     "  any key     sent to remote shell",
-                    "  ctrl+p      command palette",
+                    "  pgup/pgdn   scrollback    ctrl+tab  switch",
                     "Leader key (ctrl+x, then)",
-                    "  q           quit     h  help",
-                    "  l           sessions d  disconnect",
-                    "  n           new      r  refresh",
+                    "  q quit   h help   l sessions   r refresh",
+                    "  n new    e edit    f favorite   d delete/disconnect",
+                    "  c copy   t tab++   1-9 jump    p palette",
                 ];
                 for (i, l) in lines.iter().enumerate() {
                     let y = inner.y + i as u16;

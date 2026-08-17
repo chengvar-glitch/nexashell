@@ -78,8 +78,8 @@ cargo run --manifest-path src-tui/Cargo.toml
 | Server status (CPU/mem/latency/load) | ✅ | ✅ | helper-session monitoring |
 | Terminal scrollback / copy mode | ✅ | ✅ | `PgUp`/`PgDn`/`Home`/`End` + mouse wheel scroll; `ctrl+x c` copy mode, `enter`/`ctrl+c` copies |
 | Multi-session tabs | ✅ | ✅ | `ctrl+tab` / `ctrl+shift+tab` or leader `t` switch; leader `1`-`9` jump; disconnect keeps the rest open |
-| Session edit / delete / favorite toggle | ✅ | ⏳ planned | — |
-| Command snippets | ✅ | ⏳ planned | — |
+| Session edit / delete / favorite toggle | ✅ | ✅ | `ctrl+x e` / `ctrl+x d` / `ctrl+x f` on the home list | 
+| Command snippets | ✅ | ✅ | shown in the command palette (`ctrl+p`); inserts into the active terminal or copies to clipboard |
 | Tunnel rules (start/stop) | ✅ | ⏳ planned | — |
 | SFTP file browser | ✅ | ⏳ planned | — |
 | Local (PTY) terminal | ✅ | ⏳ planned | — |
