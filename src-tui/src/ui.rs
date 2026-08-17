@@ -1,6 +1,6 @@
 use crate::common::{OutputChunk, SessionId};
 use crate::db;
-use crate::db::{Group, SessionWithRelations};
+use crate::db::{Group, SessionWithRelations, TunnelRuleRow};
 use crate::ssh::{ServerStatus, SshEventSink, SshManager};
 use crate::term::{Selection, TerminalPane};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -264,6 +264,14 @@ pub struct CopySelection {
     pub cursor_col: u16,
 }
 
+/// Overlay listing a session's persisted tunnel rules with start/stop control.
+pub struct TunnelPanel {
+    pub session_id: String,
+    pub rules: Vec<TunnelRuleRow>,
+    pub selected: usize,
+    pub message: Option<String>,
+}
+
 #[derive(PartialEq, Eq)]
 pub enum Page {
     Home,
@@ -291,6 +299,7 @@ pub struct App {
     pub dialog: Option<Dialog>,
     pub command_bar: Option<CommandBar>,
     pub copy_mode: Option<CopySelection>,
+    pub tunnel_panel: Option<TunnelPanel>,
 
     pub leader: Option<Instant>,
     pub quit: bool,
@@ -324,6 +333,7 @@ impl App {
             dialog: None,
             command_bar: None,
             copy_mode: None,
+            tunnel_panel: None,
             leader: None,
             quit: false,
             viewport: Rect::new(0, 0, 80, 24),
@@ -472,6 +482,10 @@ impl App {
             self.copy_mode_key(key);
             return;
         }
+        if self.tunnel_panel.is_some() {
+            self.tunnel_panel_key(key);
+            return;
+        }
 
         let is_ctrl_x = key.modifiers.contains(KeyModifiers::CONTROL)
             && key.code == KeyCode::Char('x');
@@ -516,6 +530,7 @@ impl App {
                 self.leader = None;
             }
             'l' => self.go_home(),
+            'u' => self.open_tunnel_panel(),
             'c' if matches!(self.page, Page::Terminal) => self.enter_copy_mode(),
             't' if matches!(self.page, Page::Terminal) => self.switch_tab(1),
             'd' if matches!(self.page, Page::Terminal) => {
@@ -945,6 +960,98 @@ impl App {
     }
 
     // ------------------------------------------------------------------
+    // Tunnel panel
+    // ------------------------------------------------------------------
+
+    /// Open the tunnel rule panel for the active terminal's session (falling
+    /// back to the home selection).
+    fn open_tunnel_panel(&mut self) {
+        let session_id = self
+            .terminals
+            .get(self.active_term)
+            .map(|t| t.session_id.clone())
+            .or_else(|| self.selected_session().map(|s| s.session.id))
+            .or_else(|| self.terminals.first().map(|t| t.session_id.clone()));
+        let Some(session_id) = session_id else {
+            self.dialog = Some(Dialog::Notice(
+                "No session selected — connect first, then open the tunnel panel".into(),
+            ));
+            return;
+        };
+        let rules = db::list_tunnel_rules(session_id.clone()).unwrap_or_default();
+        self.tunnel_panel = Some(TunnelPanel {
+            session_id,
+            rules,
+            selected: 0,
+            message: None,
+        });
+    }
+
+    fn refresh_tunnel_panel(&mut self) {
+        if let Some(panel) = &mut self.tunnel_panel {
+            panel.rules = db::list_tunnel_rules(panel.session_id.clone()).unwrap_or_default();
+            if panel.selected >= panel.rules.len() {
+                panel.selected = 0;
+            }
+        }
+    }
+
+    fn tunnel_panel_key(&mut self, key: KeyEvent) {
+        let mut panel = match self.tunnel_panel.take() {
+            Some(p) => p,
+            None => return,
+        };
+        match key.code {
+            KeyCode::Esc => return,
+            KeyCode::Up => {
+                if !panel.rules.is_empty() {
+                    panel.selected = (panel.selected + panel.rules.len() - 1) % panel.rules.len();
+                }
+            }
+            KeyCode::Down => {
+                if !panel.rules.is_empty() {
+                    panel.selected = (panel.selected + 1) % panel.rules.len();
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(rule) = panel.rules.get(panel.selected) {
+                    let running = self.manager.tunnel_running(&rule.id);
+                    if running {
+                        self.manager.stop_tunnel(&rule.id);
+                        panel.message = Some(format!(
+                            "Stopped tunnel {}:{}",
+                            rule.listen_host, rule.listen_port
+                        ));
+                    } else {
+                        match self.manager.start_tunnel_rule(rule) {
+                            Ok(()) => {
+                                panel.message = Some(format!(
+                                    "Tunnel {}:{} -> {}:{} started",
+                                    rule.listen_host,
+                                    rule.listen_port,
+                                    rule.target_host,
+                                    rule.target_port
+                                ));
+                            }
+                            Err(e) => panel.message = Some(format!("Start failed: {}", e)),
+                        }
+                    }
+                }
+            }
+            KeyCode::Char('r') => {
+                self.refresh_tunnel_panel();
+                panel = match self.tunnel_panel.take() {
+                    Some(p) => p,
+                    None => return,
+                };
+                panel.message = Some("rules refreshed".into());
+            }
+            _ => {}
+        }
+        self.tunnel_panel = Some(panel);
+    }
+
+    // ------------------------------------------------------------------
     // Actions
     // ------------------------------------------------------------------
 
@@ -983,6 +1090,14 @@ impl App {
                     id: "disconnect".into(),
                     label: "disconnect".into(),
                     desc: "Disconnect the current SSH session".into(),
+                },
+            );
+            items.insert(
+                1,
+                CommandItem {
+                    id: "tunnels".into(),
+                    label: "tunnels".into(),
+                    desc: "Manage port-forwarding rules for this session".into(),
                 },
             );
         }
@@ -1054,6 +1169,7 @@ impl App {
             "disconnect" => {
                 self.disconnect_current();
             }
+            "tunnels" => self.open_tunnel_panel(),
             _ => {}
         }
     }
@@ -1079,6 +1195,7 @@ impl App {
     fn go_home(&mut self) {
         self.page = Page::Home;
         self.copy_mode = None;
+        self.tunnel_panel = None;
         self.last_term_size = None;
     }
 
@@ -1362,9 +1479,100 @@ impl App {
         if let Some(cb) = &self.command_bar {
             Self::draw_command_bar(frame, cb, &self.theme);
         }
+        if let Some(p) = &self.tunnel_panel {
+            self.draw_tunnel_panel(frame, p);
+        }
         if let Some(d) = &self.dialog {
             Self::draw_dialog(frame, d, &self.theme);
         }
+    }
+
+    fn draw_tunnel_panel(&self, frame: &mut Frame, panel: &TunnelPanel) {
+        let theme = &self.theme;
+        let area = Self::popup_area(frame.area(), 70, 55);
+        frame.render_widget(Clear, area);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.accent))
+            .title(Span::styled(
+                format!(" tunnel rules — session {} ", panel.session_id),
+                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+            ));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        if panel.rules.is_empty() {
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    "No tunnel rules for this session yet. Add rules in the desktop app.",
+                    Style::default().fg(theme.dim),
+                )))
+                .style(Style::default().fg(theme.fg)),
+                Rect::new(inner.x, inner.y, inner.width, 1),
+            );
+            let hint_y = inner.y + inner.height.saturating_sub(2);
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    " esc: close ",
+                    Style::default().fg(theme.dim),
+                ))),
+                Rect::new(inner.x, hint_y, inner.width, 1),
+            );
+            return;
+        }
+
+        for (i, rule) in panel.rules.iter().enumerate() {
+            let y = inner.y + i as u16 * 2;
+            if y + 1 >= inner.y + inner.height {
+                break;
+            }
+            let running = self.manager.tunnel_running(&rule.id);
+            let accepted = self.manager.tunnel_accepted(&rule.id);
+            let sel = i == panel.selected;
+            let arrow = if sel { "▶" } else { " " };
+            let dot = if running { "●" } else { "○" };
+            let dir = if rule.direction == "dynamic" { "D" } else { "L" };
+            let target = if rule.direction == "dynamic" {
+                "socks5 (:any)".to_string()
+            } else {
+                format!("{}:{}", rule.target_host, rule.target_port)
+            };
+            let auto = if rule.enabled { "auto" } else { "manual" };
+            let line = format!(
+                " {} {} [{}] {}:{} → {}  ({} conns, {})",
+                arrow,
+                dot,
+                dir,
+                rule.listen_host,
+                rule.listen_port,
+                target,
+                accepted,
+                auto
+            );
+            let style = if sel {
+                Style::default()
+                    .fg(theme.accent)
+                    .add_modifier(Modifier::BOLD)
+                    .add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default().fg(if running { theme.ok } else { theme.fg })
+            };
+            frame.buffer_mut().set_string(inner.x, y, &line, style);
+        }
+
+        let hint_y = inner.y + inner.height.saturating_sub(2);
+        let mut hint = " enter: start/stop   r: refresh   esc: close ".to_string();
+        if let Some(msg) = &panel.message {
+            hint = format!("{}  |  {}", msg, hint);
+        }
+        frame.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                hint,
+                Style::default().fg(theme.dim),
+            ))),
+            Rect::new(inner.x, hint_y, inner.width, 1),
+        );
     }
 
     fn draw_home(&mut self, frame: &mut Frame) {
@@ -1422,8 +1630,13 @@ impl App {
                         .collect::<Vec<_>>()
                         .join("");
                     let text = format!(
-                        " {}  {}  {}@{}{}{}{}",
+                        " {}  {}{}  {}@{}{}{}{}",
                         if i == self.selected { "▶" } else { " " },
+                        if self.terminals.iter().any(|t| t.session_id == sess.id) {
+                            "● "
+                        } else {
+                            ""
+                        },
                         sess.server_name,
                         sess.username,
                         sess.addr,
