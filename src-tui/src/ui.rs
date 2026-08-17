@@ -223,6 +223,7 @@ pub struct TerminalSession {
     pub pane: TerminalPane,
     pub connected: bool,
     pub disconnect_reason: Option<String>,
+    pub status: Option<ServerStatus>,
 }
 
 /// Copy-mode selection anchor + cursor over the visible grid coordinates.
@@ -254,8 +255,8 @@ pub struct App {
     pub selected: usize,
 
     pub page: Page,
-    pub terminal: Option<TerminalSession>,
-    pub status: Option<ServerStatus>,
+    pub terminals: Vec<TerminalSession>,
+    pub active_term: usize,
 
     pub connecting: bool,
     pub dialog: Option<Dialog>,
@@ -288,8 +289,8 @@ impl App {
             filter_cursor: 0,
             selected: 0,
             page: Page::Home,
-            terminal: None,
-            status: None,
+            terminals: Vec::new(),
+            active_term: 0,
             connecting: false,
             dialog: None,
             command_bar: None,
@@ -318,22 +319,28 @@ impl App {
     pub fn handle_ui_event(&mut self, ev: UiEvent) {
         match ev {
             UiEvent::Output { session_id, output } => {
-                if let Some(t) = &mut self.terminal
-                    && t.session_id == session_id
+                if let Some(t) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|t| t.session_id == session_id)
                 {
                     t.pane.feed(output.as_bytes());
                 }
             }
             UiEvent::Status { session_id, status } => {
-                if let Some(t) = &self.terminal
-                    && t.session_id == session_id
+                if let Some(t) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|t| t.session_id == session_id)
                 {
-                    self.status = Some(status);
+                    t.status = Some(status);
                 }
             }
             UiEvent::Disconnected { session_id, reason } => {
-                if let Some(t) = &mut self.terminal
-                    && t.session_id == session_id
+                if let Some(t) = self
+                    .terminals
+                    .iter_mut()
+                    .find(|t| t.session_id == session_id)
                 {
                     t.connected = false;
                     t.disconnect_reason = Some(reason);
@@ -356,15 +363,16 @@ impl App {
                         let mut pane = TerminalPane::new(cols, rows);
                         pane.resize(cols, rows);
                         let user_host = format!("{}@{}", sess.session.username, sess.session.addr);
-                        self.terminal = Some(TerminalSession {
+                        self.terminals.push(TerminalSession {
                             session_id: session_id.clone(),
                             server_name: sess.session.server_name.clone(),
                             user_host,
                             pane,
                             connected: true,
                             disconnect_reason: None,
+                            status: None,
                         });
-                        self.status = None;
+                        self.active_term = self.terminals.len() - 1;
                         self.page = Page::Terminal;
                         self.last_term_size = None;
                     }
@@ -401,7 +409,7 @@ impl App {
                 }
             }
             Page::Terminal => {
-                if let Some(t) = &self.terminal {
+                if let Some(t) = self.active_terminal() {
                     let _ = self.manager.send_ssh_input(
                         &SessionId::from(t.session_id.clone()),
                         text,
@@ -477,9 +485,13 @@ impl App {
             }
             'l' => self.go_home(),
             'c' if matches!(self.page, Page::Terminal) => self.enter_copy_mode(),
+            't' if matches!(self.page, Page::Terminal) => self.switch_tab(1),
             'd' if matches!(self.page, Page::Terminal) => {
                 self.disconnect_current();
-                self.go_home();
+            }
+            '1'..='9' if matches!(self.page, Page::Terminal) => {
+                let idx = (code as u8 - b'1') as usize;
+                self.activate_terminal(idx);
             }
             _ => {}
         }
@@ -548,6 +560,8 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
             KeyCode::Char('p') if ctrl => self.open_command_bar(),
+            KeyCode::Tab if ctrl => self.switch_tab(1),
+            KeyCode::BackTab if ctrl => self.switch_tab(-1),
             // Local scrollback navigation happens on the terminal page; these
             // keys are not forwarded to the remote shell (same convention as
             // tmux scrolling / local scrollback in common SSH clients).
@@ -558,19 +572,18 @@ impl App {
             KeyCode::Esc => {
                 // Esc returns to the live screen before being sent remotely.
                 let scrolled = self
-                    .terminal
-                    .as_ref()
+                    .active_terminal()
                     .is_some_and(|t| !t.pane.is_at_bottom());
                 if scrolled {
                     self.scroll_terminal_bottom();
-                } else if let Some(t) = &self.terminal {
+                } else if let Some(t) = self.active_terminal() {
                     let _ = self
                         .manager
                         .send_ssh_input(&SessionId::from(t.session_id.clone()), "\x1b".into());
                 }
             }
             _ => {
-                if let (Some(seq), Some(t)) = (key_to_escape(key), &self.terminal) {
+                if let (Some(seq), Some(t)) = (key_to_escape(key), self.active_terminal()) {
                     let _ = self
                         .manager
                         .send_ssh_input(&SessionId::from(t.session_id.clone()), seq);
@@ -594,7 +607,7 @@ impl App {
     }
 
     fn scroll_terminal_lines(&mut self, up: bool, lines: u16) {
-        let Some(t) = &mut self.terminal else {
+        let Some(t) = self.terminals.get_mut(self.active_term) else {
             return;
         };
         if up {
@@ -605,13 +618,13 @@ impl App {
     }
 
     fn scroll_terminal_top(&mut self) {
-        if let Some(t) = &mut self.terminal {
+        if let Some(t) = self.terminals.get_mut(self.active_term) {
             t.pane.scroll_top();
         }
     }
 
     fn scroll_terminal_bottom(&mut self) {
-        if let Some(t) = &mut self.terminal {
+        if let Some(t) = self.terminals.get_mut(self.active_term) {
             t.pane.scroll_to_bottom();
         }
     }
@@ -632,7 +645,7 @@ impl App {
     // ------------------------------------------------------------------
 
     fn enter_copy_mode(&mut self) {
-        let Some(t) = &self.terminal else {
+        let Some(t) = self.terminals.get(self.active_term) else {
             return;
         };
         // Start the selection at the live cursor position (or screen bottom).
@@ -653,7 +666,7 @@ impl App {
         let Some(sel) = self.copy_mode.take() else {
             return;
         };
-        let Some(t) = &self.terminal else {
+        let Some(t) = self.terminals.get(self.active_term) else {
             return;
         };
         let (_, cols) = t.pane.size();
@@ -669,8 +682,8 @@ impl App {
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         let (max_row, max_col) = {
             let (r, c) = self
-                .terminal
-                .as_ref()
+                .terminals
+                .get(self.active_term)
                 .map_or((0, 0), |t| t.pane.size());
             (r.saturating_sub(1), c.saturating_sub(1))
         };
@@ -962,21 +975,52 @@ impl App {
 
     fn go_home(&mut self) {
         self.page = Page::Home;
-        self.status = None;
+        self.copy_mode = None;
         self.last_term_size = None;
     }
 
+    fn active_terminal(&self) -> Option<&TerminalSession> {
+        self.terminals.get(self.active_term)
+    }
+
+    fn activate_terminal(&mut self, idx: usize) {
+        if idx < self.terminals.len() {
+            self.active_term = idx;
+            self.copy_mode = None;
+            self.last_term_size = None;
+        }
+    }
+
+    fn switch_tab(&mut self, delta: i32) {
+        if self.terminals.is_empty() {
+            return;
+        }
+        let len = self.terminals.len() as i32;
+        let next = (self.active_term as i32 + delta).rem_euclid(len) as usize;
+        self.activate_terminal(next);
+    }
+
     fn disconnect_current(&mut self) {
-        if let Some(t) = &self.terminal {
+        if let Some(t) = self.terminals.get(self.active_term) {
             let _ = self
                 .manager
                 .disconnect_ssh(&SessionId::from(t.session_id.clone()));
+            self.terminals.remove(self.active_term);
+            if self.active_term >= self.terminals.len() && !self.terminals.is_empty() {
+                self.active_term = self.terminals.len() - 1;
+            }
         }
-        self.terminal = None;
+        self.copy_mode = None;
+        if self.terminals.is_empty() {
+            self.go_home();
+        } else {
+            self.last_term_size = None;
+        }
     }
 
     pub fn shutdown(&mut self) {
-        self.disconnect_current();
+        self.manager.disconnect_all();
+        self.terminals.clear();
     }
 
     fn connect_size(&self) -> (u16, u16) {
@@ -990,6 +1034,16 @@ impl App {
             return;
         }
         let sid = session.session.id.clone();
+        // Already open? Just switch to it.
+        if let Some(idx) = self
+            .terminals
+            .iter()
+            .position(|t| t.session_id == sid)
+        {
+            self.activate_terminal(idx);
+            self.page = Page::Terminal;
+            return;
+        }
         let (_, password, key_passphrase) =
             db::get_session_credentials(sid.clone()).unwrap_or((sid.clone(), None, None));
 
@@ -1028,7 +1082,6 @@ impl App {
         }
         let sess = session.session;
         self.connecting = true;
-        self.status = None;
 
         let (cols, rows) = self.connect_size();
         let manager = self.manager.clone();
@@ -1305,64 +1358,67 @@ impl App {
     fn draw_terminal(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let theme = &self.theme;
-        let (term_area, status_area) = {
-            let rows = Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Min(3),
-                Constraint::Length(1),
-            ])
-            .split(area);
-            (rows[1], rows[2])
-        };
+        let rows = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Min(3),
+            Constraint::Length(1),
+        ])
+        .split(area);
+        let (tabs_area, term_area, status_area) = (rows[0], rows[1], rows[2]);
 
-        // Top bar
+        // Tab strip
         {
             let buf = frame.buffer_mut();
-            let mut line = format!(
-                " {}  {} ",
-                if let Some(t) = &self.terminal {
-                    &t.server_name
+            let mut x = tabs_area.x;
+            for (i, t) in self.terminals.iter().enumerate() {
+                let active = i == self.active_term;
+                let label = format!(
+                    " {} {} ",
+                    i + 1,
+                    if t.connected {
+                        t.server_name.clone()
+                    } else {
+                        format!("{}(down)", t.server_name)
+                    }
+                );
+                let style = if active {
+                    Style::default()
+                        .fg(theme.accent)
+                        .add_modifier(Modifier::BOLD)
+                        .add_modifier(Modifier::REVERSED)
                 } else {
-                    "connecting..."
-                },
-                if let Some(t) = &self.terminal {
-                    &t.user_host
+                    Style::default().fg(theme.dim)
+                };
+                let w = x + unicode_width::UnicodeWidthStr::width(label.as_str()) as u16;
+                if w < tabs_area.x + tabs_area.width {
+                    buf.set_string(x, tabs_area.y, &label, style);
+                    x = w + 1;
                 } else {
-                    ""
+                    break;
                 }
-            );
+            }
             if self.connecting {
-                line.push_str("  (connecting…)");
+                buf.set_string(
+                    x,
+                    tabs_area.y,
+                    " (connecting…)",
+                    Style::default().fg(theme.warning),
+                );
             }
-            if let Some(t) = &self.terminal
-                && !t.pane.is_at_bottom()
-                && self.copy_mode.is_none()
-            {
-                line.push_str(&format!(
-                    "  ⤒ {} lines back ",
-                    t.pane.scroll_offset()
-                ));
-            }
-            buf.set_string(
-                area.x,
-                area.y,
-                &line,
-                Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
-            );
             let hint = if self.copy_mode.is_some() {
                 " copy: arrows move · enter/copy  esc: exit "
             } else {
-                " ctrl+p commands · ctrl+x c copy · ctrl+x d disconnect "
+                " ctrl+tab switch · ctrl+p commands · ctrl+x c copy · ctrl+x d disconnect "
             };
             buf.set_string(
-                area.x + area.width.saturating_sub(hint.len() as u16),
-                area.y,
+                tabs_area.x + tabs_area.width.saturating_sub(hint.len() as u16),
+                tabs_area.y,
                 hint,
                 Style::default().fg(theme.accent),
             );
         }
 
-        if let Some(t) = &mut self.terminal {
+        if let Some(t) = self.terminals.get_mut(self.active_term) {
             // Sync emulator + remote PTY with the widget size.
             let (w, h) = (term_area.width, term_area.height);
             if self.last_term_size != Some((w, h)) {
@@ -1398,7 +1454,10 @@ impl App {
         let theme = &self.theme;
         let buf = frame.buffer_mut();
 
-        let (dot, dot_color, label) = match (&self.terminal, &self.status, self.connecting) {
+        let t = self.terminals.get(self.active_term);
+        let status = t.and_then(|t| t.status.clone());
+        let scrolled = t.is_some_and(|t| !t.pane.is_at_bottom() && self.copy_mode.is_none());
+        let (dot, dot_color, label) = match (t, status, self.connecting) {
             (Some(t), _, _) if !t.connected => (
                 "●",
                 theme.error,
@@ -1407,24 +1466,30 @@ impl App {
                     .unwrap_or_else(|| "disconnected".into()),
             ),
             (_, _, true) => ("●", theme.warning, "connecting".into()),
-            (Some(_), Some(s), _) => (
+            (Some(t), Some(s), _) => (
                 "●",
                 theme.ok,
                 format!(
-                    "cpu {:.0}%  mem {:.0}%  lat {}ms  load {:.2}",
+                    "{} — cpu {:.0}%  mem {:.0}%  lat {}ms  load {:.2}",
+                    t.user_host,
                     s.cpu_usage,
                     s.mem_usage,
                     s.latency,
                     s.load_avg[0]
                 ),
             ),
-            (Some(_), None, _) => ("●", theme.ok, "connected".into()),
-            _ => ("○", theme.dim, "no session".into()),
+            (Some(t), None, _) => ("●", theme.ok, format!("{} — connected", t.user_host)),
+            _ => ("○", theme.dim, "no active session".into()),
         };
 
-        let text = format!(" {} {} ", dot, label);
+        let mut text = format!(" {} {} ", dot, label);
+        if scrolled
+            && let Some(t) = self.terminals.get(self.active_term)
+        {
+            text.insert_str(0, &format!("⤒ {} lines back · ", t.pane.scroll_offset()));
+        }
         buf.set_string(area.x, area.y, &text, Style::default().fg(dot_color));
-        let hint = " ctrl+x q quit · esc: shell ";
+        let hint = " ctrl+x q quit · esc: shell · ctrl+tab: switch ";
         buf.set_string(
             area.x + area.width.saturating_sub(hint.len() as u16),
             area.y,

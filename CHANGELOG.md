@@ -5,6 +5,18 @@
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-08-17
+
+### Added
+
+- TUI 多会话并存：同时保持多个 SSH 连接，终端页顶部 tab 条显示全部会话（断线标注 down）
+- 切换：`ctrl+tab` / `ctrl+shift+tab` 循环，leader `t` 循环，`ctrl+x 1`-`9` 直达；断开会话后其余保持打开，全部断开才回首页
+- 会话级状态栏（每个终端独立保存 CPU/内存/延迟/负载），状态栏显示 user@host、回看行数提示
+
+### Changed
+
+- `App` 从单终端重构为 `terminals: Vec<TerminalSession>` + `active_term`；事件按 session_id 路由到对应终端；退出时 `disconnect_all` 统一清理
+
 ## [1.13.0] - 2026-08-17
 
 ### Added
