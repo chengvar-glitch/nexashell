@@ -59,6 +59,36 @@ pnpm build && pnpm tauri build
 
 ---
 
+## 🖥️ Terminal UI (TUI)
+
+NexaShell ships a lightweight **ratatui**-based TUI frontend (`src-tui/`) that shares the exact same encrypted SQLite database and `known_hosts` as the desktop app — you can manage the same sessions from a plain terminal (e.g. over SSH, or on servers/CI boxes).
+
+```bash
+# Run the TUI (requires a Rust toolchain)
+pnpm tui
+# or directly:
+cargo run --manifest-path src-tui/Cargo.toml
+```
+
+| Feature | Desktop app | TUI | Notes |
+|---|---|---|---|
+| Session list / filter / favorites / tags | ✅ | ✅ | shown in the session list |
+| New session (password / key auth) | ✅ | ✅ | `ctrl+p` → `new`, or `ctrl+x n` |
+| SSH terminal (vt100 emulation) | ✅ | ✅ | bracketed paste, resize sync, live status bar |
+| Server status (CPU/mem/latency/load) | ✅ | ✅ | helper-session monitoring |
+| Terminal scrollback / copy mode | ✅ | ⏳ planned | — |
+| Multi-session tabs | ✅ | ⏳ planned | — |
+| Session edit / delete / favorite toggle | ✅ | ⏳ planned | — |
+| Command snippets | ✅ | ⏳ planned | — |
+| Tunnel rules (start/stop) | ✅ | ⏳ planned | — |
+| SFTP file browser | ✅ | ⏳ planned | — |
+| Local (PTY) terminal | ✅ | ⏳ planned | — |
+| Import/export, group/tag management | ✅ | ⏳ planned | — |
+
+> The TUI is a separate crate (`nexashell-tui`); CI gates it with `cargo check` + `test` + `clippy -D warnings`. Sensitive credentials stay encrypted on disk and are decrypted only at connect time.
+
+---
+
 ## 🏗️ Architecture Design
 
 NexaShell adopts a **Multi-Process Architecture** powered by [Tauri 2](https://tauri.app/), separating the UI concerns from the low-level system operations.
@@ -175,6 +205,7 @@ sequenceDiagram
 | `cargo test` | Rust unit tests (run from `src-tauri/`) |
 | `cargo clippy` | Rust lints (`-D warnings` in CI) |
 | `pnpm tauri build` | Production desktop bundle (DMG on macOS, NSIS on Windows) |
+| `pnpm tui` | Run the ratatui TUI frontend (`src-tui/`) |
 
 ---
 

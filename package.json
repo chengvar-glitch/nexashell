@@ -1,7 +1,7 @@
 {
   "name": "nexashell",
   "private": true,
-  "version": "1.12.0",
+  "version": "1.12.1",
   "type": "module",
   "engines": {
     "node": ">=18"
@@ -20,6 +20,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "tui": "cargo run --manifest-path src-tui/Cargo.toml",
     "format": "prettier --write ."
   },
   "dependencies": {

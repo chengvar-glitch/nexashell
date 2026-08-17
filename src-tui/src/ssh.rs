@@ -899,6 +899,7 @@ impl SshManager {
         Ok(())
     }
 
+    #[allow(dead_code)] // wired by the multi-session shutdown path
     pub fn disconnect_all(&self) {
         let session_ids: Vec<SessionId> = if let Ok(channels) = self.channels.read() {
             channels.keys().cloned().collect()

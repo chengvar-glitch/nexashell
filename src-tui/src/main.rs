@@ -6,7 +6,6 @@ mod ssh;
 mod term;
 mod ui;
 
-use common::SessionId;
 use ratatui::crossterm::event::{self, Event, KeyEvent, KeyEventKind};
 use ratatui::crossterm::execute;
 use std::io::stdout;

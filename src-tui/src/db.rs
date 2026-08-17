@@ -6,6 +6,15 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
+// ----------------------------------------------------------------------------
+// Mirror-API policy
+// ----------------------------------------------------------------------------
+// This module mirrors the desktop app's SQLite API so the TUI shares the same
+// database. Functions/structs the TUI does not call yet are marked
+// `#[allow(dead_code)]` and get wired progressively as TUI features land; they
+// are intentionally kept for parity with the desktop surface (groups/tags,
+// import/export, snippets, tunnel rules).
+// ----------------------------------------------------------------------------
 
 /// Platform-specific app data directory path for the SQLite database.
 static DB_PATH: Lazy<Result<PathBuf, String>> = Lazy::new(|| {
@@ -63,6 +72,7 @@ pub struct Group {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub struct Tag {
     pub id: String,
     pub name: String,
@@ -73,6 +83,7 @@ pub struct Tag {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub struct ExportSession {
     pub metadata: Session,
     pub encrypted_credentials: Option<String>,
@@ -91,6 +102,7 @@ pub struct SessionWithRelations {
 }
 
 #[derive(Serialize, Deserialize)]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub struct ExportData {
     pub sessions: Vec<ExportSession>,
     pub groups: Vec<Group>,
@@ -183,6 +195,7 @@ fn build_update(
     Ok((sql, params_vec))
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 fn exec_update(conn: &Connection, sql: &str, params_vec: &[Box<dyn ToSql>]) -> Result<(), String> {
     let p: Vec<&dyn ToSql> = params_vec.iter().map(|b| &**b as &dyn ToSql).collect();
     conn.execute(sql, p.as_slice()).map_err(|e| e.to_string())?;
@@ -394,6 +407,7 @@ pub(super) fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sessio
 
 pub(super) const SESSION_COLUMNS: &str = "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn add_session(
     addr: String,
     port: i64,
@@ -572,6 +586,7 @@ pub fn get_session_credentials(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn save_session(
     addr: String,
     port: i64,
@@ -629,6 +644,7 @@ pub fn save_session(
     Ok(id)
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn toggle_favorite(id: String, is_favorite: bool) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
@@ -651,6 +667,7 @@ pub fn update_session_timestamp(id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_sessions() -> Result<Vec<Session>, String> {
     with_db(|conn| {
         let sql = format!("SELECT {} FROM sessions", SESSION_COLUMNS);
@@ -663,6 +680,7 @@ pub fn list_sessions() -> Result<Vec<Session>, String> {
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn get_sessions(
     group_id: Option<String>,
     tag_id: Option<String>,
@@ -803,6 +821,7 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn edit_group(id: String, name: Option<String>, sort: Option<i64>) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard
@@ -828,6 +847,7 @@ pub fn edit_group(id: String, name: Option<String>, sort: Option<i64>) -> Result
     exec_update(conn, &sql, &params)
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_group(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard
@@ -845,6 +865,7 @@ pub fn delete_group(id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn edit_tag(
     id: String,
     name: Option<String>,
@@ -881,6 +902,7 @@ pub fn edit_tag(
     exec_update(conn, &sql, &params)
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_tag(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard
@@ -896,6 +918,7 @@ pub fn delete_tag(id: String) -> Result<(), String> {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn edit_session(
     id: String,
     addr: Option<String>,
@@ -960,6 +983,7 @@ pub fn edit_session(
     exec_update(conn, &sql, &params)
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_session(id: String) -> Result<(), String> {
     let mut guard = db_conn()?;
     let conn = guard
@@ -983,6 +1007,7 @@ pub fn delete_session(id: String) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn add_group(name: Option<String>, sort: Option<i64>) -> Result<String, String> {
     let mut guard = db_conn()?;
     let conn = guard
@@ -1020,6 +1045,7 @@ pub fn list_groups() -> Result<Vec<Group>, String> {
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn link_session_group(session_id: String, group_id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
@@ -1031,6 +1057,7 @@ pub fn link_session_group(session_id: String, group_id: String) -> Result<(), St
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn unlink_session_group(session_id: String, group_id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
@@ -1042,6 +1069,7 @@ pub fn unlink_session_group(session_id: String, group_id: String) -> Result<(), 
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String> {
     with_db(|conn| {
         let mut stmt = conn
@@ -1069,6 +1097,7 @@ pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String>
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn add_tag(
     name: Option<String>,
     color: Option<String>,
@@ -1089,6 +1118,7 @@ pub fn add_tag(
     Ok(id)
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_tags() -> Result<Vec<Tag>, String> {
     with_db(|conn| {
         let mut stmt = conn
@@ -1111,6 +1141,7 @@ pub fn list_tags() -> Result<Vec<Tag>, String> {
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn link_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
@@ -1122,6 +1153,7 @@ pub fn link_session_tag(session_id: String, tag_id: String) -> Result<(), String
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn unlink_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute(
@@ -1133,6 +1165,7 @@ pub fn unlink_session_tag(session_id: String, tag_id: String) -> Result<(), Stri
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
     with_db(|conn| {
         let mut stmt = conn
@@ -1167,6 +1200,7 @@ pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub struct TunnelRuleRow {
     pub id: String,
     pub session_id: String,
@@ -1178,6 +1212,7 @@ pub struct TunnelRuleRow {
     pub enabled: bool,
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn add_tunnel_rule(
     session_id: String,
     direction: String,
@@ -1212,6 +1247,7 @@ pub fn add_tunnel_rule(
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_tunnel_rules(session_id: String) -> Result<Vec<TunnelRuleRow>, String> {
     with_db(|conn| {
         let mut stmt = conn
@@ -1238,6 +1274,7 @@ pub fn list_tunnel_rules(session_id: String) -> Result<Vec<TunnelRuleRow>, Strin
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn update_tunnel_rule(
     id: String,
     direction: Option<String>,
@@ -1272,6 +1309,7 @@ pub fn update_tunnel_rule(
     with_db(|conn| exec_update(conn, &sql, &params_vec))
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_tunnel_rule(id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM tunnel_rules WHERE id = ?1", params![id])
@@ -1280,6 +1318,7 @@ pub fn delete_tunnel_rule(id: String) -> Result<(), String> {
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_tunnel_rules_for_session(session_id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM tunnel_rules WHERE session_id = ?1", params![session_id])
@@ -1294,6 +1333,7 @@ pub fn delete_tunnel_rules_for_session(session_id: String) -> Result<(), String>
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub struct Snippet {
     pub id: String,
     pub name: String,
@@ -1304,6 +1344,7 @@ pub struct Snippet {
     pub updated_at: String,
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn add_snippet(name: String, command: String, description: Option<String>) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     with_db(|conn| {
@@ -1319,6 +1360,7 @@ pub fn add_snippet(name: String, command: String, description: Option<String>) -
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn list_snippets() -> Result<Vec<Snippet>, String> {
     with_db(|conn| {
         let mut stmt = conn
@@ -1344,6 +1386,7 @@ pub fn list_snippets() -> Result<Vec<Snippet>, String> {
     })
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn update_snippet(
     id: String,
     name: Option<String>,
@@ -1368,6 +1411,7 @@ pub fn update_snippet(
     with_db(|conn| exec_update(conn, &sql, &params_vec))
 }
 
+#[allow(dead_code)] // mirror API not wired into the TUI UI yet
 pub fn delete_snippet(id: String) -> Result<(), String> {
     with_db(|conn| {
         conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])

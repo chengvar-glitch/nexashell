@@ -3,7 +3,6 @@ use crate::db;
 use crate::db::{Group, SessionWithRelations};
 use crate::ssh::{ServerStatus, SshEventSink, SshManager};
 use crate::term::TerminalPane;
-use ratatui::buffer::Buffer;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -520,11 +519,9 @@ impl App {
                     self.start_connect(sess);
                 }
             }
-            KeyCode::Esc => {
-                if !self.filter.is_empty() {
-                    self.filter.clear();
-                    self.filter_cursor = 0;
-                }
+            KeyCode::Esc if !self.filter.is_empty() => {
+                self.filter.clear();
+                self.filter_cursor = 0;
             }
             _ => {}
         }
@@ -535,12 +532,10 @@ impl App {
         match key.code {
             KeyCode::Char('p') if ctrl => self.open_command_bar(),
             _ => {
-                if let Some(seq) = key_to_escape(key) {
-                    if let Some(t) = &self.terminal {
-                        let _ = self
-                            .manager
-                            .send_ssh_input(&SessionId::from(t.session_id.clone()), seq);
-                    }
+                if let (Some(seq), Some(t)) = (key_to_escape(key), &self.terminal) {
+                    let _ = self
+                        .manager
+                        .send_ssh_input(&SessionId::from(t.session_id.clone()), seq);
                 }
             }
         }
@@ -965,7 +960,7 @@ impl App {
     fn draw_home(&mut self, frame: &mut Frame) {
         let area = frame.area();
         let theme = &self.theme;
-        let mut buf = frame.buffer_mut();
+        let buf = frame.buffer_mut();
 
         // Top bar
         buf.set_string(
@@ -1090,7 +1085,7 @@ impl App {
 
     fn draw_home_status(&self, frame: &mut Frame, area: Rect) {
         let theme = &self.theme;
-        let mut buf = frame.buffer_mut();
+        let buf = frame.buffer_mut();
         let favs = self
             .sessions
             .iter()
@@ -1131,7 +1126,7 @@ impl App {
 
         // Top bar
         {
-            let mut buf = frame.buffer_mut();
+            let buf = frame.buffer_mut();
             let mut line = format!(
                 " {}  {} ",
                 if let Some(t) = &self.terminal {
@@ -1187,7 +1182,7 @@ impl App {
 
     fn draw_term_status(&self, frame: &mut Frame, area: Rect) {
         let theme = &self.theme;
-        let mut buf = frame.buffer_mut();
+        let buf = frame.buffer_mut();
 
         let (dot, dot_color, label) = match (&self.terminal, &self.status, self.connecting) {
             (Some(t), _, _) if !t.connected => (
@@ -1366,8 +1361,8 @@ impl App {
                     } else {
                         Style::default().fg(theme.dim)
                     };
-                    let mut buf = frame.buffer_mut();
-                    buf.set_string(inner.x, y, &format!(" {}", field.label), label_style);
+                    let buf = frame.buffer_mut();
+                    buf.set_string(inner.x, y, format!(" {}", field.label), label_style);
                     let value: String = if field.masked {
                         field.value.chars().map(|_| '•').collect()
                     } else {
@@ -1376,7 +1371,7 @@ impl App {
                     buf.set_string(
                         inner.x + 2,
                         y + 1,
-                        &format!(" {}", value),
+                        format!(" {}", value),
                         Style::default()
                             .fg(theme.fg)
                             .bg(if focused { Color::DarkGray } else { Color::Black }),
@@ -1580,7 +1575,7 @@ pub fn key_to_escape(key: KeyEvent) -> Option<String> {
                     return Some("\x00".into());
                 }
                 let lower = c.to_ascii_lowercase();
-                if ('a'..='z').contains(&lower) {
+                if lower.is_ascii_lowercase() {
                     return Some(((lower as u8 - b'a' + 1) as char).to_string());
                 }
                 return match c {

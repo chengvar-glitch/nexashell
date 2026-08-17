@@ -12,8 +12,10 @@ use zeroize::Zeroize;
 
 const SERVICE_NAME: &str = "NexaShell";
 const ACCOUNT_NAME: &str = "master-key";
+#[allow(dead_code)] // export/import helpers keep this constant dormant
 const ITERATIONS: u32 = 390_000;
 const KEY_LEN: usize = 32;
+#[allow(dead_code)] // export/import helpers keep this constant dormant
 const SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 
@@ -167,6 +169,7 @@ impl EncryptionManager {
     ///
     /// Format: `v1$<base64(salt)><base64(nonce+ciphertext)>`.
     /// A fresh random salt is generated for every call.
+    #[allow(dead_code)] // export/import surface, not wired into the TUI yet
     pub fn encrypt_with_key(data: &SensitiveData, key_str: &str) -> Result<String, String> {
         let mut salt = [0u8; SALT_LEN];
         thread_rng().fill_bytes(&mut salt);
@@ -181,6 +184,7 @@ impl EncryptionManager {
         Ok(format!("v1${}${}", salt_b64, inner))
     }
 
+    #[allow(dead_code)] // export/import surface, not wired into the TUI yet
     pub fn decrypt_with_key(encrypted: &str, key_str: &str) -> Result<SensitiveData, String> {
         // New format: v1$<salt_b64>$<nonce+ciphertext_b64>
         if let Some(rest) = encrypted.strip_prefix("v1$") {

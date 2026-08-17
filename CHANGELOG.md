@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [1.12.1] - 2026-08-17
+
+### Added
+
+- TUI 质量门：CI 新增 `tui` 任务，对 `src-tui` 执行 `cargo check` + `test` + `clippy -D warnings`
+- TUI 文档：README 新增「Terminal UI（TUI）」章节（运行方式、桌面/TUI 功能对照表），新增 `pnpm tui` 运行脚本
+
+### Fixed
+
+- 清理 `src-tui` 全部 46 个编译警告（未接线的共享数据库镜像 API 标注 `allow(dead_code)`，clippy 修复 5 处（collapsible-if/needless-borrow/manual-is-ascii-check））
+
 ## [1.10.2] - 2026-08-16
 
 ### Fixed

@@ -66,3 +66,26 @@ jobs:
 
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  tui:
+    name: TUI (cargo check + test + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tui
+
+      - name: Cargo check
+        run: cargo check --manifest-path src-tui/Cargo.toml
+
+      - name: Cargo test
+        run: cargo test --manifest-path src-tui/Cargo.toml
+
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path src-tui/Cargo.toml -- -D warnings
