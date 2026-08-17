@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+## [1.17.1] - 2026-08-17
+
+### Fixed
+
+- GUI 终端 `Ctrl+V` / `Cmd+V` 粘贴失效：xterm.js 在 Tauri WebView 里不会为 `Ctrl+V` 可靠读取剪贴板（此前按键被吞掉、仅 `Shift+Insert` 可用）。现在显式 `navigator.clipboard.readText()` 后 `terminal.paste()`，并统一 `Ctrl+C` 复制分支（选中即复制 + `clearSelection`，无选中仍作为 SIGINT 直通 shell）
+
 ## [1.17.0] - 2026-08-17
 
 ### Added

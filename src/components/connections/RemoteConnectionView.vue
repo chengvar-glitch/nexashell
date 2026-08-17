@@ -1297,19 +1297,44 @@ const initialize = async (): Promise<void> => {
     }
 
     // 2. Handle clipboard shortcuts (Cmd+C/V on Mac, Ctrl+C/V on Windows/Linux)
-    // We let KeyC and KeyV bubble to the browser so it can handle native Copy/Paste
-    // xterm.js manages a hidden textarea that receives these events correctly.
-    // This avoids the "Permission required" popup from navigator.clipboard.readText().
-    if (isControlKey && (event.code === 'KeyC' || event.code === 'KeyV')) {
-      // For Ctrl+C on Windows/Linux, if there is a selection, we copy and don't send to terminal.
-      if (!isMac && event.code === 'KeyC' && terminal?.hasSelection()) {
+    // Ctrl+C: copy the selection. We copy explicitly and swallow the key so it
+    // is never sent to the shell (unlike Ctrl+D's EOF, Ctrl+C with a selection
+    // must not reach the remote process as SIGINT).
+    if (isControlKey && event.code === 'KeyC') {
+      if (terminal?.hasSelection()) {
         const selection = terminal.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection);
+          navigator.clipboard.writeText(selection).catch(err => {
+            logger.error('Copy selection failed', err);
+          });
         }
-        return false;
+        terminal.clearSelection();
       }
-      return true; // Let browser/xterm handle it natively
+      // No selection: let xterm's native textarea handling keep the default
+      // (it sends the SIGINT control byte to the shell).
+      return !terminal?.hasSelection();
+    }
+
+    // 3. Ctrl+V / Cmd+V: paste. xterm.js does NOT reliably read the clipboard
+    // for Ctrl+V through its hidden textarea — on Tauri's WebView it often
+    // swallows the key (sends a raw \x16 control byte) instead of pasting,
+    // which is why only Shift+Insert historically worked. Explicitly read the
+    // clipboard here and hand the text to terminal.paste(), then swallow the
+    // key so xterm never re-processes it.
+    if (isControlKey && event.code === 'KeyV') {
+      event.preventDefault();
+      event.stopPropagation();
+      navigator.clipboard
+        .readText()
+        .then(text => {
+          if (text && terminal) {
+            terminal.paste(text);
+          }
+        })
+        .catch(err => {
+          logger.error('Paste failed', err);
+        });
+      return false;
     }
 
     // 3. Other internal shortcuts
