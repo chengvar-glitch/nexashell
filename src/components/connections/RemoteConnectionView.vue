@@ -693,24 +693,21 @@ const writeBufferedOutput = async (): Promise<boolean> => {
 /**
  * Establish connection via session store and API.
  *
- * Returns true when this call actually created the backend session (fresh
- * connection), false when the session already existed. The buffered initial
- * output poll must run ONLY for a freshly created session: the backend drains
- * its initial-output cache on first read, and the cache is only ever written
- * during the brief window right after connect. Re-mounting the component for
- * an already-live session (tab reopen, split pane re-render) must NOT re-poll
- * — with the old peek semantics every such mount replayed the cached welcome
- * banner / MOTD / first prompt (and any output produced inside the initial
- * buffering window) into the terminal again, so the same screen content kept
- * re-appearing ("keeps scrolling").
+ * The buffered initial-output poll runs for EVERY SSH session mount (not just
+ * freshly created ones): the backend drains its initial-output cache on first
+ * read, so polling an already-live session returns an empty cache and is a
+ * cheap no-op, while polling a session that was pre-created by App.vue (SSH
+ * form connect — the component mounts only after the backend already emitted
+ * the banner) restores the welcome banner / MOTD that the live event stream
+ * delivered before this component's listener existed. Re-mounting an
+ * already-live session cannot replay anything — the cache is one-shot.
  */
-const connectSession = async (cols: number, rows: number): Promise<boolean> => {
+const connectSession = async (cols: number, rows: number): Promise<void> => {
   if (!props.sessionId) {
     throw new Error('sessionId is required');
   }
 
   const sessionExists = sessionStore.hasSession(props.sessionId);
-  const created = !sessionExists;
 
   if (!sessionExists) {
     if (props.tabType === 'terminal') {
@@ -749,11 +746,12 @@ const connectSession = async (cols: number, rows: number): Promise<boolean> => {
     }
   }
 
-  if (props.tabType !== 'terminal' && created) {
+  if (props.tabType !== 'terminal') {
     // The welcome banner / MOTD is buffered by the backend for a short
     // window after connect. Poll the buffer instead of sleeping a fixed
     // amount so we return as soon as content is ready (and never block on a
-    // magic timer). `writeBufferedOutput` dedupes against live events.
+    // magic timer). `writeBufferedOutput` dedupes against live events; the
+    // backend drains the cache on read, so this is safe to run on every mount.
     const maxAttempts = 14;
     const runGeneration = generation;
     let attempts = 0;
@@ -764,8 +762,6 @@ const connectSession = async (cols: number, rows: number): Promise<boolean> => {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
   }
-
-  return created;
 };
 
 /**
