@@ -137,7 +137,11 @@ pub fn utf8_incomplete_tail(bytes: &[u8]) -> usize {
 /// trailing sequence in `carry` so it is prepended to the next chunk.
 ///
 /// Any leftover bytes carried from a previous flush are prepended first, then
-/// the incomplete tail (if any) is split off and kept for the next flush.
+/// the incomplete tail (if any) is split off and kept for the next flush. The
+/// complete part is taken OUT of `pending` — `pending` must end up empty, or
+/// every subsequent flush would re-emit the same accumulated content (the
+/// SSH I/O loop would repeatedly re-send the welcome banner / MOTD and make
+/// every echoed keystroke appear doubled).
 pub fn flush_utf8(pending: &mut Vec<u8>, carry: &mut Vec<u8>) -> String {
     if !carry.is_empty() {
         let mut tail = std::mem::take(carry);
@@ -146,8 +150,12 @@ pub fn flush_utf8(pending: &mut Vec<u8>, carry: &mut Vec<u8>) -> String {
     }
     let incomplete = utf8_incomplete_tail(pending);
     let split = pending.len() - incomplete;
+    // `pending.split_off(split)` leaves the COMPLETE part in `pending` and
+    // returns the incomplete tail — carry the tail and then take the complete
+    // part out so `pending` is drained and never re-emitted.
     *carry = pending.split_off(split);
-    String::from_utf8_lossy(pending).into_owned()
+    let complete = std::mem::take(pending);
+    String::from_utf8_lossy(&complete).into_owned()
 }
 
 #[cfg(test)]
@@ -232,5 +240,25 @@ mod tests {
         let mut carry: Vec<u8> = Vec::new();
         assert_eq!(flush_utf8(&mut pending, &mut carry), "plain text");
         assert!(carry.is_empty());
+    }
+
+    #[test]
+    fn flush_utf8_drains_pending_to_prevent_reemission() {
+        // Regression for the SSH banner-repeat / doubled-echo bug: the flush
+        // must REMOVE the complete bytes from `pending`, otherwise the SSH I/O
+        // loop (20ms read timeout, fast idle spin) re-emits the same
+        // accumulated content on every iteration — the welcome banner kept
+        // scrolling and every echoed keystroke appeared twice.
+        let mut pending: Vec<u8> = b"Welcome banner content".to_vec();
+        let mut carry: Vec<u8> = Vec::new();
+
+        let first = flush_utf8(&mut pending, &mut carry);
+        assert_eq!(first, "Welcome banner content");
+        assert!(pending.is_empty(), "pending must be drained after a flush");
+        assert!(carry.is_empty());
+
+        // Repeated flushes with no new data must not re-emit anything.
+        assert!(flush_utf8(&mut pending, &mut carry).is_empty());
+        assert!(pending.is_empty());
     }
 }
