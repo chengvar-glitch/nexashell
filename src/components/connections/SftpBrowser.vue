@@ -175,6 +175,8 @@ const cancelRename = () => {
 };
 
 onMounted(() => {
+  // Detect the remote OS once (Windows hosts need drive-aware path handling).
+  void sftp.probePlatform();
   // Open the requested initial path (e.g. the terminal's CWD), falling back
   // to the root when none is provided.
   void sftp.go(normalizePath(props.initialPath || '/'));

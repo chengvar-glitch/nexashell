@@ -132,10 +132,13 @@ const newFolder = () => void browserRef.value?.newFolder();
 /** Start an upload for a list of local file paths into the current remote dir. */
 const uploadLocalPaths = async (paths: string[]) => {
   if (!sessionId.value || paths.length === 0) return;
-  const base = currentRemotePath.value === '/' ? '' : currentRemotePath.value;
+  const base = currentRemotePath.value.trim().replace(/\/$/, '');
   for (const localPath of paths) {
-    const fileName = localPath.split('/').pop() || localPath;
-    await transferQueue.startUpload(localPath, `${base}/${fileName}`, fileName);
+    // Basename handles both `/` (POSIX) and `\` (Windows) local separators.
+    const normalized = localPath.replace(/\\/g, '/');
+    const fileName = normalized.split('/').pop() || localPath;
+    const target = `${base}/${fileName}`;
+    await transferQueue.startUpload(localPath, target, fileName);
   }
   refreshBrowser();
   showTransfers.value = true;

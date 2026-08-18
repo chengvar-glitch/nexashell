@@ -183,6 +183,11 @@ pub struct SshChannelInfo {
     pub input_listener_id: Option<tauri::EventId>,
     pub resize_listener_id: Option<tauri::EventId>,
     pub app_handle: Option<tauri::AppHandle>,
+
+    /// Remote OS platform, cached after the first probe (`windows`/`macos`/
+    /// `linux`/`unknown`). Used by the file browser to pick Windows-aware path
+    /// handling. Nil until probed.
+    pub remote_platform: Arc<std::sync::OnceLock<String>>,
 }
 
 fn build_pty_modes() -> PtyModes {
@@ -346,6 +351,7 @@ impl SshManager {
                     input_listener_id,
                     resize_listener_id,
                     app_handle: app_handle.clone(),
+                    remote_platform: Arc::new(std::sync::OnceLock::new()),
                 },
             );
         }
@@ -856,6 +862,70 @@ impl SshManager {
         Ok(output.trim().eq_ignore_ascii_case("linux"))
     }
 
+    /// Probe the remote OS platform via a single `uname -s`. Returns a normal
+    /// category string (`windows` / `macos` / `linux`) or `unknown` when the
+    /// probe fails or reports an unrecognized kernel. The caller must hold the
+    /// helper session lock and run on a blocking thread.
+    fn probe_platform_blocking(sess: &Session) -> String {
+        let mut channel = match sess.channel_session() {
+            Ok(ch) => ch,
+            Err(_) => return "unknown".to_string(),
+        };
+        if channel
+            .exec("uname -s 2>/dev/null || echo unknown")
+            .is_err()
+        {
+            return "unknown".to_string();
+        }
+        let mut output = String::new();
+        let _ = channel.read_to_string(&mut output);
+        let _ = channel.wait_close();
+        let trimmed = output.trim().to_ascii_lowercase();
+        if trimmed.contains("mingw") || trimmed.contains("cygwin") || trimmed == "windows" {
+            "windows".to_string()
+        } else if trimmed.contains("darwin") {
+            "macos".to_string()
+        } else if trimmed == "linux" {
+            "linux".to_string()
+        } else {
+            "unknown".to_string()
+        }
+    }
+
+    /// Return the remote platform for a session, probing on first call and
+    /// caching the result for the life of the session.
+    pub async fn remote_platform(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<String, SshError> {
+        let helper_sess = self.helper_session(session_id)?;
+        let platform_cache = {
+            let channels = self
+                .channels
+                .read()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            channels
+                .get(session_id)
+                .ok_or_else(|| SshError::SessionNotFound(session_id.as_ref().to_string()))?
+                .remote_platform
+                .clone()
+        };
+
+        if let Some(p) = platform_cache.get() {
+            return Ok(p.clone());
+        }
+
+        let p = tokio::task::spawn_blocking(move || {
+            let sess = helper_sess.blocking_lock();
+            Self::probe_platform_blocking(&sess)
+        })
+        .await
+        .map_err(|e| SshError::TaskError(e.to_string()))?;
+
+        let _ = platform_cache.set(p.clone());
+        Ok(p)
+    }
+
     /// A zeroed status used for hosts that don't expose the Linux `/proc`
     /// metrics the dashboard reads.
     fn empty_status() -> ServerStatus {
@@ -1218,6 +1288,9 @@ impl SshManager {
                 // continues writing at the same offset. (`sess` is kept alive
                 // because the Sftp borrows from it.)
                 let (sess, sftp) = Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
+                // Normalize the remote path (Windows backslashes -> `/`) so
+                // `C:\dir\file` uploads correctly to Windows SFTP servers.
+                let remote_path = Self::normalize_remote_path(&remote_path);
 
                 let mut remote_file = sftp
                     .open_mode(
@@ -1708,16 +1781,108 @@ impl SshManager {
         Ok(())
     }
 
-    /// Join a remote path segment onto a base path, collapsing duplicate
-    /// slashes while preserving a leading slash for absolute paths.
-    fn join_remote_path(base: &str, name: &str) -> String {
-        if base == "/" {
-            format!("/{}", name)
-        } else if base.is_empty() {
-            name.to_string()
-        } else {
-            format!("{}/{}", base.trim_end_matches('/'), name)
+    /// Normalize a remote SFTP path to a canonical form that works on every
+    /// server: backslashes become forward slashes (Windows SFTP servers accept
+    /// both), duplicate slashes are collapsed, a leading slash (when present) is
+    /// preserved, and a native Windows absolute path (`C:\Users` / `C:/Users`)
+    /// is mapped to the `/C:/Users` form that OpenSSH for Windows virtualizes
+    /// drive roots as. Returns `/` for an empty dirty path.
+    fn normalize_remote_path(path: &str) -> String {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return "/".to_string();
         }
+
+        // Split on either slash flavour.
+        let mut segments: Vec<&str> = Vec::new();
+        for part in trimmed.split(['\\', '/']) {
+            if !part.is_empty() {
+                segments.push(part);
+            }
+        }
+
+        if segments.is_empty() {
+            return "/".to_string();
+        }
+
+        let first_has_leading_slash = trimmed.starts_with('/') || trimmed.starts_with('\\');
+
+        // A native Windows drive prefix (`C`) maps to a virtual `/C:/` root.
+        let first_is_drive_letter = segments[0].len() == 1
+            && segments[0].as_bytes()[0].is_ascii_alphabetic()
+            && segments.len() > 1;
+
+        if first_is_drive_letter {
+            let mut out = format!("/{}:/", segments[0]);
+            for seg in segments.iter().skip(1) {
+                if seg.len() == 2 && seg.as_bytes()[1] == b':' {
+                    // Avoid double-colon segments from a `C:`-style input.
+                    continue;
+                }
+                out.push('/');
+                out.push_str(seg);
+            }
+            return out;
+        }
+
+        // A top-level `C:`-style segment becomes a `/C:/` drive root.
+        if segments[0].len() == 2 && segments[0].as_bytes()[1] == b':' {
+            let mut out = format!("/{}:/", &segments[0][..1]);
+            for seg in segments.iter().skip(1) {
+                out.push('/');
+                out.push_str(seg);
+            }
+            return out;
+        }
+
+        let mut out = if first_has_leading_slash {
+            "/".to_string()
+        } else {
+            String::new()
+        };
+        out.push_str(segments[0]);
+        for seg in segments.iter().skip(1) {
+            out.push('/');
+            out.push_str(seg);
+        }
+        out
+    }
+
+    /// Join a remote path segment onto a base path, collapsing duplicate
+    /// slashes, preserving a leading slash for absolute paths, and handling the
+    /// Windows drive roots that OpenSSH servers virtualize as `/C:/`, `/D:/`.
+    ///
+    /// When joining a single ASCII drive letter (e.g. `C`) at the SFTP root the
+    /// result is a navigable drive root (`/C:/`). `name` may already carry a
+    /// trailing colon (`C:` -> `/C:/`).
+    fn join_remote_path(base: &str, name: &str, is_dir: bool) -> String {
+        let base = Self::normalize_remote_path(base);
+        let name = Self::normalize_remote_path(name);
+        let name = name.trim_matches('/').to_string();
+        if name.is_empty() {
+            return base;
+        }
+
+        let looks_like_drive_root = is_dir
+            && (name.len() == 2 && name.as_bytes()[1] == b':')
+            || (name.len() == 1 && name.is_ascii() && name.as_bytes()[0].is_ascii_alphabetic());
+
+        if base == "/" {
+            if looks_like_drive_root {
+                // `/C` or `/C:` -> `/C:/` (OpenSSH Windows virtual drive root).
+                let drive = name.trim_end_matches(':');
+                return format!("/{}:/", drive);
+            }
+            return format!("/{}", name);
+        }
+        if base.is_empty() {
+            return if looks_like_drive_root {
+                format!("{}:/", name.trim_end_matches(':'))
+            } else {
+                name
+            };
+        }
+        format!("{}/{}", base.trim_end_matches('/'), name)
     }
 
     /// List the entries in a remote directory via the helper SFTP session.
@@ -1734,6 +1899,9 @@ impl SshManager {
             let sftp = sess.sftp().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
             })?;
+            // Normalize the requested directory (backslashes -> forward slashes)
+            // so Windows SFTP paths like `C:\Users` resolve correctly.
+            let path = Self::normalize_remote_path(&path);
             let entries = sftp.readdir(Path::new(&path)).map_err(|e| {
                 SshError::OperationFailed(format!("Failed to list {}: {}", path, e))
             })?;
@@ -1747,11 +1915,12 @@ impl SshManager {
                 if name == "." || name == ".." {
                     continue;
                 }
-                let full_path = Self::join_remote_path(&path, &name);
+                let is_dir = stat.is_dir();
+                let full_path = Self::join_remote_path(&path, &name, is_dir);
                 result.push(SftpEntry {
                     name,
                     path: full_path,
-                    is_dir: stat.is_dir(),
+                    is_dir,
                     is_file: stat.is_file(),
                     is_symlink: is_symlink(&stat),
                     size: stat.size.unwrap_or(0),
@@ -1780,6 +1949,7 @@ impl SshManager {
             let sftp = sess.sftp().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
             })?;
+            let remote_path = Self::normalize_remote_path(&remote_path);
             if is_dir {
                 sftp.rmdir(Path::new(&remote_path)).map_err(|e| {
                     SshError::OperationFailed(format!(
@@ -1814,6 +1984,7 @@ impl SshManager {
             let sftp = sess.sftp().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
             })?;
+            let remote_path = Self::normalize_remote_path(&remote_path);
             sftp.mkdir(Path::new(&remote_path), 0o755).map_err(|e| {
                 SshError::OperationFailed(format!(
                     "Failed to create directory {}: {}",
@@ -1841,6 +2012,8 @@ impl SshManager {
             let sftp = sess.sftp().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to start SFTP: {}", e))
             })?;
+            let old_path = Self::normalize_remote_path(&old_path);
+            let new_path = Self::normalize_remote_path(&new_path);
             sftp.rename(Path::new(&old_path), Path::new(&new_path), None).map_err(|e| {
                 SshError::OperationFailed(format!(
                     "Failed to rename {} to {}: {}",
@@ -1932,6 +2105,8 @@ impl SshManager {
                 // Dedicated connection for this transfer.
                 let (sess, sftp) =
                     Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
+                // Normalize the remote path (Windows backslashes -> `/`).
+                let remote_path = Self::normalize_remote_path(&remote_path);
 
                 let mut remote_file = sftp
                     .open_mode(
@@ -2259,6 +2434,17 @@ pub async fn probe_remote_path(
     state.probe_remote_path(&SessionId::from(sessionId)).await
 }
 
+/// Probe the remote host's OS platform (`windows`/`macos`/`linux`/`unknown`).
+/// Cached per session so repeated calls are cheap.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn sftp_probe_platform(
+    state: tauri::State<'_, SshManager>,
+    sessionId: String,
+) -> Result<String, SshError> {
+    state.remote_platform(&SessionId::from(sessionId)).await
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn pause_upload(
@@ -2479,6 +2665,7 @@ mod upload_control_tests {
             input_listener_id: None,
             resize_listener_id: None,
             app_handle: None,
+            remote_platform: Arc::new(std::sync::OnceLock::new()),
         };
 
         let manager = SshManager {
@@ -2609,12 +2796,35 @@ mod upload_control_tests {
         );
     }
 
-    /// Remote path joining collapses duplicate slashes and preserves the root.
+    /// Remote path joining collapses duplicate slashes, preserves the root, and
+    /// handles Windows drive roots virtualized by OpenSSH as `/C:/`.
     #[test]
     fn join_remote_path_handles_root_and_trailing_slash() {
-        assert_eq!(SshManager::join_remote_path("/", "home"), "/home");
-        assert_eq!(SshManager::join_remote_path("/a/b", "c"), "/a/b/c");
-        assert_eq!(SshManager::join_remote_path("/a/b/", "c"), "/a/b/c");
-        assert_eq!(SshManager::join_remote_path("", "file"), "file");
+        // POSIX-style paths.
+        assert_eq!(SshManager::join_remote_path("/", "home", true), "/home");
+        assert_eq!(SshManager::join_remote_path("/a/b", "c", false), "/a/b/c");
+        assert_eq!(SshManager::join_remote_path("/a/b/", "c", true), "/a/b/c");
+        assert_eq!(SshManager::join_remote_path("", "file", false), "file");
+
+        // Windows drive roots: a single-letter or `C:`-style directory at the
+        // SFTP root becomes a navigable `/C:/` drive root.
+        assert_eq!(SshManager::join_remote_path("/", "C", true), "/C:/");
+        assert_eq!(SshManager::join_remote_path("/", "C:", true), "/C:/");
+        // A file named like a drive letter must NOT gain a colon + slash.
+        assert_eq!(SshManager::join_remote_path("/", "C", false), "/C");
+        // Sub-paths under a drive keep normal POSIX-style joining.
+        assert_eq!(SshManager::join_remote_path("/C:/", "Users", true), "/C:/Users");
+        assert_eq!(SshManager::join_remote_path("/C:/Users", "Desktop", true), "/C:/Users/Desktop");
+    }
+
+    /// Remote path normalization converts backslashes to forward slashes and
+    /// collapses duplicate separators so Windows-native paths resolve over SFTP.
+    #[test]
+    fn normalize_remote_path_handles_windows_backslashes() {
+        assert_eq!(SshManager::normalize_remote_path("C:\\Users\\dev"), "/C:/Users/dev");
+        assert_eq!(SshManager::normalize_remote_path("C:/Users/dev"), "/C:/Users/dev");
+        assert_eq!(SshManager::normalize_remote_path("//a////b"), "/a/b");
+        assert_eq!(SshManager::normalize_remote_path(""), "/");
+        assert_eq!(SshManager::normalize_remote_path("/"), "/");
     }
 }

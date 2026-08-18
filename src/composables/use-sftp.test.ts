@@ -17,6 +17,17 @@ describe('normalizePath', () => {
     expect(normalizePath('/a/b')).toBe('/a/b');
     expect(normalizePath('/')).toBe('/');
   });
+
+  it('normalizes Windows backslash paths into the SFTP /C:/ form', () => {
+    expect(normalizePath('C:\\Users\\dev')).toBe('/C:/Users/dev');
+    expect(normalizePath('C:/Users/dev')).toBe('/C:/Users/dev');
+    expect(normalizePath('D:\\')).toBe('/D:/');
+  });
+
+  it('keeps OpenSSH virtual drive paths as-is', () => {
+    expect(normalizePath('/C:/Users/dev')).toBe('/C:/Users/dev');
+    expect(normalizePath('/C:/')).toBe('/C:/');
+  });
 });
 
 describe('parentOfPath', () => {
@@ -31,6 +42,13 @@ describe('parentOfPath', () => {
   it('returns the immediate parent for nested paths', () => {
     expect(parentOfPath('/a/b/c')).toBe('/a/b');
     expect(parentOfPath('/usr/local')).toBe('/usr');
+  });
+
+  it('handles Windows drive roots', () => {
+    expect(parentOfPath('/C:/Users/dev')).toBe('/C:/Users');
+    expect(parentOfPath('/C:/Users')).toBe('/C:/');
+    expect(parentOfPath('/C:/')).toBe('/');
+    expect(parentOfPath('C:\\Users\\dev')).toBe('/C:/Users');
   });
 });
 
@@ -48,6 +66,7 @@ describe('useSftp return surface', () => {
     expect(typeof sftp.remove).toBe('function');
     expect(typeof sftp.rename).toBe('function');
     expect(typeof sftp.dispose).toBe('function');
+    expect(typeof sftp.probePlatform).toBe('function');
   });
 
   it('exposes reactive browsing state', () => {
@@ -56,5 +75,6 @@ describe('useSftp return surface', () => {
     expect(typeof sftp.entries).toBe('object');
     expect(typeof sftp.loading).toBe('object');
     expect(typeof sftp.error).toBe('object');
+    expect(typeof sftp.platform).toBe('object');
   });
 });

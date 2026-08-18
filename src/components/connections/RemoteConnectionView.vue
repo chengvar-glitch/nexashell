@@ -611,7 +611,9 @@ const writeBufferedOutput = async (): Promise<boolean> => {
       const ubuntuMatch = cleanLine.match(/.*@.*:(.*)[#$]/);
 
       const initialPath = centosMatch?.[1] || ubuntuMatch?.[1];
-      if (initialPath && initialPath.startsWith('/')) {
+      // Accept both POSIX (`/home/user`) and Windows (`C:\Users\user`) prompt
+      // paths so the embedded file browser can start in the right directory.
+      if (initialPath && (initialPath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(initialPath))) {
         remoteHomeDir.value = initialPath;
         logger.info('Cached initial remote home directory', {
           home: remoteHomeDir.value,

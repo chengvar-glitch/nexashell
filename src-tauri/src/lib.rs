@@ -92,6 +92,7 @@ pub fn run() {
             ssh::get_buffered_ssh_output,
             ssh::upload_file_sftp,
             ssh::probe_remote_path,
+            ssh::sftp_probe_platform,
             ssh::pause_upload,
             ssh::resume_upload,
             ssh::cancel_upload,
