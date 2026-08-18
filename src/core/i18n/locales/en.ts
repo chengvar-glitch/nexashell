@@ -38,6 +38,7 @@ export default {
     lastConnected: 'Last Connected',
     copy: 'Copy',
     copied: 'Copied to clipboard',
+    import: 'Import',
     copyName: 'Name',
     copyAddr: 'Address',
     copyPort: 'Port',
@@ -49,6 +50,20 @@ export default {
     deleteGroupConfirm: 'Delete the group "{name}"?',
     deleteTag: 'Delete Tag',
     deleteTagConfirm: 'Delete the tag "{name}"?',
+  },
+  import: {
+    title: 'Import XTerminal Sessions',
+    subtitle:
+      'Accepts XTerminal export/import text: "名称/地址/端口/用户/密码" label blocks, host=... key=value lines, and host|user|pass|title pipe format.',
+    placeholder:
+      'Paste XTerminal exported content here, e.g.:\n名称: fofo\n地址: 8.166.133.7\n端口: 22\n用户: root\n密码: fofo0898.',
+    confirm: 'Import',
+    importing: 'Importing…',
+    success: 'Imported {imported} session(s)',
+    skipped: 'Skipped {skipped} duplicate session(s)',
+    failed: '{failed} record(s) failed to parse',
+    empty: 'No importable session content found',
+    error: 'Import failed: {message}',
   },
   search: {
     placeholder: 'Quick search ({shortcut})',

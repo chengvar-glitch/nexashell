@@ -254,6 +254,12 @@
             {{ $t('home.subtitle') }}
           </p>
         </div>
+        <div class="header-actions">
+          <button class="header-action-btn" @click="showImportDialog = true">
+            <Import :size="14" />
+            <span>{{ $t('home.import') }}</span>
+          </button>
+        </div>
       </header>
 
       <!-- Session Grid/Table Area -->
@@ -462,6 +468,13 @@
         {{ $t('home.copied') }}
       </div>
     </Transition>
+
+    <!-- XTerminal session import dialog -->
+    <ImportXTerminalDialog
+      :visible="showImportDialog"
+      @update:visible="showImportDialog = $event"
+      @imported="loadSessions"
+    />
   </div>
 </template>
 
@@ -486,10 +499,12 @@ import {
   X,
   GripVertical,
   MoreVertical,
+  Import,
   type LucideIcon,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
+import ImportXTerminalDialog from '@/components/home/ImportXTerminalDialog.vue';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
@@ -738,6 +753,9 @@ let pendingDeleteTagId: string | null = null;
 // Copy feedback state
 const copiedSessionId = ref<string | null>(null);
 let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
+// XTerminal import dialog state
+const showImportDialog = ref(false);
 
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 const { t, locale } = useI18n();
@@ -1621,6 +1639,35 @@ const onCancelDelete = () => {
   color: var(--color-text-secondary);
   margin: 2px 0 0 0;
   font-size: 13px;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition-fast);
+}
+
+.header-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-secondary);
 }
 
 .action-area {

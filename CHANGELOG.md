@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Added
+
+- 兼容导入 XTerminal 格式：首页工具栏新增「导入」按钮，粘贴 XTerminal 导出的文本即可批量创建 SSH 会话
+  - 支持 `名称/地址/端口/用户/密码` 中文标签块（含全角冒号）、`host=... user=...` 英文键值对、`host[:port] | user | pass | title` 竖线格式；`#` / `//` 注释行自动忽略
+  - 密码使用应用主密钥加密存储；按 (地址, 端口, 用户名) 自动去重，重复导入不会产生重复会话；解析失败的记录逐条列出
+  - 新增 `import_xterminal_sessions` 后端命令（`src-tauri/src/db/import_export.rs`，含 12 个解析单测）
+
 ## [1.17.1] - 2026-08-17
 
 ### Fixed

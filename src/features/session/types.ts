@@ -29,3 +29,12 @@ export interface SavedSessionDisplay extends SavedSession {
   password?: string;
   key_passphrase?: string;
 }
+
+/**
+ * Result of importing XTerminal-format session text.
+ */
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  failed: string[];
+}

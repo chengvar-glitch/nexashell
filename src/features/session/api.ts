@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/core/utils/logger';
-import type { SavedSession } from './types';
+import type { ImportResult, SavedSession } from './types';
 
 const logger = createLogger('SESSION_API');
 
@@ -171,6 +171,27 @@ class SessionAPI {
       // Rethrow so callers can tell "no saved sessions" apart from a broken
       // backend instead of silently treating the failure as an empty list.
       logger.error('Failed to list sessions', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Import sessions from XTerminal-format text (label blocks, key=value or
+   * pipe-separated lines). Resolves with the import summary.
+   */
+  async importXTerminal(text: string): Promise<ImportResult> {
+    try {
+      const result = await invoke<ImportResult>('import_xterminal_sessions', {
+        text,
+      } as Record<string, unknown>);
+      logger.info('XTerminal import finished', {
+        imported: result?.imported ?? 0,
+        skipped: result?.skipped ?? 0,
+        failed: result?.failed?.length ?? 0,
+      });
+      return result || { imported: 0, skipped: 0, failed: [] };
+    } catch (error) {
+      logger.error('Failed to import XTerminal sessions', error);
       throw error;
     }
   }

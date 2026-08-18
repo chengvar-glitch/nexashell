@@ -137,6 +137,7 @@ pub fn run() {
             db::toggle_favorite,
             db::import_export::export_sessions,
             db::import_export::import_sessions,
+            db::import_export::import_xterminal_sessions,
             tunnel::start_session_tunnels,
             tunnel::start_tunnel_rule,
             tunnel::stop_session_tunnels,

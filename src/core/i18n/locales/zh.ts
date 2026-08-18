@@ -38,6 +38,7 @@ export default {
     lastConnected: '上次连接',
     copy: '复制',
     copied: '已复制到剪贴板',
+    import: '导入',
     copyName: '名称',
     copyAddr: '地址',
     copyPort: '端口',
@@ -49,6 +50,20 @@ export default {
     deleteGroupConfirm: '确定要删除分组“{name}”吗？',
     deleteTag: '删除标签',
     deleteTagConfirm: '确定要删除标签“{name}”吗？',
+  },
+  import: {
+    title: '导入 XTerminal 会话',
+    subtitle:
+      '兼容 XTerminal 导出/导入的文本格式：支持「名称/地址/端口/用户/密码」标签块、host=... 键值对、以及 host|user|pass|title 竖线格式。',
+    placeholder:
+      '在此粘贴 XTerminal 导出的内容，例如：\n名称: fofo\n地址: 8.166.133.7\n端口: 22\n用户: root\n密码: fofo0898.',
+    confirm: '确认导入',
+    importing: '导入中…',
+    success: '成功导入 {imported} 个会话',
+    skipped: '跳过 {skipped} 个重复会话',
+    failed: '{failed} 条记录解析失败',
+    empty: '未识别到可导入的会话内容',
+    error: '导入失败：{message}',
   },
   search: {
     placeholder: '快速搜索 ({shortcut})',
