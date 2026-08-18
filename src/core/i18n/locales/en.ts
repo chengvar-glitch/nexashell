@@ -30,6 +30,13 @@ export default {
     host: 'Host',
     localTerminal: 'Local Terminal',
     lastConnected: 'Last Connected',
+    copy: 'Copy',
+    copied: 'Copied to clipboard',
+    copyName: 'Name',
+    copyAddr: 'Address',
+    copyPort: 'Port',
+    copyUser: 'User',
+    copyPassword: 'Password',
   },
   search: {
     placeholder: 'Quick search ({shortcut})',

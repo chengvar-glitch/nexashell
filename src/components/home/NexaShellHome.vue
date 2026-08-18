@@ -373,6 +373,13 @@
                         <Terminal :size="14" />
                       </button>
                       <button
+                        class="icon-action-btn copy"
+                        :title="$t('home.copy') || 'Copy'"
+                        @click.stop="handleCopySession(session)"
+                      >
+                        <Copy :size="14" />
+                      </button>
+                      <button
                         class="icon-action-btn edit"
                         :title="$t('common.edit') || 'Edit'"
                         @click.stop="handleEditSession(session)"
@@ -424,6 +431,13 @@
       @confirm="onConfirmDelete"
       @cancel="onCancelDelete"
     />
+
+    <!-- Transient toast (copy feedback) -->
+    <Transition name="toast">
+      <div v-if="copiedSessionId" class="home-toast" role="status">
+        {{ $t('home.copied') }}
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -441,6 +455,7 @@ import {
   Hash,
   Minus,
   Terminal,
+  Copy,
   Pencil,
   Trash2,
   Check,
@@ -679,6 +694,10 @@ const confirmDialogTitle = ref('');
 const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
 
+// Copy feedback state
+const copiedSessionId = ref<string | null>(null);
+let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 const { t, locale } = useI18n();
 
@@ -786,6 +805,10 @@ onUnmounted(() => {
   eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
   eventBus.off(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
   eventBus.off(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
+  if (copyFeedbackTimer) {
+    clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = null;
+  }
 });
 
 const handleNewConnection = () => {
@@ -800,6 +823,51 @@ const handleConnect = (session: SavedSessionDisplay) => {
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
   logger.info('Quick connect initiated', { session: session.server_name });
   eventBus.emit(APP_EVENTS.CONNECT_SESSION, session);
+};
+
+/**
+ * Copy the session connection info to the clipboard, one labeled field per
+ * line (name/address/port/user/password, labels localized via i18n).
+ *
+ * The password line is omitted when no plaintext can be obtained (e.g. key
+ * auth only, or credential decryption failed).
+ */
+const handleCopySession = async (session: SavedSessionDisplay) => {
+  try {
+    const credentials = await invoke<
+      [string, string | null, string | null]
+    >('get_session_credentials', { sessionId: session.id }).catch(
+      () => [session.id, null, null] as [string, string | null, string | null]
+    );
+
+    const lines = [
+      `${t('home.copyName')}: ${session.server_name}`,
+      `${t('home.copyAddr')}: ${session.addr}`,
+      `${t('home.copyPort')}: ${session.port}`,
+      `${t('home.copyUser')}: ${session.username}`,
+    ];
+
+    // Only copy the password when the plaintext is actually available.
+    if (credentials[1]) {
+      lines.push(`${t('home.copyPassword')}: ${credentials[1]}`);
+    }
+
+    await navigator.clipboard.writeText(lines.join('\n'));
+    logger.info('Copied session info to clipboard', {
+      session: session.server_name,
+      hasPassword: !!credentials[1],
+    });
+
+    // Show transient feedback
+    copiedSessionId.value = session.id;
+    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
+    copyFeedbackTimer = setTimeout(() => {
+      copiedSessionId.value = null;
+      copyFeedbackTimer = null;
+    }, 2000);
+  } catch (error) {
+    logger.error('Failed to copy session info', error);
+  }
 };
 
 const handleDeleteGroup = async (groupId: string) => {
@@ -952,6 +1020,11 @@ const handleSessionContextMenu = (
   selectedSession.value = session;
 
   contextMenuItems.value = [
+    {
+      key: 'copy',
+      label: t('home.copy') || 'Copy',
+      icon: Copy,
+    },
     { key: 'edit', label: t('common.edit') || 'Edit', icon: Pencil },
     { key: 'divider', label: '', divider: true },
     {
@@ -1046,6 +1119,9 @@ const handleContextMenuSelect = async (key: string) => {
   switch (key) {
     case 'edit':
       handleEditSession(selectedSession.value);
+      break;
+    case 'copy':
+      await handleCopySession(selectedSession.value);
       break;
     case 'delete':
       await handleDeleteSession(selectedSession.value);
@@ -1795,7 +1871,8 @@ const onCancelDelete = () => {
   color: var(--color-text-primary);
 }
 
-.icon-action-btn.connect:hover {
+.icon-action-btn.connect:hover,
+.icon-action-btn.copy:hover {
   color: var(--color-primary);
   background: var(--color-interactive-hover);
 }
@@ -1814,5 +1891,35 @@ const onCancelDelete = () => {
   color: var(--color-text-secondary);
   border: 1px solid transparent;
   white-space: nowrap;
+}
+
+/* Transient copy-feedback toast */
+.home-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--radius-md);
+  padding: 10px 18px;
+  font-size: 13px;
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0, 0, 0, 0.25));
+  pointer-events: none;
+}
+
+.toast-enter-active,
+.toast-leave-active {
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease;
+}
+
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
 }
 </style>

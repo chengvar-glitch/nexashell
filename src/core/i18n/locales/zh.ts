@@ -30,6 +30,13 @@ export default {
     host: '主机地址',
     localTerminal: '本地终端',
     lastConnected: '上次连接',
+    copy: '复制',
+    copied: '已复制到剪贴板',
+    copyName: '名称',
+    copyAddr: '地址',
+    copyPort: '端口',
+    copyUser: '用户',
+    copyPassword: '密码',
   },
   search: {
     placeholder: '快速搜索 ({shortcut})',
