@@ -691,14 +691,26 @@ const writeBufferedOutput = async (): Promise<boolean> => {
 };
 
 /**
- * Establish connection via session store and API
+ * Establish connection via session store and API.
+ *
+ * Returns true when this call actually created the backend session (fresh
+ * connection), false when the session already existed. The buffered initial
+ * output poll must run ONLY for a freshly created session: the backend drains
+ * its initial-output cache on first read, and the cache is only ever written
+ * during the brief window right after connect. Re-mounting the component for
+ * an already-live session (tab reopen, split pane re-render) must NOT re-poll
+ * — with the old peek semantics every such mount replayed the cached welcome
+ * banner / MOTD / first prompt (and any output produced inside the initial
+ * buffering window) into the terminal again, so the same screen content kept
+ * re-appearing ("keeps scrolling").
  */
-const connectSession = async (cols: number, rows: number): Promise<void> => {
+const connectSession = async (cols: number, rows: number): Promise<boolean> => {
   if (!props.sessionId) {
     throw new Error('sessionId is required');
   }
 
   const sessionExists = sessionStore.hasSession(props.sessionId);
+  const created = !sessionExists;
 
   if (!sessionExists) {
     if (props.tabType === 'terminal') {
@@ -737,7 +749,7 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
     }
   }
 
-  if (props.tabType !== 'terminal') {
+  if (props.tabType !== 'terminal' && created) {
     // The welcome banner / MOTD is buffered by the backend for a short
     // window after connect. Poll the buffer instead of sleeping a fixed
     // amount so we return as soon as content is ready (and never block on a
@@ -752,6 +764,8 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
       await new Promise(resolve => setTimeout(resolve, 200));
     }
   }
+
+  return created;
 };
 
 /**

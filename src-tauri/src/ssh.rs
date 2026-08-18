@@ -1159,10 +1159,23 @@ impl SshManager {
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
 
         if let Some(channel_info) = channels.get(session_id) {
-            // Use the blocking lock rather than try_lock so an unlucky race
-            // with the I/O task's cache push cannot return an EMPTY buffer and
-            // permanently lose the pre-subscribe banner output.
-            let outputs = channel_info.initial_outputs.blocking_lock().clone();
+            // One-shot consumption: drain the cache instead of cloning it so a
+            // later re-mount of the terminal component (tab reopen, split
+            // pane re-render, retry) cannot replay the buffered initial
+            // output (welcome banner / MOTD / first prompt, and any output
+            // produced inside the initial buffering window) into the terminal
+            // a second time. The frontend subscribes to `ssh-output-{id}`
+            // BEFORE connecting, so the cache only needs to cover the small
+            // gap between connection start and subscription — anything after
+            // that arrives through the live event stream. Use the blocking
+            // lock rather than try_lock so an unlucky race with the I/O task's
+            // cache push cannot return an EMPTY buffer and permanently lose
+            // the pre-subscribe banner output.
+            let outputs = channel_info
+                .initial_outputs
+                .blocking_lock()
+                .drain(..)
+                .collect::<Vec<_>>();
             Ok(outputs)
         } else {
             Err(SshError::SessionNotFound(session_id.0.to_string()))
