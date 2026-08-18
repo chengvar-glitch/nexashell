@@ -7,6 +7,7 @@
 
 ### Fixed
 
+- **SSH 终端进入 vim/htop 等 TUI 后界面卡死无响应（仅打包版复现，dev 模式正常）**：`@xterm/xterm@6.0.0` 发布的是**已压缩**的 ESM（`lib/xterm.mjs`），Vite 生产构建的 esbuild 压缩步骤会对它二次改名（double-minification），破坏 `InputHandler.requestMode` 内的闭包——枚举初始化变成引用一个不存在的标识符。TUI 启动时发送 DECRQM 模式查询（`CSI ? Ps $ p`，vim/tmux/htop/less 都会发），`requestMode` 在 xterm 异步写入管线里抛 `ReferenceError`，写队列永久停摆：后续所有输出静默丢失、模式查询应答（DECRPM）也不回，终端表现为「完全无响应」。`vite dev` 不做依赖改名故不复现。修复：`vite.config.ts` 关闭 esbuild 的 `minifyIdentifiers` 与 `minifySyntax`（仅语法/标识符压缩对该已压缩 vendor 代码不安全，空白压缩保留，xterm 分块仅增约 3KB gzip）。已用生产 bundle 复现（`ReferenceError: i is not defined`）并验证修复（DECRQM 应答正常、屏幕内容正常渲染）
 - **安全：移除导入功能中泄露的真实服务器凭据**：导入对话框的示例文案（placeholder）及 `import_export.rs` 的文档/单测曾使用真实的服务器 IP 与明文密码（`8.166.133.7` / `fofo0898.`），该内容随 v1.20.0+ 版本进入公开仓库与发布包。已全部替换为虚构占位数据（`192.168.1.100` / `your-password`）。**注意：该密码已公开在 git 历史与旧版发布包中，必须立即更换服务器密码**
 - **GitHub Release 的 macOS DMG 下载后提示「已损坏，无法打开」**：CI 产物未签名，arm64 应用被打上隔离属性后被 Gatekeeper 判定为损坏（Windows 无此机制故正常）。修复：
   - `tauri.conf.json` 默认配置 `signingIdentity: "-"`（ad-hoc 签名），产物带有效签名，「已损坏」降级为可绕过的「无法验证开发者」（右键打开 / 系统设置→隐私与安全性→仍要打开）

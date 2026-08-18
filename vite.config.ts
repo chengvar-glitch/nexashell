@@ -9,6 +9,25 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [vue()],
+  esbuild: {
+    // @xterm/xterm@6.0.0 ships PRE-MINIFIED ESM (lib/xterm.mjs). Vite's
+    // production minify pass (esbuild) re-mangles it and corrupts a closure in
+    // InputHandler.requestMode — the enum initializer ends up referencing an
+    // identifier that no longer exists. The moment a TUI (vim/tmux/htop/less)
+    // sends a DECRQM mode query (`CSI ? Ps $ p`), requestMode throws
+    // `ReferenceError` inside xterm's async write pipeline, the write queue
+    // stalls, and the terminal freezes permanently (no output, no reply).
+    // Only reproducible in production builds: `vite dev` does not mangle deps,
+    // which is why vim works in dev but the packaged app dies.
+    //
+    // esbuild's mangler renames `let r;(P=>…)(r||={})` to reference a name it
+    // then eliminates (`(void 0||(r={}))`), and its syntax pass does the same
+    // even when identifier mangling is disabled — so BOTH passes must be off
+    // for already-minified vendor code (xtermjs/xterm.js#5800). Whitespace
+    // minification is kept; the size cost is limited to this vendor chunk.
+    minifyIdentifiers: false,
+    minifySyntax: false,
+  },
   test: {
     globals: true,
     environment: 'happy-dom',
