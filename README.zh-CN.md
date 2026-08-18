@@ -56,7 +56,7 @@ pnpm tauri build
 | `pnpm lint` | ESLint（自动修复） |
 | `pnpm test` | 前端单元测试（Vitest） |
 | `cargo test` | Rust 单元测试（在 `src-tauri/` 下运行） |
-| `pnpm tui` | 运行内置的 ratatui TUI 前端（`src-tui/`） |
+| `pnpm tui` | 运行内置的 ratatui TUI 前端（`src-tui/`，开发中） |
 
 ---
 

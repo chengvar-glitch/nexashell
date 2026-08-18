@@ -56,7 +56,7 @@ pnpm tauri build
 | `pnpm lint` | ESLint with auto-fix |
 | `pnpm test` | Frontend unit tests (Vitest) |
 | `cargo test` | Rust unit tests (run from `src-tauri/`) |
-| `pnpm tui` | Run the bundled ratatui TUI frontend (`src-tui/`) |
+| `pnpm tui` | Run the bundled ratatui TUI frontend (`src-tui/`, under development) |
 
 ---
 
