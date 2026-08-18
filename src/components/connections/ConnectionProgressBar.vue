@@ -58,7 +58,7 @@
           <template v-else-if="isError">
             <div class="progress-details-row">
               <span class="progress-time-label"
-                >Total time: {{ formattedTime }}</span
+                >{{ t('connection.totalTime') }}: {{ formattedTime }}</span
               >
             </div>
             <!-- Status indicators with error inline -->
@@ -166,15 +166,15 @@
 
           <!-- Action buttons -->
           <div v-if="isError || isConnecting" class="action-buttons">
-            <button v-if="isError" class="btn btn-primary" @click="handleRetry">
-              Retry
-            </button>
             <button
-              class="btn"
-              :class="isError ? 'btn-secondary' : 'btn-secondary'"
-              @click="handleClose"
+              v-if="isError"
+              class="btn btn-primary"
+              @click="handleRetry"
             >
-              {{ isError ? 'Close' : 'Cancel' }}
+              {{ t('connection.retry') }}
+            </button>
+            <button class="btn btn-secondary" @click="handleClose">
+              {{ isError ? t('connection.close') : t('connection.cancel') }}
             </button>
           </div>
         </div>
@@ -185,11 +185,14 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import {
   Check as CheckIcon,
   AlertCircle as ErrorIcon,
   Loader as LoadingIcon,
 } from 'lucide-vue-next';
+
+const { t } = useI18n();
 
 type ConnectionStatus = 'connecting' | 'success' | 'error';
 
@@ -234,11 +237,11 @@ const formattedTime = computed(() => {
   return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 });
 
-// Default steps (English)
+// Default steps (localized)
 const defaultSteps = computed(() => [
-  'Verifying connection',
-  'Authenticating user',
-  'Initializing terminal',
+  t('connection.step.verify'),
+  t('connection.step.authenticate'),
+  t('connection.step.initialize'),
 ]);
 
 const steps = computed(() => {
@@ -247,26 +250,26 @@ const steps = computed(() => {
     : defaultSteps.value;
 });
 
-// Header title (English)
+// Header title (localized)
 const headerTitle = computed(() => {
   if (isError.value) {
-    return props.title || 'Connection Failed';
+    return props.title || t('connection.connectionFailed');
   }
   if (isSuccess.value) {
-    return props.title || 'Connection Successful';
+    return props.title || t('connection.connectionSuccessful');
   }
-  return props.title || 'Connecting...';
+  return props.title || t('connection.connecting');
 });
 
-// Message (English)
+// Message (localized)
 const message = computed(() => {
   if (isError.value) {
-    return props.message || 'Failed to establish connection';
+    return props.message || t('connection.connectionError');
   }
   if (isSuccess.value) {
-    return props.message || 'Connection established successfully';
+    return props.message || t('connection.connectionEstablished');
   }
-  return props.message || 'Establishing SSH connection';
+  return props.message || t('connection.establishingSSH');
 });
 
 // Event handlers
@@ -346,16 +349,6 @@ const handleClose = () => {
   }
 }
 
-.progress-container {
-  background-color: transparent;
-  padding: 16px;
-  width: 100%;
-  height: 100%;
-  box-shadow: none;
-  display: flex;
-  flex-direction: column;
-}
-
 @keyframes progress-appear {
   from {
     opacity: 0;
@@ -369,9 +362,6 @@ const handleClose = () => {
   margin-bottom: 24px;
   text-align: center;
   padding: 8px 0;
-  border-bottom: none;
-  background: transparent;
-  margin: 0 0 24px 0;
 }
 
 .progress-title {
@@ -407,10 +397,6 @@ const handleClose = () => {
   border-top-color: var(--color-primary);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
-}
-
-.spinner-ring.error-spinner {
-  border-top-color: #ef4444;
 }
 
 @keyframes spin {
@@ -587,44 +573,6 @@ const handleClose = () => {
   color: var(--color-primary);
   margin-right: 8px;
   animation: spin 1s linear infinite;
-}
-
-/* Success state styles */
-.success-icon-wrapper {
-  display: flex;
-  justify-content: center;
-  margin: 20px 0;
-  color: #2ed573;
-  animation: success-bounce 0.6s ease-out;
-  opacity: 0;
-  pointer-events: none;
-}
-
-@keyframes success-bounce {
-  0% {
-    transform: scale(0) rotate(-15deg);
-    opacity: 0;
-  }
-  50% {
-    transform: scale(1.2) rotate(3deg);
-    opacity: 1;
-  }
-  80% {
-    transform: scale(0.95);
-  }
-  100% {
-    transform: scale(1) rotate(0deg);
-    opacity: 1;
-  }
-}
-
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }
 
 /* Action buttons */

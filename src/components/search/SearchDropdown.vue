@@ -72,22 +72,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, type Component } from 'vue';
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, inject, type Component } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   Settings,
   Terminal,
-  FileText,
-  Code,
   Folder,
-  Globe,
   Command,
   Server,
   CornerDownLeft,
 } from 'lucide-vue-next';
 import { sessionApi } from '@/features/session';
 import { APP_EVENTS } from '@/core/constants';
+import { TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils/event-bus';
+import { openFileManagerWindow } from '@/features/window';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
 import { createLogger } from '@/core/utils/logger';
@@ -115,6 +114,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:visible': [value: boolean];
+  'update:searchQuery': [value: string];
 }>();
 
 const { t } = useI18n();
@@ -131,14 +131,63 @@ const activeIndex = ref(-1);
 const dropdownRef = ref<HTMLElement | null>(null);
 const dropdownStyle = ref({});
 const savedSessions = ref<SavedSession[]>([]);
+// Monotonic token so a slow fetch can't overwrite a newer result (or let a
+// stale activeIndex be computed against out-of-date data after a newer fetch).
+let sessionsFetchSeq = 0;
 
 const fetchSavedSessions = async () => {
+  const seq = ++sessionsFetchSeq;
   try {
     const sessions = await sessionApi.listSessions();
+    if (seq !== sessionsFetchSeq) return; // a newer fetch superseded this one
     savedSessions.value = sessions;
+    // Sessions just landed — recompute the active index so Enter/arrows never
+    // act on a stale cursor computed against an empty list.
+    resetActiveIndex();
   } catch (error) {
     logger.error('Failed to fetch saved sessions for search:', error);
   }
+};
+
+interface SearchTabLike {
+  id: string;
+  type: string;
+  panes?: Array<{ id: string; type?: string }>;
+}
+const tabManagement = inject(TAB_MANAGEMENT_KEY) as
+  | {
+      tabs: { value: SearchTabLike[] };
+      activeTabId: { value: string };
+      activePaneId: { value: string };
+    }
+  | null;
+
+// Resolve the active SSH pane's runtime session id, if any — the File Manager
+// search action needs a concrete SSH session id to open its window.
+const getActiveSshSessionId = (): string | null => {
+  if (!tabManagement) return null;
+  const activeTab = tabManagement.tabs.value.find(
+    t => t.id === tabManagement.activeTabId.value
+  );
+  if (!activeTab || activeTab.type !== 'ssh') return null;
+  const panes = activeTab.panes || [];
+  const paneId = tabManagement.activePaneId.value || panes[0]?.id;
+  return paneId || null;
+};
+
+// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
+// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
+// failure. The space→'T' + 'Z' normalization keeps the parse valid in WebKit
+// (WKWebView), where the raw space-separated value fails to parse. Mirrors the
+// same helper used by NexaShellHome and AppTabs so recency sorting is
+// consistent everywhere.
+const parseDbTimestamp = (value?: string | null): number => {
+  if (!value) return 0;
+  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
+    ? value
+    : value.replace(' ', 'T') + 'Z';
+  const parsed = new Date(iso);
+  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
 const updateDropdownPosition = () => {
@@ -162,14 +211,10 @@ watch(
       fetchSavedSessions();
       nextTick(() => {
         updateDropdownPosition();
-        // Start at index 1 if 0 is a header
-        activeIndex.value =
-          filteredItems.value.length > 0 && filteredItems.value[0].isHeader
-            ? 1
-            : 0;
+        resetActiveIndex();
       });
     } else {
-      searchQuery.value = '';
+      emitClearSearch();
       activeIndex.value = -1;
     }
   }
@@ -186,6 +231,12 @@ watch(
   }
 );
 
+// As the typed query changes, reset the active index to the first selectable
+// row (skipping section headers) so Enter/arrows never act on a stale row.
+watch(searchQuery, () => {
+  resetActiveIndex();
+});
+
 const handleResize = () => {
   if (props.visible) {
     updateDropdownPosition();
@@ -200,7 +251,7 @@ const searchItems = computed<SearchResultItem[]>(() => [
     icon: Settings,
     shortcut: formatShortcut('Cmd+,'),
     category: 'settings',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-settings')),
+    action: () => eventBus.emit(APP_EVENTS.OPEN_SETTINGS),
   },
   {
     id: 'terminal',
@@ -209,7 +260,7 @@ const searchItems = computed<SearchResultItem[]>(() => [
     icon: Terminal,
     shortcut: formatShortcut('Cmd+Shift+T'),
     category: 'terminal',
-    action: () => window.dispatchEvent(new CustomEvent('app:new-local-tab')),
+    action: () => eventBus.emit(APP_EVENTS.NEW_LOCAL_TAB),
   },
   {
     id: 'ssh',
@@ -218,15 +269,7 @@ const searchItems = computed<SearchResultItem[]>(() => [
     icon: Server,
     shortcut: formatShortcut('Cmd+T'),
     category: 'terminal',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-ssh-form')),
-  },
-  {
-    id: 'help',
-    title: t('search.help'),
-    description: t('search.descHelp'),
-    icon: FileText,
-    category: 'help',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-help')),
+    action: () => eventBus.emit(APP_EVENTS.OPEN_SSH_FORM),
   },
   {
     id: 'command-palette',
@@ -235,8 +278,7 @@ const searchItems = computed<SearchResultItem[]>(() => [
     icon: Command,
     shortcut: formatShortcut('Cmd+Shift+P'),
     category: 'commands',
-    action: () =>
-      eventBus.emit(APP_EVENTS.OPEN_SETTINGS, { section: 'shortcuts' }),
+    action: () => eventBus.emit(APP_EVENTS.COMMAND_PALETTE),
   },
   {
     id: 'file-manager',
@@ -244,25 +286,10 @@ const searchItems = computed<SearchResultItem[]>(() => [
     description: t('search.descFiles'),
     icon: Folder,
     category: 'files',
-    action: () =>
-      window.dispatchEvent(new CustomEvent('app:open-file-manager')),
-  },
-  {
-    id: 'web-terminal',
-    title: t('search.webTerminal'),
-    description: t('search.descWeb'),
-    icon: Globe,
-    category: 'terminal',
-    action: () =>
-      window.dispatchEvent(new CustomEvent('app:open-web-terminal')),
-  },
-  {
-    id: 'code-editor',
-    title: t('search.codeEditor'),
-    description: t('search.descEditor'),
-    icon: Code,
-    category: 'editor',
-    action: () => window.dispatchEvent(new CustomEvent('app:open-code-editor')),
+    action: () => {
+      const sid = getActiveSshSessionId();
+      if (sid) void openFileManagerWindow(sid);
+    },
   },
 ]);
 
@@ -273,9 +300,10 @@ const filteredItems = computed(() => {
   // 1. Process Sessions (Recent or Filtered)
   const sessions = [...savedSessions.value]
     .sort((a, b) => {
-      const dateA = new Date(a.updated_at || 0).getTime();
-      const dateB = new Date(b.updated_at || 0).getTime();
-      return dateB - dateA;
+      return (
+        parseDbTimestamp(b.updated_at) -
+        parseDbTimestamp(a.updated_at)
+      );
     })
     .filter(
       s =>
@@ -364,6 +392,24 @@ const filteredItems = computed(() => {
   return results;
 });
 
+// Point the active cursor at the first selectable row (skipping section
+// headers) in the current filtered list; -1 when nothing is selectable.
+const resetActiveIndex = () => {
+  if (!props.visible) {
+    activeIndex.value = -1;
+    return;
+  }
+  const items = filteredItems.value;
+  activeIndex.value = items.findIndex(i => !i.isHeader);
+};
+
+// Clear the query both locally and on the owning parent (WindowTitleBar) so
+// the search input empties after selecting a result or closing the dropdown.
+const emitClearSearch = () => {
+  emit('update:searchQuery', '');
+  searchQuery.value = '';
+};
+
 const handleKeyDown = (e: KeyboardEvent) => {
   if (filteredItems.value.length === 0) return;
 
@@ -414,12 +460,24 @@ const handleKeyUp = () => {};
 const scrollToActiveItem = () => {
   nextTick(() => {
     if (dropdownRef.value && activeIndex.value >= 0) {
+      const container = dropdownRef.value.querySelector(
+        '.search-dropdown-content'
+      ) as HTMLElement | null;
       const item = dropdownRef.value.querySelector(
         `.search-dropdown-item:nth-child(${activeIndex.value + 1})`
-      );
-      if (item) {
-        // Use block: 'nearest' for smoother scrolling without jumping too much
-        item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      ) as HTMLElement | null;
+      if (item && container) {
+        // Scroll only the dropdown's own scroll container — never the whole
+        // document — keeping the active row visible within it.
+        const itemTop = item.offsetTop;
+        const itemBottom = itemTop + item.offsetHeight;
+        const viewTop = container.scrollTop;
+        const viewBottom = viewTop + container.clientHeight;
+        if (itemTop < viewTop) {
+          container.scrollTop = itemTop;
+        } else if (itemBottom > viewBottom) {
+          container.scrollTop = itemBottom - container.clientHeight;
+        }
       }
     }
   });
@@ -430,7 +488,7 @@ const selectItem = (item: SearchResultItem) => {
     item.action();
   }
   emit('update:visible', false);
-  searchQuery.value = '';
+  emitClearSearch();
   activeIndex.value = -1;
 };
 

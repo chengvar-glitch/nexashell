@@ -180,6 +180,7 @@
                   type="text"
                   class="rename-tag-input"
                   autofocus
+                  @blur="handleSaveTagRename"
                   @keydown.enter="handleSaveTagRename"
                   @keydown.esc="editingTagId = null"
                 />
@@ -193,11 +194,16 @@
                       backgroundColor:
                         color.value || 'var(--color-bg-tertiary)',
                     }"
+                    @mousedown.prevent
                     @click="renamingTagColor = color.value"
                   ></button>
                 </div>
                 <div class="edit-confirm-actions">
-                  <button class="action-btn tiny" @click="handleSaveTagRename">
+                  <button
+                    class="action-btn tiny"
+                    @mousedown.prevent
+                    @click="handleSaveTagRename"
+                  >
                     <Check :size="10" />
                   </button>
                 </div>
@@ -252,12 +258,28 @@
 
       <!-- Session Grid/Table Area -->
       <section class="session-manager">
-        <!-- Empty State (Globally if no sessions at all) -->
-        <div v-if="filteredSessions.length === 0" class="empty-state-container">
+        <!-- Empty/loading states, distinct from each other: loading (initial
+             fetch), no sessions at all ("add first"), and a filtered view
+             with no matching rows (no matches). -->
+        <div v-if="isLoading" class="empty-state-container">
+          <div class="empty-state-message">{{ $t('home.loading') }}</div>
+        </div>
+
+        <div
+          v-else-if="sessions.length === 0"
+          class="empty-state-container"
+        >
           <button class="empty-card" @click="handleNewConnection">
             <Plus :size="32" class="plus" />
             <span>{{ $t('home.addFirst') }}</span>
           </button>
+        </div>
+
+        <div
+          v-else-if="filteredSessions.length === 0"
+          class="empty-state-container"
+        >
+          <div class="empty-state-message">{{ $t('home.noMatches') }}</div>
         </div>
 
         <div v-else class="session-table-wrapper">
@@ -269,6 +291,8 @@
                   <input
                     type="checkbox"
                     class="session-checkbox"
+                    :checked="allSelected"
+                    :indeterminate="someSelected"
                     @change="toggleSelectAllGlobal($event)"
                   />
                 </th>
@@ -510,6 +534,9 @@ const sessions = ref<SavedSessionDisplay[]>([]);
 const groups = ref<Group[]>([]);
 const tags = ref<Tag[]>([]);
 const isMounted = ref(false);
+// True during the initial/refresh session fetch so the UI can show a
+// distinct "loading" state instead of flashing the empty state.
+const isLoading = ref(true);
 
 // View and filter states
 const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
@@ -577,6 +604,19 @@ const viewTitle = computed(() => {
   }
 });
 
+// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
+// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
+// failure. Normalizing the space to 'T' + 'Z' keeps the parse valid in
+// WebKit (WKWebView) where an un-normalized space-separated value fails.
+const parseDbTimestamp = (value?: string | null): number => {
+  if (!value) return 0;
+  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
+    ? value
+    : value.replace(' ', 'T') + 'Z';
+  const parsed = new Date(iso);
+  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
 const filteredSessions = computed(() => {
   let result = [...sessions.value];
 
@@ -588,12 +628,8 @@ const filteredSessions = computed(() => {
     result = result
       .filter(s => s.last_connected_at)
       .sort((a, b) => {
-        const dateA = a.last_connected_at
-          ? new Date(a.last_connected_at.replace(' ', 'T') + 'Z').getTime()
-          : 0;
-        const dateB = b.last_connected_at
-          ? new Date(b.last_connected_at.replace(' ', 'T') + 'Z').getTime()
-          : 0;
+        const dateA = parseDbTimestamp(a.last_connected_at);
+        const dateB = parseDbTimestamp(b.last_connected_at);
         return dateB - dateA;
       })
       .slice(0, 10);
@@ -638,18 +674,21 @@ const setActiveView = (view: 'all' | 'favorites' | 'recent') => {
   activeView.value = view;
   selectedGroupId.value = null;
   selectedTagId.value = null;
+  selectedSessionIds.value = new Set();
 };
 
 const setActiveGroup = (groupId: string) => {
   activeView.value = 'group';
   selectedGroupId.value = groupId;
   selectedTagId.value = null;
+  selectedSessionIds.value = new Set();
 };
 
 const setActiveTag = (tagId: string) => {
   activeView.value = 'tag';
   selectedTagId.value = tagId;
   selectedGroupId.value = null;
+  selectedSessionIds.value = new Set();
 };
 
 const toggleFavorite = async (session: SavedSessionDisplay) => {
@@ -693,6 +732,8 @@ const showConfirmDialog = ref(false);
 const confirmDialogTitle = ref('');
 const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
+let pendingDeleteGroupId: string | null = null;
+let pendingDeleteTagId: string | null = null;
 
 // Copy feedback state
 const copiedSessionId = ref<string | null>(null);
@@ -757,8 +798,24 @@ const toggleSelectAllGlobal = (event: Event) => {
   selectedSessionIds.value = next;
 };
 
+// Reflect the filtered view's selection state in the header "select all"
+// checkbox (checked when every visible row is selected, indeterminate when
+// only some are).
+const allSelected = computed(
+  () =>
+    filteredSessions.value.length > 0 &&
+    filteredSessions.value.every(s => selectedSessionIds.value.has(s.id))
+);
+
+const someSelected = computed(
+  () =>
+    filteredSessions.value.some(s => selectedSessionIds.value.has(s.id)) &&
+    !allSelected.value
+);
+
 // Fetch all sessions from the database in a single IPC round-trip.
 const loadSessions = async () => {
+  isLoading.value = true;
   try {
     const fetched = await invoke<SavedSessionDisplay[]>(
       'get_sessions_with_relations'
@@ -768,6 +825,8 @@ const loadSessions = async () => {
   } catch (error) {
     logger.error('Failed to load sessions', error);
     sessions.value = [];
+  } finally {
+    isLoading.value = false;
   }
 };
 
@@ -816,8 +875,10 @@ const handleNewConnection = () => {
 };
 
 const handleConnect = (session: SavedSessionDisplay) => {
-  // Single click to select, double click to connect
-  logger.debug('Session selected', { session: session.server_name });
+  // Single click selects/toggles the row; double click actually connects
+  // (see handleQuickConnect). This matches the row's "single click to select,
+  // double click to connect" affordance instead of being a no-op.
+  toggleSessionSelection(session.id);
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
@@ -870,24 +931,24 @@ const handleCopySession = async (session: SavedSessionDisplay) => {
   }
 };
 
-const handleDeleteGroup = async (groupId: string) => {
-  try {
-    await invoke('delete_group', { id: groupId });
-    groups.value = groups.value.filter(g => g.id !== groupId);
-    // The backend cascades deletion to session_groups, clearing SSH sessions' group association
-  } catch (error) {
-    logger.error('Failed to delete group', error);
-  }
+const handleDeleteGroup = (groupId: string) => {
+  const group = groups.value.find(g => g.id === groupId);
+  pendingDeleteGroupId = groupId;
+  confirmDialogTitle.value = t('home.deleteGroup');
+  confirmDialogMessage.value = group
+    ? t('home.deleteGroupConfirm', { name: group.name })
+    : '';
+  showConfirmDialog.value = true;
 };
 
-const handleDeleteTag = async (tagId: string) => {
-  try {
-    await invoke('delete_tag', { id: tagId });
-    tags.value = tags.value.filter(t => t.id !== tagId);
-    // The backend cascades deletion to session_tags, clearing SSH sessions' tag association
-  } catch (error) {
-    logger.error('Failed to delete tag', error);
-  }
+const handleDeleteTag = (tagId: string) => {
+  const tag = tags.value.find(tg => tg.id === tagId);
+  pendingDeleteTagId = tagId;
+  confirmDialogTitle.value = t('home.deleteTag');
+  confirmDialogMessage.value = tag
+    ? t('home.deleteTagConfirm', { name: tag.name })
+    : '';
+  showConfirmDialog.value = true;
 };
 
 const handleAddGroup = async () => {
@@ -1146,15 +1207,54 @@ const handleDeleteSession = (session: SavedSessionDisplay) => {
 };
 
 const onConfirmDelete = async () => {
-  if (!pendingDeleteSession) return;
-
   showConfirmDialog.value = false;
+
+  if (pendingDeleteGroupId) {
+    const id = pendingDeleteGroupId;
+    pendingDeleteGroupId = null;
+    try {
+      await invoke('delete_group', { id });
+      groups.value = groups.value.filter(g => g.id !== id);
+      // If the deleted group was the active filter, fall back to the "all" view
+      if (selectedGroupId.value === id) {
+        selectedGroupId.value = null;
+        activeView.value = 'all';
+      }
+      selectedSessionIds.value = new Set();
+      // The backend cascades the group association away, so refresh the list
+      await loadSessions();
+    } catch (error) {
+      logger.error('Failed to delete group', error);
+    }
+    return;
+  }
+
+  if (pendingDeleteTagId) {
+    const id = pendingDeleteTagId;
+    pendingDeleteTagId = null;
+    try {
+      await invoke('delete_tag', { id });
+      tags.value = tags.value.filter(t => t.id !== id);
+      if (selectedTagId.value === id) {
+        selectedTagId.value = null;
+        activeView.value = 'all';
+      }
+      selectedSessionIds.value = new Set();
+      // The backend cascades the tag association away, so refresh the list
+      await loadSessions();
+    } catch (error) {
+      logger.error('Failed to delete tag', error);
+    }
+    return;
+  }
+
+  if (!pendingDeleteSession) return;
   const session = pendingDeleteSession;
   pendingDeleteSession = null;
 
   try {
     await invoke('delete_session', { id: session.id });
-
+    selectedSessionIds.value.delete(session.id);
     sessions.value = sessions.value.filter(s => s.id !== session.id);
     await loadSessions();
   } catch (error) {
@@ -1165,6 +1265,8 @@ const onConfirmDelete = async () => {
 const onCancelDelete = () => {
   showConfirmDialog.value = false;
   pendingDeleteSession = null;
+  pendingDeleteGroupId = null;
+  pendingDeleteTagId = null;
 };
 </script>
 
@@ -1677,7 +1779,9 @@ const onCancelDelete = () => {
 }
 
 .drag-handle {
-  cursor: grab;
+  /* Decorative only — there is no row-drag feature, so do not present a
+   * draggable "grab" affordance. */
+  cursor: default;
   display: inline-block;
 }
 

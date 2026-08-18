@@ -57,25 +57,32 @@ impl EncryptionManager {
             match keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
                 Ok(entry) => match entry.get_password() {
                     Ok(b64) => {
-                        let bytes = general_purpose::STANDARD
-                            .decode(b64.trim())
-                            .map_err(|e| format!("Invalid master key encoding: {}", e))?;
+                        let mut bytes = match general_purpose::STANDARD.decode(b64.trim()) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                log::warn!(
+                                    "Master key in keychain is corrupt ({}); trying file fallback",
+                                    e
+                                );
+                                return Self::load_existing_master_key_file();
+                            }
+                        };
                         if bytes.len() == KEY_LEN {
                             let mut key = [0u8; KEY_LEN];
                             key.copy_from_slice(&bytes);
+                            bytes.zeroize();
                             return Ok(key);
                         }
-                        // Corrupt keychain entry. Refuse to fall through to
-                        // "create a fresh key": that would silently overwrite
-                        // the entry and permanently orphan every credential
-                        // encrypted with the old key.
-                        return Err(format!(
-                            "Master key in keychain has invalid length ({} bytes, \
-                             expected {}). Refusing to regenerate — saved credentials \
-                             cannot be recovered.",
-                            bytes.len(),
-                            KEY_LEN
-                        ));
+                        bytes.zeroize();
+                        // Corrupt keychain entry (wrong length). Try the file
+                        // fallback (which may hold a valid key from an earlier
+                        // file-based session). Only if the file is also absent
+                        // do we refuse — never silently regenerate here, which
+                        // would orphan credentials encrypted with the old key.
+                        log::warn!(
+                            "Master key in keychain has invalid length; trying file fallback"
+                        );
+                        return Self::load_existing_master_key_file();
                     }
                     Err(keyring::Error::NoEntry) => {
                         // Not found, create a new one below
@@ -89,9 +96,45 @@ impl EncryptionManager {
                 }
             }
 
-            // Fall back to file storage
+            // Fall back to file storage (the keychain was empty/unavailable,
+            // so it is safe to create a fresh key).
             Self::load_or_create_master_key_file()
         })
+    }
+
+    /// Load an EXISTING file-based master key without ever creating a new one.
+    /// Used when the keychain holds a corrupt entry, so a valid file fallback
+    /// from an earlier file-based session can still recover credentials.
+    fn load_existing_master_key_file() -> Result<[u8; KEY_LEN], String> {
+        let key_path = Self::key_file_path()?;
+        if key_path.exists() {
+            let mut bytes = std::fs::read(&key_path).map_err(|e| e.to_string())?;
+            if bytes.len() == KEY_LEN {
+                let mut key = [0u8; KEY_LEN];
+                key.copy_from_slice(&bytes);
+                bytes.zeroize();
+
+                // Attempt to migrate the key into the keychain for better security.
+                if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
+                    let b64 = general_purpose::STANDARD.encode(key);
+                    if entry.set_password(&b64).is_ok() {
+                        let _ = std::fs::remove_file(&key_path);
+                    }
+                }
+                return Ok(key);
+            }
+            bytes.zeroize();
+            return Err(format!(
+                "Master key file at {} is corrupt (expected {} bytes). \
+                 Refusing to overwrite — saved credentials cannot be recovered.",
+                key_path.display(),
+                KEY_LEN
+            ));
+        }
+        Err(
+            "No master key available: keychain entry is corrupt and no valid key file exists"
+                .to_string(),
+        )
     }
 
     fn key_file_path() -> Result<std::path::PathBuf, String> {
@@ -106,10 +149,11 @@ impl EncryptionManager {
         let key_path = Self::key_file_path()?;
 
         if key_path.exists() {
-            let bytes = std::fs::read(&key_path).map_err(|e| e.to_string())?;
+            let mut bytes = std::fs::read(&key_path).map_err(|e| e.to_string())?;
             if bytes.len() == KEY_LEN {
                 let mut key = [0u8; KEY_LEN];
                 key.copy_from_slice(&bytes);
+                bytes.zeroize();
 
                 // Attempt to migrate the key into the keychain for better security
                 if let Ok(entry) = keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
@@ -122,6 +166,7 @@ impl EncryptionManager {
             }
             // Corrupt key file — refuse to overwrite, otherwise all existing
             // credentials would be permanently undecryptable.
+            bytes.zeroize();
             return Err(format!(
                 "Master key file at {} is corrupt (expected {} bytes). \
                  Refusing to overwrite — saved credentials cannot be recovered.",
@@ -134,12 +179,26 @@ impl EncryptionManager {
         let mut key = [0u8; KEY_LEN];
         thread_rng().fill_bytes(&mut key);
 
-        // Write to file with restrictive permissions
-        std::fs::write(&key_path, key).map_err(|e| e.to_string())?;
+        // Write to file with restrictive permissions. On Unix create the file
+        // with mode 0o600 atomically (avoiding a 0644-then-chmod race window
+        // where another local user could read the plaintext key). On Windows
+        // the file gets default ACLs — the keychain remains the primary store.
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600));
+            use std::io::Write as _;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut f = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&key_path)
+                .map_err(|e| e.to_string())?;
+            f.write_all(&key).map_err(|e| e.to_string())?;
+            f.sync_all().map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(unix))]
+        {
+            std::fs::write(&key_path, key).map_err(|e| e.to_string())?;
         }
 
         // Also try to store in keychain
@@ -219,7 +278,7 @@ impl EncryptionManager {
         data: &SensitiveData,
         key_bytes: &[u8; KEY_LEN],
     ) -> Result<String, String> {
-        let json = serde_json::to_vec(data).map_err(|e| e.to_string())?;
+        let mut json = serde_json::to_vec(data).map_err(|e| e.to_string())?;
 
         let mut iv = [0u8; NONCE_LEN];
         thread_rng().fill_bytes(&mut iv);
@@ -229,6 +288,8 @@ impl EncryptionManager {
         let ciphertext = cipher
             .encrypt(nonce, json.as_ref())
             .map_err(|e| format!("Encryption failed: {}", e))?;
+        // Wipe the plaintext JSON buffer now that it has been encrypted.
+        json.zeroize();
 
         let mut combined = Vec::with_capacity(NONCE_LEN + ciphertext.len());
         combined.extend_from_slice(&iv);
@@ -241,7 +302,7 @@ impl EncryptionManager {
         encrypted_base64: &str,
         key_bytes: &[u8; KEY_LEN],
     ) -> Result<SensitiveData, String> {
-        let combined = general_purpose::STANDARD
+        let mut combined = general_purpose::STANDARD
             .decode(encrypted_base64)
             .map_err(|e| format!("Invalid base64: {}", e))?;
 
@@ -255,11 +316,13 @@ impl EncryptionManager {
         let cipher = Aes256Gcm::new_from_slice(key_bytes).map_err(|e| e.to_string())?;
         let nonce = Nonce::from_slice(iv);
 
-        let plaintext = cipher
+        let mut plaintext = cipher
             .decrypt(nonce, ciphertext)
             .map_err(|e| format!("Decryption failed (possibly wrong key): {}", e))?;
 
         let data: SensitiveData = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
+        plaintext.zeroize();
+        combined.zeroize();
         Ok(data)
     }
 }

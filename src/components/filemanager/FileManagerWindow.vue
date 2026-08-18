@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import SftpBrowser from '@/components/connections/SftpBrowser.vue';
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import { useTransferQueue } from '@/composables/use-transfer-queue';
 import { createLogger } from '@/core/utils/logger';
 import { formatBytes, formatSpeed, type SftpEntry, type UploadTask } from '@/core/types';
@@ -50,6 +51,10 @@ const refreshKey = ref(0);
 // Reference to the embedded browser so the unified toolbar can drive
 // navigation/mkdir through the imperative API exposed by SftpBrowser.
 const browserRef = ref<InstanceType<typeof SftpBrowser> | null>(null);
+
+// True while the embedded browser is listing a directory. Used to block uploads
+// so the captured target path can't race an in-flight navigation.
+const browserLoading = computed(() => browserRef.value?.loading ?? false);
 
 // View mode: "detail" (sortable columns) vs "compact" (single-line rows).
 const compactView = ref(false);
@@ -132,17 +137,84 @@ const newFolder = () => void browserRef.value?.newFolder();
 /** Start an upload for a list of local file paths into the current remote dir. */
 const uploadLocalPaths = async (paths: string[]) => {
   if (!sessionId.value || paths.length === 0) return;
+  // Don't race an in-flight navigation: the upload target is captured from the
+  // currently shown directory, so wait for the browser to settle first.
+  if (browserRef.value?.loading) return;
+
   const base = currentRemotePath.value.trim().replace(/\/$/, '');
-  for (const localPath of paths) {
+  const files = paths.map(localPath => {
     // Basename handles both `/` (POSIX) and `\` (Windows) local separators.
     const normalized = localPath.replace(/\\/g, '/');
     const fileName = normalized.split('/').pop() || localPath;
-    const target = `${base}/${fileName}`;
-    await transferQueue.startUpload(localPath, target, fileName);
+    return { localPath, target: `${base}/${fileName}`, fileName };
+  });
+
+  // Overwrite guard: ask before silently replacing a remote file that already
+  // exists in the currently viewed directory (the backend opens with
+  // WRITE|CREATE|TRUNCATE, so an overwrite would otherwise be data loss).
+  const alreadyExisting = files.filter(f =>
+    browserRef.value?.exists(f.fileName)
+  );
+  if (alreadyExisting.length > 0) {
+    pendingUploads.value = files;
+    overwriteTarget.value =
+      alreadyExisting.length === 1
+        ? alreadyExisting[0].fileName
+        : t('dashboard.nFilesOverwrite', { count: alreadyExisting.length });
+    return;
   }
-  refreshBrowser();
+
+  await commitUploads(files);
   showTransfers.value = true;
 };
+
+const commitUploads = async (
+  files: { localPath: string; target: string; fileName: string }[]
+) => {
+  for (const file of files) {
+    await transferQueue.startUpload(file.localPath, file.target, file.fileName);
+  }
+};
+
+const pendingUploads = ref<
+  { localPath: string; target: string; fileName: string }[]
+>([]);
+const overwriteTarget = ref<string | null>(null);
+const confirmOverwriteVisible = computed(() => overwriteTarget.value !== null);
+
+const confirmOverwrite = () => {
+  const files = pendingUploads.value;
+  pendingUploads.value = [];
+  overwriteTarget.value = null;
+  void commitUploads(files);
+  showTransfers.value = true;
+};
+
+const cancelOverwrite = () => {
+  pendingUploads.value = [];
+  overwriteTarget.value = null;
+};
+
+// Refresh the remote list when a queued upload actually completes, rather than
+// at spawn time (which previously showed stale entries while transfers ran).
+const refreshTriggeredTasks = new Set<string>();
+watch(
+  transferQueue.tasks.value,
+  () => {
+    for (const task of transferQueue.tasks.value) {
+      if (
+        task.direction === 'upload' &&
+        task.status === 'success' &&
+        !refreshTriggeredTasks.has(task.id)
+      ) {
+        refreshTriggeredTasks.add(task.id);
+        refreshBrowser();
+        showTransfers.value = true;
+      }
+    }
+  },
+  { deep: true }
+);
 
 /** Pick one or more local files and upload them into the current remote dir. */
 const onUpload = async () => {
@@ -313,7 +385,7 @@ const taskStatusClass = (task: UploadTask): string => {
               >
                 <FolderPlus :size="15" />
               </button>
-              <button type="button" class="tb-btn upload" :title="t('dashboard.upload')" @click="onUpload">
+              <button type="button" class="tb-btn upload" :title="t('dashboard.upload')" :disabled="browserLoading" @click="onUpload">
                 <Upload :size="15" />
                 <span>{{ t('dashboard.upload') }}</span>
               </button>
@@ -387,8 +459,8 @@ const taskStatusClass = (task: UploadTask): string => {
                   <div class="fm-task-icon-wrap" :class="taskStatusClass(task)">
                     <component :is="taskStatusIcon(task.status)" :size="14" />
                   </div>
-                  <span class="fm-task-name" :title="task.fileName || task.id">{{
-                    task.fileName || 'Transfer'
+                  <span class="fm-task-name" :title="task.fileName || t('dashboard.transfer')">{{
+                    task.fileName || t('dashboard.transfer')
                   }}</span>
                   <span class="fm-task-percent">{{
                     Math.floor(task.progress)
@@ -404,6 +476,9 @@ const taskStatusClass = (task: UploadTask): string => {
                 <div v-if="task.speed || task.fileSize" class="fm-task-meta">
                   <span v-if="task.speed">{{ formatSpeed(task.speed) }}</span>
                   <span v-if="task.fileSize">{{ formatBytes(task.fileSize) }}</span>
+                </div>
+                <div v-if="task.message" class="fm-task-message">
+                  {{ task.message }}
                 </div>
                 <div
                   v-if="
@@ -462,6 +537,18 @@ const taskStatusClass = (task: UploadTask): string => {
         </div>
       </div>
     </Transition>
+
+    <!-- Overwrite confirmation before uploading over an existing remote file -->
+    <ConfirmDialog
+      :visible="confirmOverwriteVisible"
+      :title="t('dashboard.overwriteTitle')"
+      :message="t('dashboard.overwriteMessage', { name: overwriteTarget })"
+      :confirm-text="t('dashboard.overwriteConfirm')"
+      :cancel-text="t('upload.cancel')"
+      :is-danger="true"
+      @confirm="confirmOverwrite"
+      @cancel="cancelOverwrite"
+    />
   </div>
 </template>
 
@@ -833,6 +920,18 @@ const taskStatusClass = (task: UploadTask): string => {
   font-size: 11px;
   color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+.fm-task-message {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+.tb-btn.upload:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  color: var(--color-text-secondary);
+  background: var(--color-interactive-hover);
 }
 .fm-task-actions {
   display: flex;

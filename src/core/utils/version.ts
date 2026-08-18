@@ -36,6 +36,40 @@ function compareParts(a: number[], b: number[]): number {
 }
 
 /**
+ * Compare two pre-release strings (e.g. "beta.1" vs "alpha") following semver
+ * identifier rules: numeric and alphanumeric segments are compared
+ * independently (numeric numerically, alphanumeric by ASCII), a numeric
+ * segment is lower precedence than an alphanumeric one, and a missing segment
+ * is lower precedence than a present one.
+ */
+function comparePreRelease(a: string, b: string): number {
+  const arrA = a.split('.');
+  const arrB = b.split('.');
+  const len = Math.max(arrA.length, arrB.length);
+  for (let i = 0; i < len; i++) {
+    const sa = arrA[i];
+    const sb = arrB[i];
+    if (sa === undefined) return -1;
+    if (sb === undefined) return 1;
+
+    const numericA = /^\d+$/.test(sa);
+    const numericB = /^\d+$/.test(sb);
+
+    if (numericA && numericB) {
+      const x = Number.parseInt(sa, 10);
+      const y = Number.parseInt(sb, 10);
+      if (x !== y) return x > y ? 1 : -1;
+    } else if (numericA !== numericB) {
+      // Numeric identifiers have lower precedence than alphanumeric ones.
+      return numericA ? -1 : 1;
+    } else if (sa !== sb) {
+      return sa > sb ? 1 : -1;
+    }
+  }
+  return 0;
+}
+
+/**
  * Compare two version strings.
  *
  * @returns 1 if `a` is newer than `b`, -1 if older, 0 if equal.
@@ -49,7 +83,7 @@ export function compareVersions(a: string, b: string): number {
 
   if (preA === null && preB === null) return 0;
   if (preA !== null && preB !== null) {
-    return compareParts(toNumericParts(preA), toNumericParts(preB));
+    return comparePreRelease(preA, preB);
   }
   // Same core version: the final release is newer than a pre-release.
   return preA !== null ? -1 : 1;

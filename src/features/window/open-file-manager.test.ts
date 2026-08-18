@@ -16,7 +16,14 @@ vi.mock('@tauri-apps/api/webviewWindow', () => {
     constructor(label: string, options: { url?: string }) {
       holder.constructCalls.push([label, options]);
     }
-    once = vi.fn(async () => () => {});
+    once = vi.fn(
+      async (event: string, handler: () => void) => {
+        // Fire the creation callback synchronously so the new
+        // await-created-result behavior resolves, mirroring a real window.
+        if (event === 'tauri://created') handler();
+        return () => {};
+      },
+    );
     show = vi.fn(async () => {});
     setFocus = vi.fn(async () => {});
   }
@@ -57,7 +64,14 @@ describe('openFileManagerWindow', () => {
 
   it('creates a new window when none exists', async () => {
     const { openFileManagerWindow } = await import('./open-file-manager');
-    holder.getByLabel = vi.fn().mockResolvedValue(null);
+    // First lookup (existing-window check) -> null; post-creation verify -> truthy.
+    holder.getByLabel = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        show: vi.fn(async () => {}),
+        setFocus: vi.fn(async () => {}),
+      });
     const result = await openFileManagerWindow('sid-2');
     expect(result).toBe(true);
     expect(holder.constructCalls).toHaveLength(1);
@@ -70,5 +84,7 @@ describe('openFileManagerWindow', () => {
       center: true,
       resizable: true,
     });
+    // getByLabel should have been consulted a second time for the verify step.
+    expect(holder.getByLabel).toHaveBeenCalledTimes(2);
   });
 });

@@ -2,7 +2,10 @@
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { createLogger } from '@/core/utils/logger';
 import type { ServerStatus, UploadTask } from '@/core/types';
+
+const logger = createLogger('ServerDashboard');
 import {
   formatBytes,
   formatSizeMiB,
@@ -195,88 +198,112 @@ const generateAreaPath = (data: number[], max: number = 100) => {
   );
 };
 
+// Chart data only needs to be computed while the panel is shown. When hidden
+// (is-hidden via `!show`), return empty paths so the heavy SVG path/area string
+// generation and the max-scale pass don't keep running on every status poll.
+const chartsVisible = computed(() => props.show);
+
 const cpuPath = computed(() =>
-  generatePath(
-    historyData.value.map(h => h.cpuUsage),
-    100
-  )
+  chartsVisible.value
+    ? generatePath(historyData.value.map(h => h.cpuUsage), 100)
+    : ''
 );
 const cpuAreaPath = computed(() =>
-  generateAreaPath(
-    historyData.value.map(h => h.cpuUsage),
-    100
-  )
+  chartsVisible.value
+    ? generateAreaPath(historyData.value.map(h => h.cpuUsage), 100)
+    : ''
 );
 
 const memPath = computed(() =>
-  generatePath(
-    historyData.value.map(h => h.memUsage),
-    100
-  )
+  chartsVisible.value
+    ? generatePath(historyData.value.map(h => h.memUsage), 100)
+    : ''
 );
 const memAreaPath = computed(() =>
-  generateAreaPath(
-    historyData.value.map(h => h.memUsage),
-    100
-  )
+  chartsVisible.value
+    ? generateAreaPath(historyData.value.map(h => h.memUsage), 100)
+    : ''
 );
 
 const maxNet = computed(() => {
+  if (!chartsVisible.value) return 1024 * 100;
   const values = historyData.value.flatMap(h => [h.netDown, h.netUp]);
   return Math.max(1024 * 100, ...values); // Max scale min 100KB/s
 });
 
 const netDownPath = computed(() =>
-  generatePath(
-    historyData.value.map(h => h.netDown),
-    maxNet.value
-  )
+  chartsVisible.value
+    ? generatePath(historyData.value.map(h => h.netDown), maxNet.value)
+    : ''
 );
 const netDownAreaPath = computed(() =>
-  generateAreaPath(
-    historyData.value.map(h => h.netDown),
-    maxNet.value
-  )
+  chartsVisible.value
+    ? generateAreaPath(historyData.value.map(h => h.netDown), maxNet.value)
+    : ''
 );
 
 const netUpPath = computed(() =>
-  generatePath(
-    historyData.value.map(h => h.netUp),
-    maxNet.value
-  )
+  chartsVisible.value
+    ? generatePath(historyData.value.map(h => h.netUp), maxNet.value)
+    : ''
 );
 const netUpAreaPath = computed(() =>
-  generateAreaPath(
-    historyData.value.map(h => h.netUp),
-    maxNet.value
-  )
+  chartsVisible.value
+    ? generateAreaPath(historyData.value.map(h => h.netUp), maxNet.value)
+    : ''
 );
 
 let unlisten: UnlistenFn | null = null;
+// Guards against the async registration race: when `sessionId` changes or the
+// component unmounts while `listen` is still awaiting, the pending registration
+// must not attach (or, if it already attached, must be torn down immediately).
+let listenerGeneration = 0;
+let disposed = false;
 
 const setupListener = async (sid: string) => {
+  const gen = ++listenerGeneration;
   if (unlisten) {
     unlisten();
     unlisten = null;
   }
 
   if (props.history) return;
+  if (!sid || disposed) return;
 
-  unlisten = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
-    localHistory.value.push(event.payload);
-    if (localHistory.value.length > MAX_HISTORY) {
-      localHistory.value.shift();
+  try {
+    const fn = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
+      // Ignore anything delivered after we've moved on.
+      if (gen !== listenerGeneration || disposed) return;
+      localHistory.value.push(event.payload);
+      if (localHistory.value.length > MAX_HISTORY) {
+        localHistory.value.shift();
+      }
+    });
+    // If the session changed or we unmounted while awaiting, drop the listener
+    // the moment it attaches so we never leak a stale subscription.
+    if (gen !== listenerGeneration || disposed || sid !== props.sessionId) {
+      fn();
+      return;
     }
-  });
+    unlisten = fn;
+  } catch (error) {
+    // Leave unlisten null so a later setup call can retry.
+    logger.error('Failed to register metric listener', error);
+  }
 };
 
 onMounted(async () => {
   await nextTick();
-  setupListener(props.sessionId);
+  void setupListener(props.sessionId);
 });
 
 onUnmounted(() => {
-  if (unlisten) unlisten();
+  disposed = true;
+  listenerGeneration += 1;
+  if (unlisten) {
+    unlisten();
+    unlisten = null;
+  }
 });
 
 watch(
@@ -284,7 +311,7 @@ watch(
   newId => {
     localHistory.value = [];
     if (!props.history) {
-      setupListener(newId);
+      void setupListener(newId);
     }
   }
 );

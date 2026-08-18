@@ -1,9 +1,13 @@
 <template>
   <div v-if="visible" class="confirm-dialog-overlay" @click.self="onCancel">
     <div
+      ref="dialogRef"
       class="confirm-dialog"
       role="alertdialog"
+      aria-modal="true"
       aria-labelledby="dialog-title"
+      aria-describedby="dialog-message"
+      @keydown="handleKeydown"
     >
       <div class="dialog-header">
         <div class="dialog-title-container">
@@ -11,28 +15,28 @@
             v-if="isDanger"
             class="dialog-title-icon dialog-title-icon-danger"
           />
-          <h3 id="dialog-title" class="dialog-title">{{ title }}</h3>
+          <h3 id="dialog-title" class="dialog-title">{{ resolveTitle }}</h3>
         </div>
       </div>
 
       <div class="dialog-body">
-        <p class="dialog-message">{{ message }}</p>
+        <p id="dialog-message" class="dialog-message">{{ message }}</p>
       </div>
 
       <div class="dialog-footer">
         <button
+          ref="cancelBtnRef"
           class="dialog-btn dialog-btn-secondary"
-          autofocus
           @click="onCancel"
         >
-          {{ cancelText }}
+          {{ resolveCancelText }}
         </button>
         <button
           class="dialog-btn dialog-btn-primary"
           :class="{ 'dialog-btn-danger': isDanger }"
           @click="onConfirm"
         >
-          {{ confirmText }}
+          {{ resolveConfirmText }}
         </button>
       </div>
     </div>
@@ -40,16 +44,20 @@
 </template>
 
 <script setup lang="ts">
+import { ref, watch, nextTick, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { AlertCircle } from 'lucide-vue-next';
 
-defineProps({
+const { t } = useI18n();
+
+const props = defineProps({
   visible: {
     type: Boolean,
     default: false,
   },
   title: {
     type: String,
-    default: 'Confirm',
+    default: '',
   },
   message: {
     type: String,
@@ -57,11 +65,11 @@ defineProps({
   },
   confirmText: {
     type: String,
-    default: 'Confirm',
+    default: '',
   },
   cancelText: {
     type: String,
-    default: 'Cancel',
+    default: '',
   },
   isDanger: {
     type: Boolean,
@@ -69,17 +77,75 @@ defineProps({
   },
 });
 
+// Localized fallbacks when the caller does not provide explicit text.
+const resolveTitle = computed(() => props.title || t('common.confirmTitle'));
+const resolveConfirmText = computed(
+  () => props.confirmText || t('common.confirm')
+);
+const resolveCancelText = computed(
+  () => props.cancelText || t('common.cancel')
+);
+
 const emit = defineEmits<{
   confirm: [];
   cancel: [];
 }>();
 
+const dialogRef = ref<HTMLElement | null>(null);
+const cancelBtnRef = ref<HTMLElement | null>(null);
+let lastFocused: HTMLElement | null = null;
+
+// Store the previously focused element on open so focus can be restored on
+// close; focus the cancel button on open (safe default for a destructive
+// action — never auto-focus the confirm/danger button).
+watch(
+  () => props.visible,
+  visible => {
+    if (visible) {
+      lastFocused = document.activeElement as HTMLElement | null;
+      nextTick(() => {
+        cancelBtnRef.value?.focus();
+      });
+    }
+  }
+);
+
+const restoreFocus = () => {
+  if (lastFocused && document.contains(lastFocused)) lastFocused.focus();
+  lastFocused = null;
+};
+
 const onConfirm = () => {
   emit('confirm');
+  restoreFocus();
 };
 
 const onCancel = () => {
   emit('cancel');
+  restoreFocus();
+};
+
+// Keyboard: Escape cancels; Tab cycles focus within the dialog (focus trap).
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    onCancel();
+    return;
+  }
+  if (e.key !== 'Tab' || !dialogRef.value) return;
+  const focusables = dialogRef.value.querySelectorAll<HTMLElement>(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  );
+  if (focusables.length === 0) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
 };
 </script>
 

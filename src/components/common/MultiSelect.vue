@@ -1,6 +1,6 @@
 <template>
   <div class="multi-select">
-    <label v-if="label" :for="`${itemType}-select`" class="select-label">
+    <label v-if="label" :for="inputId" class="select-label">
       {{ label }}
     </label>
     <div class="select-container">
@@ -36,7 +36,7 @@
           </span>
         </div>
         <input
-          :id="`${itemType}-select`"
+          :id="inputId"
           v-model="searchQuery"
           type="text"
           :placeholder="selectedItems.length === 0 ? placeholder : ''"
@@ -141,6 +141,15 @@ import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('MULTI_SELECT');
 
+// Each instance needs a unique DOM id for its input/label, because several
+// multi-selects (groups/tags) can be rendered on the same page — a shared
+// `item-select` id produced invalid duplicate ids.
+let instanceSeq = 0;
+const inputId = `item-select-${++instanceSeq}`;
+
+const arraysEqual = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
 interface Props {
   modelValue?: string[];
   items?: T[];
@@ -173,6 +182,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   'update:modelValue': [value: string[]];
   'item-added': [item: T];
+  'create-error': [message: string];
 }>();
 
 const isOpen = ref(false);
@@ -194,16 +204,14 @@ watch(
 );
 
 // Sync external v-model changes (parent reset/programmatic updates) back into
-// local state. Prevents stale selection after the parent replaces the array.
-let internalUpdate = false;
+// local state. Comparison-based instead of a one-shot flag: a legitimate
+// external update that happens right after an internal emit is not swallowed.
 watch(
   () => props.modelValue,
   newVal => {
-    if (internalUpdate) {
-      internalUpdate = false;
-      return;
-    }
-    selectedItems.value = [...(newVal || [])];
+    const next = newVal || [];
+    if (arraysEqual(next, selectedItems.value)) return;
+    selectedItems.value = [...next];
   },
   { immediate: true }
 );
@@ -261,7 +269,6 @@ const toggleItem = (itemId: string) => {
   if (selectedItems.value.includes(itemId)) {
     removeItem(itemId);
   } else {
-    internalUpdate = true;
     selectedItems.value.push(itemId);
     emit('update:modelValue', [...selectedItems.value]);
     searchQuery.value = '';
@@ -270,7 +277,6 @@ const toggleItem = (itemId: string) => {
 };
 
 const removeItem = (itemId: string) => {
-  internalUpdate = true;
   selectedItems.value = selectedItems.value.filter(id => id !== itemId);
   emit('update:modelValue', [...selectedItems.value]);
 };
@@ -291,19 +297,28 @@ const onKeyDown = (e: KeyboardEvent) => {
       isOpen.value = true;
       return;
     }
-    highlightedIndex.value =
-      (highlightedIndex.value + 1) % navigationItems.value.length;
+    if (navigationItems.value.length > 0) {
+      highlightedIndex.value =
+        (highlightedIndex.value + 1) % navigationItems.value.length;
+    }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
     if (!isOpen.value) {
       isOpen.value = true;
       return;
     }
-    highlightedIndex.value =
-      (highlightedIndex.value - 1 + navigationItems.value.length) %
-      navigationItems.value.length;
+    if (navigationItems.value.length > 0) {
+      highlightedIndex.value =
+        (highlightedIndex.value - 1 + navigationItems.value.length) %
+        navigationItems.value.length;
+    }
   } else if (e.key === 'Enter') {
-    if (isOpen.value && highlightedIndex.value !== -1) {
+    if (
+      isOpen.value &&
+      navigationItems.value.length > 0 &&
+      highlightedIndex.value !== -1 &&
+      highlightedIndex.value < navigationItems.value.length
+    ) {
       e.preventDefault();
       const item = navigationItems.value[highlightedIndex.value];
       if (item.id === 'create_new_item_action') {
@@ -339,7 +354,6 @@ const addNewItem = async () => {
 
   if (existingItem) {
     if (!selectedItems.value.includes(existingItem.id)) {
-      internalUpdate = true;
       selectedItems.value.push(existingItem.id);
       emit('update:modelValue', [...selectedItems.value]);
     }
@@ -355,7 +369,6 @@ const addNewItem = async () => {
 
       // Add to local items list and select it
       (allItems.value as T[]).push(newItem);
-      internalUpdate = true;
       selectedItems.value.push(newItem.id);
 
       emit('update:modelValue', [...selectedItems.value]);
@@ -365,6 +378,8 @@ const addNewItem = async () => {
       isOpen.value = false;
     } catch (error) {
       logger.error('Failed to create item:', error);
+      const msg = error instanceof Error ? error.message : String(error);
+      emit('create-error', msg);
     } finally {
       isCreating.value = false;
     }
@@ -380,7 +395,6 @@ const addNewItem = async () => {
     } as T;
 
     (allItems.value as unknown[]).push(newItem);
-    internalUpdate = true;
     selectedItems.value.push(tempId);
 
     emit('update:modelValue', [...selectedItems.value]);

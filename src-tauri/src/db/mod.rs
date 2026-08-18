@@ -216,7 +216,10 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
 
-    let _ = add_column_if_not_exists(conn, "tags", "color", "TEXT");
+    // The `color` column is required by list_tags/list_tags_for_session; a
+    // silent failure here would leave those SELECTs failing at runtime with a
+    // confusing "no such column" error. Propagate instead.
+    add_column_if_not_exists(conn, "tags", "color", "TEXT")?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS session_groups (
@@ -247,7 +250,7 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
 pub fn init_db() -> Result<String, String> {
     let db_path = db_path()?;
     let existed = db_path.exists();
-    let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+    let mut conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
     conn.execute_batch(
         "PRAGMA journal_mode = WAL;
@@ -283,12 +286,18 @@ pub fn init_db() -> Result<String, String> {
         "INTEGER NOT NULL DEFAULT 0",
     )?;
     add_column_if_not_exists(&conn, "sessions", "encrypted_credentials", "TEXT")?;
+    // Backfill last_connected_at ONLY when we just introduced the column
+    // (first migration to a schema that has it). Re-running this backfill on
+    // every startup would stamp every "never connected" session with
+    // updated_at and fabricate a (misleading) connection history.
+    let had_last_connected = table_has_column(&conn, "sessions", "last_connected_at")?;
     add_column_if_not_exists(&conn, "sessions", "last_connected_at", "TEXT")?;
-
-    let _ = conn.execute(
-        "UPDATE sessions SET last_connected_at = updated_at WHERE last_connected_at IS NULL",
-        [],
-    );
+    if !had_last_connected {
+        let _ = conn.execute(
+            "UPDATE sessions SET last_connected_at = updated_at WHERE last_connected_at IS NULL",
+            [],
+        );
+    }
 
     ensure_groups_and_tags(&conn)?;
 
@@ -366,6 +375,12 @@ pub fn init_db() -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
 
+    // Enforce real foreign keys ON DELETE CASCADE on the relation tables so
+    // deleted sessions can never orphan tunnel_rules (and imports cannot leave
+    // dangling links). Runs after every related table exists, only for schemas
+    // that still lack the constraints.
+    ensure_relation_fks(&mut conn)?;
+
     {
         let mut guard = DB.lock().map_err(|e| format!("DB lock poisoned: {}", e))?;
         *guard = Some(conn);
@@ -376,6 +391,132 @@ pub fn init_db() -> Result<String, String> {
     } else {
         Ok("ok".into())
     }
+}
+
+/// Rebuild a relation table with proper FOREIGN KEY ... ON DELETE CASCADE
+/// constraints. The tables were originally created without FKs (referential
+/// integrity was hand-maintained in the delete_* commands), which let
+/// delete_session orphan tunnel_rules and allowed imports to create dangling
+/// links. Implements the 12-step table-rebuild migration inside a transaction.
+fn rebuild_table_with_fk(conn: &mut Connection, table: &str, create_sql: &str) -> Result<(), String> {
+    if !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(format!("Invalid table identifier: {}", table));
+    }
+    // Skip when FK constraints are already present.
+    let fk_count: i64 = conn
+        .query_row(
+            &format!("SELECT COUNT(*) FROM pragma_foreign_key_list('{}')", table),
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if fk_count > 0 {
+        return Ok(());
+    }
+
+    let tmp = format!("{}_new", table);
+    conn.execute_batch("PRAGMA foreign_keys = OFF;")
+        .map_err(|e| e.to_string())?;
+    let result = (|| -> Result<(), String> {
+        let tx = conn.transaction().map_err(|e| e.to_string())?;
+        tx.execute(&format!("DROP TABLE IF EXISTS {}", tmp), [])
+            .map_err(|e| e.to_string())?;
+        tx.execute(create_sql, []).map_err(|e| e.to_string())?;
+        tx.execute(&format!("INSERT INTO {} SELECT * FROM {}", tmp, table), [])
+            .map_err(|e| e.to_string())?;
+        tx.execute(&format!("DROP TABLE {}", table), [])
+            .map_err(|e| e.to_string())?;
+        tx.execute(&format!("ALTER TABLE {} RENAME TO {}", tmp, table), [])
+            .map_err(|e| e.to_string())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    })();
+    let _ = conn.execute_batch("PRAGMA foreign_keys = ON;");
+    result?;
+
+    // Verify referential integrity of the migrated data.
+    let bad: i64 = conn
+        .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if bad > 0 {
+        return Err(format!(
+            "Foreign key check failed for {} ({} dangling references)",
+            table, bad
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_relation_fks(conn: &mut Connection) -> Result<(), String> {
+    rebuild_table_with_fk(
+        conn,
+        "session_groups",
+        "CREATE TABLE session_groups_new (
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            UNIQUE(session_id, group_id)
+        )",
+    )?;
+    rebuild_table_with_fk(
+        conn,
+        "session_tags",
+        "CREATE TABLE session_tags_new (
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            UNIQUE(session_id, tag_id)
+        )",
+    )?;
+    rebuild_table_with_fk(
+        conn,
+        "tunnel_rules",
+        "CREATE TABLE tunnel_rules_new (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            direction TEXT NOT NULL CHECK (direction IN ('local', 'dynamic')),
+            listen_host TEXT NOT NULL DEFAULT '127.0.0.1',
+            listen_port INTEGER NOT NULL CHECK (listen_port >= 0 AND listen_port <= 65535),
+            target_host TEXT NOT NULL DEFAULT '',
+            target_port INTEGER NOT NULL DEFAULT 0 CHECK (target_port >= 0 AND target_port <= 65535),
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+        )",
+    )?;
+    Ok(())
+}
+
+fn table_has_column(conn: &Connection, table: &str, column: &str) -> Result<bool, String> {
+    if !table.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || !column.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return Err(format!(
+            "Invalid table/column identifier: {}.{}",
+            table, column
+        ));
+    }
+    let count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            params![table, column],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(count > 0)
+}
+
+/// Escape `%`, `_` and `\` so user search terms are matched literally in a
+/// `LIKE ... ESCAPE '\'` pattern instead of acting as wildcards.
+fn escape_like(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch == '\\' || ch == '%' || ch == '_' {
+            out.push('\\');
+        }
+        out.push(ch);
+    }
+    out
 }
 
 pub(super) fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session> {
@@ -397,26 +538,6 @@ pub(super) fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sessio
 pub(super) const SESSION_COLUMNS: &str = "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
 
 #[tauri::command]
-pub fn add_session(
-    addr: String,
-    port: i64,
-    server_name: String,
-    username: String,
-    auth_type: String,
-    private_key_path: Option<String>,
-) -> Result<String, String> {
-    let id = Uuid::new_v4().to_string();
-    with_db(|conn| {
-        conn.execute(
-            "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
-            params![id, addr, port, server_name, username, auth_type, private_key_path],
-        ).map_err(|e| e.to_string())
-    })?;
-    Ok(id)
-}
-
-#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn save_session_with_credentials(
     id: Option<String>,
@@ -431,11 +552,16 @@ pub fn save_session_with_credentials(
     is_favorite: Option<bool>,
     group_ids: Option<Vec<String>>,
     tag_ids: Option<Vec<String>>,
+    clear_credentials: bool,
 ) -> Result<String, String> {
     let is_update = id.is_some();
     let session_id = id.unwrap_or_else(|| Uuid::new_v4().to_string());
 
-    let encrypted_credentials = if password.is_some() || key_passphrase.is_some() {
+    // `None` means "unchanged" (preserve any stored ciphertext), while an
+    // explicit clear request writes NULL so the stored secret is removed.
+    let credential_value_to_write: Option<String> = if clear_credentials {
+        None
+    } else if password.is_some() || key_passphrase.is_some() {
         let sensitive = crate::encryption::SensitiveData {
             password,
             key_passphrase,
@@ -481,7 +607,14 @@ pub fn save_session_with_credentials(
                 value: Box::new(private_key_path),
             },
         ];
-        if let Some(enc) = encrypted_credentials {
+        if clear_credentials {
+            // Explicit request to remove stored credentials: write NULL so the
+            // ciphertext is dropped (not treated as "unchanged").
+            sets.push(SetClause {
+                column: "encrypted_credentials",
+                value: Box::new(None::<String>),
+            });
+        } else if let Some(enc) = credential_value_to_write {
             sets.push(SetClause {
                 column: "encrypted_credentials",
                 value: Box::new(enc),
@@ -498,16 +631,25 @@ pub fn save_session_with_credentials(
         let p: Vec<&dyn ToSql> = params.iter().map(|b| &**b as &dyn ToSql).collect();
         tx.execute(&sql, p.as_slice()).map_err(|e| e.to_string())?;
 
-        tx.execute(
-            "DELETE FROM session_groups WHERE session_id = ?1",
-            params![session_id],
-        )
-        .map_err(|e| e.to_string())?;
-        tx.execute(
-            "DELETE FROM session_tags WHERE session_id = ?1",
-            params![session_id],
-        )
-        .map_err(|e| e.to_string())?;
+        // Only re-sync relations when the caller supplied them. Treating `None`
+        // as "unchanged" mirrors the credential guard above — otherwise an
+        // update that omits group_ids/tag_ids would silently wipe every
+        // group/tag link the session has (exactly the symmetric data-loss the
+        // credential guard at the top of this branch protects against).
+        if group_ids.is_some() {
+            tx.execute(
+                "DELETE FROM session_groups WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
+        if tag_ids.is_some() {
+            tx.execute(
+                "DELETE FROM session_tags WHERE session_id = ?1",
+                params![session_id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
     } else {
         tx.execute(
             "INSERT INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials)
@@ -521,7 +663,7 @@ pub fn save_session_with_credentials(
                 auth_type,
                 private_key_path,
                 if is_favorite.unwrap_or(false) { 1 } else { 0 },
-                encrypted_credentials
+                credential_value_to_write
             ],
         ).map_err(|e| e.to_string())?;
     }
@@ -706,12 +848,12 @@ pub fn get_sessions(
         params_vec.push(Box::new(pid));
     }
     if let Some(n) = server_name {
-        wheres.push("s.server_name LIKE ?".to_string());
-        params_vec.push(Box::new(format!("%{}%", n)));
+        wheres.push("s.server_name LIKE ? ESCAPE '\\'".to_string());
+        params_vec.push(Box::new(format!("%{}%", escape_like(&n))));
     }
     if let Some(a) = host_addr {
-        wheres.push("s.addr LIKE ?".to_string());
-        params_vec.push(Box::new(format!("%{}%", a)));
+        wheres.push("s.addr LIKE ? ESCAPE '\\'".to_string());
+        params_vec.push(Box::new(format!("%{}%", escape_like(&a))));
     }
 
     if !wheres.is_empty() {
@@ -990,6 +1132,14 @@ pub fn delete_session(id: String) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
     tx.execute(
         "DELETE FROM session_tags WHERE session_id = ?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
+    // Also remove this session's port-forwarding rules. (With the FK migration
+    // in place this also cascades automatically, but an explicit delete keeps
+    // pre-migration schemas correct and is harmless either way.)
+    tx.execute(
+        "DELETE FROM tunnel_rules WHERE session_id = ?1",
         params![id],
     )
     .map_err(|e| e.to_string())?;
@@ -1283,22 +1433,23 @@ pub fn update_tunnel_rule(
     {
         return Err("direction must be 'local' or 'dynamic'".to_string());
     }
-    let (sql, params_vec) = build_update(
-        "tunnel_rules",
-        vec![
-            direction.map(|v| SetClause { column: "direction", value: Box::new(v) }),
-            listen_host.map(|v| SetClause { column: "listen_host", value: Box::new(v) }),
-            listen_port.map(|v| SetClause { column: "listen_port", value: Box::new(v) }),
-            target_host.map(|v| SetClause { column: "target_host", value: Box::new(v) }),
-            target_port.map(|v| SetClause { column: "target_port", value: Box::new(v) }),
-            enabled.map(|v| SetClause { column: "enabled", value: Box::new(v as i64) }),
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
-        "id",
-        Box::new(id),
-    )?;
+    let sets: Vec<SetClause<'_>> = [
+        direction.map(|v| SetClause { column: "direction", value: Box::new(v) }),
+        listen_host.map(|v| SetClause { column: "listen_host", value: Box::new(v) }),
+        listen_port.map(|v| SetClause { column: "listen_port", value: Box::new(v) }),
+        target_host.map(|v| SetClause { column: "target_host", value: Box::new(v) }),
+        target_port.map(|v| SetClause { column: "target_port", value: Box::new(v) }),
+        enabled.map(|v| SetClause { column: "enabled", value: Box::new(v as i64) }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // No-op edit should not bump updated_at (matches edit_group/edit_tag).
+    if sets.is_empty() {
+        return Ok(());
+    }
+    let (sql, params_vec) =
+        build_update("tunnel_rules", sets, "id", Box::new(id))?;
     with_db(|conn| exec_update(conn, &sql, &params_vec))
 }
 
@@ -1386,20 +1537,20 @@ pub fn update_snippet(
     description: Option<String>,
     sort: Option<i64>,
 ) -> Result<(), String> {
-    let (sql, params_vec) = build_update(
-        "snippets",
-        vec![
-            name.map(|v| SetClause { column: "name", value: Box::new(v) }),
-            command.map(|v| SetClause { column: "command", value: Box::new(v) }),
-            description.map(|v| SetClause { column: "description", value: Box::new(v) }),
-            sort.map(|v| SetClause { column: "sort", value: Box::new(v) }),
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
-        "id",
-        Box::new(id),
-    )?;
+    let sets: Vec<SetClause<'_>> = [
+        name.map(|v| SetClause { column: "name", value: Box::new(v) }),
+        command.map(|v| SetClause { column: "command", value: Box::new(v) }),
+        description.map(|v| SetClause { column: "description", value: Box::new(v) }),
+        sort.map(|v| SetClause { column: "sort", value: Box::new(v) }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    // No-op edit should not bump updated_at (matches edit_group/edit_tag).
+    if sets.is_empty() {
+        return Ok(());
+    }
+    let (sql, params_vec) = build_update("snippets", sets, "id", Box::new(id))?;
     with_db(|conn| exec_update(conn, &sql, &params_vec))
 }
 

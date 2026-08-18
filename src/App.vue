@@ -32,12 +32,16 @@ interface SSHConnectionFormData {
   addr: string;
   port: number | null;
   username: string;
-  password: string;
+  // Optional: omitted (undefined) in edit mode when the user left it blank so
+  // the backend keeps the stored ciphertext ("unchanged").
+  password?: string;
   private_key_path: string;
-  key_passphrase: string;
+  key_passphrase?: string;
   save_session: boolean;
   groups?: string[];
   tags?: string[];
+  /** True when the user explicitly asked to clear any stored credentials. */
+  clearCredentials?: boolean;
 }
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
@@ -114,16 +118,26 @@ const connectionErrorTitle = ref('');
 
 // no `t` used here
 
-provide(SHOW_SSH_FORM_KEY, showSSHForm);
-provide(OPEN_SSH_FORM_KEY, () => {
+// Reset all SSH-form transient state so a fresh open starts in "create" mode.
+// Shared by the provided OPEN_SSH_FORM handler and the APP_EVENTS.OPEN_SSH_FORM
+// event handler so Ctrl+T after cancel/edit never reopens a stale "edit" form
+// that would overwrite the original session on save.
+const resetSSHFormState = () => {
   sshErrorMessage.value = null;
   isConnecting.value = false;
   sshFormMode.value = 'create';
   editingSessionId.value = null;
   savedSSHFormData.value = null;
   showConnectionProgress.value = false;
+};
+
+const openSSHFormReset = () => {
+  resetSSHFormState();
   openSSHForm();
-});
+};
+
+provide(SHOW_SSH_FORM_KEY, showSSHForm);
+provide(OPEN_SSH_FORM_KEY, openSSHFormReset);
 provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 
 // Settings panel management
@@ -216,7 +230,7 @@ onMounted(async () => {
 
   offFns.push(
     eventBus.on(APP_EVENTS.OPEN_SSH_FORM, () => {
-      openSSHForm();
+      openSSHFormReset();
     })
   );
 
@@ -532,6 +546,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
           privateKeyPath: data.private_key_path || null,
           password: data.password || null,
           keyPassphrase: data.key_passphrase || null,
+          clearCredentials: !!data.clearCredentials,
           groupIds: groupIds.length > 0 ? groupIds : null,
           tagIds: tagIds.length > 0 ? tagIds : null,
         };
@@ -705,6 +720,7 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
       privateKeyPath: data.private_key_path || null,
       password: data.password || null,
       keyPassphrase: data.key_passphrase || null,
+      clearCredentials: !!data.clearCredentials,
       groupIds: groupIds.length > 0 ? groupIds : null,
       tagIds: tagIds.length > 0 ? tagIds : null,
     };

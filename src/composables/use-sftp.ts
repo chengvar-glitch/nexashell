@@ -4,8 +4,7 @@
  * Wraps the Tauri `sftp_*` invoke commands and the per-session
  * `ssh-download-progress-{sid}` event stream. A SFTP browser uses this to list
  * directories and kick off downloads; the surrounding transfer progress is
- * surfaced through the shared upload/download task queue (see
- * `use-sftp-task-queue` in the feature layer).
+ * surfaced through the shared upload/download task queue in the feature layer.
  *
  * Path handling is deliberately tolerant of Windows hosts: OpenSSH for Windows
  * virtualizes drive roots as `/C:/`, `/D:/`, and native backslash paths
@@ -14,8 +13,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { ref, readonly, type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import { createLogger } from '@/core/utils/logger';
 import type { SftpEntry } from '@/core/types';
 
@@ -26,7 +24,6 @@ export interface SftpState {
   entries: Ref<SftpEntry[]>;
   loading: Ref<boolean>;
   error: Ref<string>;
-  stack: Ref<string[]>;
 }
 
 /** Remote platform category (`windows` | `macos` | `linux` | `unknown`). */
@@ -114,23 +111,26 @@ function joinPath(base: string, name: string): string {
 /**
  * Create an instance of the SFTP browser state bound to a session id. Each
  * component (or session) gets its own instance to avoid cross-session state
- * leakage. Call `dispose()` on unmount to release the event listener.
+ * leakage. Call `dispose()` on unmount to stop any in-flight list watchdog and
+ * mark the instance disposed so it stops writing reactive state.
  */
 export function useSftp(sessionId: Ref<string>) {
   const currentPath = ref<string>('/');
   const entries = ref<SftpEntry[]>([]);
-  const loadedPath = ref<string | null>(null);
   const loading = ref<boolean>(false);
   const error = ref<string>('');
-  const stack = ref<string[]>([]);
   const platform = ref<RemotePlatform>('unknown');
-  let unlisten: UnlistenFn | null = null;
   // Monotonic request id so a slow in-flight listing cannot clobber state
   // (or clear `loading`) after a newer navigation has started.
   let requestSeq = 0;
   let platformProbeStarted = false;
+  // Single in-flight list watchdog, tracked at composable scope so dispose()
+  // can clear it — a dismissed instance must not keep writing reactive state.
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  let disposed = false;
 
   const go = async (path: string): Promise<boolean> => {
+    if (disposed) return false;
     const target = normalizePath(path);
     const sid = sessionId.value;
     if (!sid) {
@@ -142,8 +142,9 @@ export function useSftp(sessionId: Ref<string>) {
     error.value = '';
     // Guard against a hung `sftp_list_dir` invoke leaving `loading` stuck, which
     // would dim the list and disable pointer events forever.
-    const watchdog = setTimeout(() => {
-      if (seq === requestSeq) {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      if (seq === requestSeq && !disposed) {
         loading.value = false;
       }
     }, 15000);
@@ -152,18 +153,24 @@ export function useSftp(sessionId: Ref<string>) {
         sessionId: sid,
         path: target,
       });
-      clearTimeout(watchdog);
+      if (watchdog) {
+        clearTimeout(watchdog);
+        watchdog = null;
+      }
+      if (disposed) return false;
       // A newer request has superseded this one — do not touch state.
       if (seq !== requestSeq) return false;
       currentPath.value = target;
-      loadedPath.value = target;
       entries.value = result;
       loading.value = false;
       return true;
     } catch (e) {
-      clearTimeout(watchdog);
+      if (watchdog) {
+        clearTimeout(watchdog);
+        watchdog = null;
+      }
       logger.error('sftp_list_dir failed', e);
-      if (seq !== requestSeq) return false;
+      if (disposed || seq !== requestSeq) return false;
       loading.value = false;
       error.value = e instanceof Error ? e.message : String(e);
       return false;
@@ -171,11 +178,10 @@ export function useSftp(sessionId: Ref<string>) {
   };
 
   const navigate = async (path: string): Promise<boolean> => {
-    const ok = await go(path);
-    if (ok) {
-      stack.value.push(currentPath.value);
-    }
-    return ok;
+    // History is intentionally not tracked here — the previous stack array
+    // grew without bound and was never consumed, so navigation is now a plain
+    // go() (browsers/consumers that need history manage it themselves).
+    return go(path);
   };
 
   const goUp = async (): Promise<boolean> => {
@@ -277,60 +283,19 @@ export function useSftp(sessionId: Ref<string>) {
    * Register a handler for this session's download progress events. Returns an
    * unlisten function; only one handler is registered per instance.
    */
-  const onDownloadProgress = async (
-    handler: (payload: {
-      taskId: string;
-      progress: number;
-      uploadedBytes: number;
-      totalBytes: number;
-      status: string;
-      message: string;
-      speed: number;
-      error?: string;
-    }) => void
-  ): Promise<void> => {
-    const sid = sessionId.value;
-    if (!sid) return;
-    if (unlisten) {
-      await unlisten();
-      unlisten = null;
-    }
-    unlisten = await listen(
-      `ssh-download-progress-${sid}`,
-      (event: { payload?: unknown }) => {
-        try {
-          const payload = event.payload as {
-            taskId: string;
-            progress: number;
-            uploadedBytes: number;
-            totalBytes: number;
-            status: string;
-            message: string;
-            speed: number;
-            error?: string;
-          };
-          handler(payload);
-        } catch (e) {
-          logger.error('download progress handler failed', e);
-        }
-      }
-    );
-  };
-
   const dispose = async (): Promise<void> => {
-    if (unlisten) {
-      await unlisten();
-      unlisten = null;
+    disposed = true;
+    if (watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
     }
   };
 
   return {
     currentPath,
     entries,
-    loadedPath,
     loading,
     error,
-    stack,
     platform,
     go,
     list: go,
@@ -341,19 +306,8 @@ export function useSftp(sessionId: Ref<string>) {
     mkdir,
     remove,
     rename,
-    onDownloadProgress,
     probePlatform,
     dispose,
-  };
-}
-
-/** Alias for consumers that want a stable, immutable view of browsing state. */
-export function useSftpBrowseState(sftp: ReturnType<typeof useSftp>) {
-  return {
-    currentPath: readonly(sftp.currentPath),
-    entries: readonly(sftp.entries),
-    loading: readonly(sftp.loading),
-    error: readonly(sftp.error),
   };
 }
 

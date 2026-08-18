@@ -153,7 +153,7 @@
 .btn-primary:hover {
   background-color: var(--color-primary-hover);
   color: #ffffff;
-  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-primary) 30%, transparent);
 }
 
 /* Input field common styles - macOS style */
@@ -567,7 +567,6 @@ a:focus-visible,
   display: grid;
   grid-template-columns: 24px 1fr 24px;
   align-items: center;
-  margin-bottom: 16px;
   gap: 8px;
   padding: 8px 12px 12px;
   border-bottom: 1px solid var(--color-border-secondary);
@@ -607,7 +606,7 @@ a:focus-visible,
 }
 
 .modal-macos-close {
-  background: #ff5f57;
+  background: var(--color-macos-close);
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -691,7 +690,7 @@ a:focus-visible,
 }
 
 .modal-input.error {
-  border-color: #ff4757;
+  border-color: var(--color-danger);
 }
 
 .modal-input:focus {
@@ -702,7 +701,7 @@ a:focus-visible,
 /* Error message */
 .modal-error-message {
   display: block;
-  color: #ff4757;
+  color: var(--color-danger);
   font-size: 0.75em;
   margin-top: 2px;
   margin-bottom: 4px;

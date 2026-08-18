@@ -31,7 +31,14 @@ pub fn run() {
         .manage(TunnelManager::default())
         .setup(|app| {
             if let Err(e) = db::init_db() {
+                // Surface the failure instead of silently running a broken app
+                // where every DB command fails with "DB not initialized".
                 log::error!("Database initialization failed: {}", e);
+                return Err(format!(
+                    "Database initialization failed: {}. NexaShell cannot run without its session database.",
+                    e
+                )
+                .into());
             }
 
             encryption::EncryptionManager::init();
@@ -84,12 +91,11 @@ pub fn run() {
             system::toggle_maximize,
             system::minimize_window,
             system::close_window,
-            system::read_file_preview,
-            system::get_file_size,
             ssh::connect_ssh,
             ssh::disconnect_ssh,
             ssh::send_ssh_input,
             ssh::get_buffered_ssh_output,
+            ssh::forget_host_key,
             ssh::upload_file_sftp,
             ssh::probe_remote_path,
             ssh::sftp_probe_platform,
@@ -105,7 +111,6 @@ pub fn run() {
             ssh::sftp_rename,
             terminal::connect_local,
             terminal::disconnect_local,
-            db::add_session,
             db::save_session,
             db::save_session_with_credentials,
             db::update_session_timestamp,
@@ -155,6 +160,11 @@ pub fn run() {
                     manager.disconnect_all();
                 }
                 if let Some(manager) = app_handle.try_state::<TerminalManager>() {
+                    manager.disconnect_all();
+                }
+                // Tear down every SSH tunnel so no forwarding port is left
+                // bound after the app exits.
+                if let Some(manager) = app_handle.try_state::<TunnelManager>() {
                     manager.disconnect_all();
                 }
             }

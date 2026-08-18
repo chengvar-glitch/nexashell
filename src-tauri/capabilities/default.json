@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for all windows (main shell and detached dashboard windows)",
-  "windows": ["main", "*"],
+  "description": "Capabilities for the main shell and detached file-manager windows. Scoped to the actual windows (the file-manager windows are runtime-created with `file-manager-{id}` labels) and trimmed to only the window/webview operations the frontend actually uses.",
+  "windows": ["main", "file-manager-*"],
   "permissions": [
     "core:default",
     "opener:default",
@@ -14,10 +14,8 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
     "core:window:allow-start-dragging",
-    "core:webview:allow-create-webview-window",
-    "core:window:allow-create",
-    "core:window:allow-destroy",
+    "core:window:allow-set-focus",
     "core:window:allow-show",
-    "core:window:allow-set-focus"
+    "core:webview:allow-create-webview-window"
   ]
 }

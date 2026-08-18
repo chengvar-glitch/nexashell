@@ -29,8 +29,10 @@ class SnippetAPI {
       const snippets = await invoke<Snippet[]>('list_snippets');
       return snippets || [];
     } catch (error) {
+      // Rethrow so the UI can distinguish "no snippets" from a backend error
+      // instead of silently treating the failure as an empty list.
       logger.error('Failed to list snippets', error);
-      return [];
+      throw error;
     }
   }
 

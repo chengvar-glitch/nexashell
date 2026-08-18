@@ -49,13 +49,45 @@ export async function openFileManagerWindow(sessionId: string): Promise<boolean>
       center: true,
       resizable: true,
     });
-    await win.once('tauri://created', () => {
-      logger.info('File-manager window created', { label });
+
+    // Await the ACTUAL creation result (created or error) rather than merely
+    // registering listeners and returning true immediately — an asynchronous
+    // creation failure used to be reported as success.
+    const CREATION_TIMEOUT = 5000;
+    const outcome = await new Promise<boolean>(resolve => {
+      let settled = false;
+      const timeout = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        logger.error('Timed out waiting for file-manager window creation', {
+          label,
+        });
+        resolve(false);
+      }, CREATION_TIMEOUT);
+
+      const onCreated = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        logger.info('File-manager window created', { label });
+        resolve(true);
+      };
+      const onError = (e: unknown) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        logger.error('File-manager window failed to load', { label, e });
+        resolve(false);
+      };
+      void win.once('tauri://created', onCreated);
+      void win.once('tauri://error', onError);
     });
-    await win.once('tauri://error', e => {
-      logger.error('File-manager window failed to load', e);
-    });
-    return true;
+
+    if (!outcome) return false;
+
+    // Verify the window actually exists before claiming success.
+    const check = await WebviewWindow.getByLabel(label).catch(() => null);
+    return !!check;
   } catch (err) {
     logger.error('Failed to open file-manager window', err);
     return false;

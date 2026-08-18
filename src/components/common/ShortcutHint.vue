@@ -94,6 +94,13 @@ onUnmounted(() => {
   border: 0.5px solid var(--color-border-secondary);
 }
 
+/* Show the tooltip when hovering the wrapped control or when its interactive
+ * children receive focus (keyboard navigation). */
+.shortcut-hint-wrapper:hover .shortcut-hint,
+.shortcut-hint-wrapper:focus-within .shortcut-hint {
+  opacity: 1;
+}
+
 @media (prefers-color-scheme: dark) {
   :root:not(.theme-light) .shortcut-hint {
     background-color: var(--color-bg-elevated);

@@ -84,6 +84,36 @@ export class ShortcutManager {
   /**
    * Handle keyboard events
    */
+  /** True when the key event originates inside a terminal (xterm.js) instance. */
+  private isInTerminal(event: KeyboardEvent): boolean {
+    const target = event.target as HTMLElement | null;
+    if (!target || typeof target.closest !== 'function') return false;
+    // xterm renders a real <textarea>; a global shortcut must not swallow
+    // keys that belong to the terminal (Ctrl+D EOF, Ctrl+Q, Cmd+... etc.).
+    return target.closest('.xterm') !== null;
+  }
+
+  /** True when the event should trigger a global shortcut even in an input. */
+  private isGlobalShortcut(key: string, event: KeyboardEvent): boolean {
+    return (
+      (['p', 'w', 't', 'q', ',', 'd'].includes(key.toLowerCase()) &&
+        (event.metaKey || event.ctrlKey)) ||
+      event.key === 'Escape'
+    );
+  }
+
+  /** True when Tab should open/focus the already-visible search dropdown. */
+  private isSearchDropdownTabAction(event: KeyboardEvent): boolean {
+    const target = event.target as HTMLElement | null;
+    if (!target || typeof target.closest !== 'function') return false;
+    const searchDropdownVisible = !!document.querySelector('.search-dropdown');
+    return (
+      searchDropdownVisible &&
+      (target.closest('.search-container') !== null ||
+        target.closest('.search-dropdown') !== null)
+    );
+  }
+
   private handleKeyDown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
     const isInputElement =
@@ -91,24 +121,21 @@ export class ShortcutManager {
       target.tagName === 'TEXTAREA' ||
       target.contentEditable === 'true';
 
-    // Global shortcuts that should trigger even in input fields
-    const isGlobalShortcut =
-      (['p', 'w', 't', 'q', ',', 'd'].includes(event.key.toLowerCase()) &&
-        (event.metaKey || event.ctrlKey)) ||
-      event.key === 'Escape';
+    // When the event targets a terminal, never intercept: let xterm handle
+    // keys (including Ctrl+D/EOF, Ctrl+Q, Cmd+...) natively.
+    if (this.isInTerminal(event)) {
+      return;
+    }
 
     if (isInputElement) {
-      if (isGlobalShortcut) {
+      if (this.isGlobalShortcut(event.key, event)) {
         // Allow global shortcuts to proceed
       } else if (event.key === 'Tab') {
-        // Special handling: allow Tab key in search-related areas
-        const isInSearchBox = target.closest('.search-container') !== null;
-        const isInSearchDropdown = target.closest('.search-dropdown') !== null;
-        const searchDropdownVisible =
-          document.querySelector('.search-dropdown');
-
-        if (!(searchDropdownVisible && (isInSearchBox || isInSearchDropdown))) {
-          event.preventDefault();
+        // Only intercept Tab when it performs an actual action (focusing the
+        // visible search dropdown); otherwise let native focus navigation work.
+        if (this.isSearchDropdownTabAction(event)) {
+          // fall through to shortcut resolution
+        } else {
           return;
         }
       } else {
@@ -117,15 +144,9 @@ export class ShortcutManager {
       }
     }
 
-    if (event.key === 'Tab') {
-      const isInSearchBox = target.closest('.search-container') !== null;
-      const isInSearchDropdown = target.closest('.search-dropdown') !== null;
-      const searchDropdownVisible = document.querySelector('.search-dropdown');
-
-      if (!(searchDropdownVisible && (isInSearchBox || isInSearchDropdown))) {
-        event.preventDefault();
-        return;
-      }
+    if (event.key === 'Tab' && !this.isSearchDropdownTabAction(event)) {
+      // Let native Tab navigation proceed instead of blocking it globally.
+      return;
     }
 
     const key = this.generateKey({

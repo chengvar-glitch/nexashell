@@ -16,7 +16,8 @@ export default defineConfig({
     css: false,
   },
   build: {
-    target: 'es2021',
+    // Aligned with the TS compiler target in tsconfig.json (ES2020).
+    target: 'es2020',
     cssCodeSplit: true,
     cssMinify: 'esbuild',
     chunkSizeWarningLimit: 700,
@@ -47,7 +48,8 @@ export default defineConfig({
   clearScreen: false,
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
-    port: 1420,
+    // VITE_PORT can override the dev port (see .env.example); default 1420.
+    port: Number(process.env.VITE_PORT) || 1420,
     strictPort: true,
     host: host || false,
     hmr: host

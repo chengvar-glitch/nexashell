@@ -152,7 +152,32 @@ pub fn export_sessions(password: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn import_sessions(json_data: String, password: String) -> Result<(), String> {
+    // Guard against unbounded payloads: the raw string is parsed in the main
+    // process, so a corrupted/malicious multi-gigabyte file would force the
+    // whole thing into memory. 50 MB comfortably covers any realistic backup.
+    const MAX_IMPORT_BYTES: usize = 50 * 1024 * 1024;
+    if json_data.len() > MAX_IMPORT_BYTES {
+        return Err(format!(
+            "Import payload too large ({} bytes, max {} bytes)",
+            json_data.len(),
+            MAX_IMPORT_BYTES
+        ));
+    }
+
     let export_data: ExportData = serde_json::from_str(&json_data).map_err(|e| e.to_string())?;
+
+    // Reject duplicate session ids inside a single file up front: INSERT OR
+    // REPLACE would silently overwrite the earlier copy — including its
+    // relation set — which is silent data loss the user never asked for.
+    let mut seen_session_ids = std::collections::HashSet::new();
+    for session in &export_data.sessions {
+        if !seen_session_ids.insert(session.metadata.id.clone()) {
+            return Err(format!(
+                "Duplicate session id in import payload: {}",
+                session.metadata.id
+            ));
+        }
+    }
 
     // Decrypt/re-encrypt all credentials BEFORE taking the DB lock — PBKDF2
     // (390k iterations per session) must not block every other DB call.
@@ -202,26 +227,33 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
             ],
         ).map_err(|e| e.to_string())?;
 
-        let _ = tx.execute(
+        // Relation writes MUST propagate errors: a partially-applied link set
+        // committing silently would leave the import inconsistent. Every other
+        // statement here rolls back on failure via `?`.
+        tx.execute(
             "DELETE FROM session_groups WHERE session_id = ?1",
             params![metadata.id],
-        );
+        )
+        .map_err(|e| e.to_string())?;
         for gid in session.group_ids {
-            let _ = tx.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
                 params![metadata.id, gid],
-            );
+            )
+            .map_err(|e| format!("Failed to link group {}: {}", gid, e))?;
         }
 
-        let _ = tx.execute(
+        tx.execute(
             "DELETE FROM session_tags WHERE session_id = ?1",
             params![metadata.id],
-        );
+        )
+        .map_err(|e| e.to_string())?;
         for tid in session.tag_ids {
-            let _ = tx.execute(
+            tx.execute(
                 "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
                 params![metadata.id, tid],
-            );
+            )
+            .map_err(|e| format!("Failed to link tag {}: {}", tid, e))?;
         }
     }
 

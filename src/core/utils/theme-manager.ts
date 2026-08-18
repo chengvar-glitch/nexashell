@@ -5,6 +5,13 @@ export type AccentKey = 'blue' | 'graphite' | 'purple' | 'green' | 'orange';
 const THEME_STORAGE_KEY = 'nexashell-theme';
 const ACCENT_STORAGE_KEY = 'nexashell-accent';
 
+/**
+ * Event dispatched whenever the theme mode or accent changes. Kept as a local
+ * constant (it is not part of the shared APP_EVENTS set) so both setters can
+ * emit a consistent payload shape.
+ */
+export const THEME_CHANGED_EVENT = 'theme-changed';
+
 const ACCENT_KEYS: AccentKey[] = [
   'blue',
   'graphite',
@@ -118,10 +125,11 @@ class ThemeManager {
     this.saveTheme(theme);
     this.applyTheme(theme);
 
-    // Dispatch event for other components
+    // Dispatch event for other components, with a consistent payload shape
+    // ({ theme, accent }) matching setAccent below.
     window.dispatchEvent(
-      new CustomEvent('theme-changed', {
-        detail: { theme },
+      new CustomEvent(THEME_CHANGED_EVENT, {
+        detail: { theme, accent: this.currentAccent },
       })
     );
   }
@@ -135,10 +143,10 @@ class ThemeManager {
     this.saveAccent(accent);
     this.applyAccent(accent);
 
-    // Dispatch event for other components, keeping 'theme-changed' working
-    // for both mode and accent changes.
+    // Dispatch event for other components, keeping theme-changed working for
+    // both mode and accent changes with a consistent { theme, accent } shape.
     window.dispatchEvent(
-      new CustomEvent('theme-changed', {
+      new CustomEvent(THEME_CHANGED_EVENT, {
         detail: { theme: this.currentTheme, accent },
       })
     );

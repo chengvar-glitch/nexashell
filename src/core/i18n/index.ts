@@ -77,10 +77,19 @@ export async function setLocale(locale: string) {
   localStorage.setItem('language', locale);
 }
 
-async function initLocale() {
+/**
+ * Initialize the active locale (loading the matching message table when it is
+ * not the default). Exported so entrypoints can await it during bootstrap.
+ */
+export async function initLocale(): Promise<void> {
   if (initialLocale !== 'en') {
     await setLocale(initialLocale);
   }
 }
 
-initLocale();
+// Kick off locale loading at module load. `.catch` prevents an unhandled
+// rejection if a dynamic import fails, and entrypoints may additionally await
+// initLocale() above without double work (loadLocale is cached).
+initLocale().catch(() => {
+  // Non-fatal: the default English locale keeps the app usable.
+});

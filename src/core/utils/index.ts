@@ -19,3 +19,7 @@ export { ShortcutManager } from './shortcut-manager';
 
 // Theme Manager
 export { themeManager } from './theme-manager';
+
+// Animation-frame throttling
+export { rafThrottle } from './rAF';
+export type { RafThrottled } from './rAF';

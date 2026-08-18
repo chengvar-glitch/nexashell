@@ -38,6 +38,15 @@ export function useTransferQueue(sessionId: Ref<string>) {
   let unlistenUpload: UnlistenFn | null = null;
   let unlistenDownload: UnlistenFn | null = null;
 
+  /**
+   * Task ids that WE cancelled from this window. cancel() removes the row
+   * optimistically, but the backend still broadcasts a final 'cancelled'
+   * progress event which applyProgress would otherwise rebuild via its
+   * unknown-taskId branch. We skip the rebuild for these and drop the id once
+   * the terminal event arrives.
+   */
+  const cancelledByUs = new Set<string>();
+
   const updateTask = (taskId: string, updates: Partial<UploadTask>) => {
     const found = tasks.value.find(t => t.id === taskId);
     if (!found) return;
@@ -55,8 +64,17 @@ export function useTransferQueue(sessionId: Ref<string>) {
   };
 
   const applyProgress = (payload: UploadProgressPayload, direction: UploadTask['direction']) => {
-    const existing = tasks.value.find(t => t.id === payload.taskId);
     const status = payload.status as UploadTask['status'];
+    // A final event for a task this window cancelled: we already removed it
+    // optimistically, so do NOT rebuild it. Drop the marker so later unrelated
+    // events are unaffected.
+    if (cancelledByUs.has(payload.taskId)) {
+      if (status === 'success' || status === 'error' || status === 'cancelled') {
+        cancelledByUs.delete(payload.taskId);
+      }
+      return;
+    }
+    const existing = tasks.value.find(t => t.id === payload.taskId);
     if (!existing) {
       // A progress event for an unknown task (e.g. started in the main window):
       // keep a lightweight entry so state stays consistent across windows.
@@ -166,6 +184,15 @@ export function useTransferQueue(sessionId: Ref<string>) {
   };
 
   const pause = async (taskId: string) => {
+    const task = tasks.value.find(t => t.id === taskId);
+    if (!task) return;
+    // Pausing only makes sense for uploads; the backend has no
+    // pause_download, so report the constraint instead of a silent no-op.
+    if (task.direction !== 'upload') {
+      updateTask(taskId, { message: 'Pause is only supported for uploads' });
+      logger.warn('pause() called for a non-upload task', { taskId, direction: task.direction });
+      return;
+    }
     updateTask(taskId, { status: 'paused', message: 'Pausing...' });
     try {
       await invoke('pause_upload', { sessionId: sessionId.value, taskId });
@@ -177,6 +204,15 @@ export function useTransferQueue(sessionId: Ref<string>) {
   };
 
   const resume = async (taskId: string) => {
+    const task = tasks.value.find(t => t.id === taskId);
+    if (!task) return;
+    // Resume must reflect the task's actual direction instead of hard-coding
+    // 'uploading'; downloads cannot be resumed via resume_upload.
+    if (task.direction !== 'upload') {
+      updateTask(taskId, { message: 'Resume is only supported for uploads' });
+      logger.warn('resume() called for a non-upload task', { taskId, direction: task.direction });
+      return;
+    }
     updateTask(taskId, { status: 'uploading', message: 'Resuming...' });
     try {
       await invoke('resume_upload', { sessionId: sessionId.value, taskId });
@@ -197,7 +233,9 @@ export function useTransferQueue(sessionId: Ref<string>) {
     } catch (err) {
       logger.error('Failed to cancel transfer', err);
     }
-    // Optimistic remove.
+    // Remember this cancellation so the final 'cancelled' broadcast does not
+    // resurrect the row, then remove it optimistically.
+    cancelledByUs.add(taskId);
     tasks.value = tasks.value.filter(t => t.id !== taskId);
   };
 
@@ -216,6 +254,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
       void unlistenDownload();
       unlistenDownload = null;
     }
+    cancelledByUs.clear();
   };
 
   return {

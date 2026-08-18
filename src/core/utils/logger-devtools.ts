@@ -60,13 +60,18 @@ export function setupLoggerDevTools(): void {
        */
       search: (keyword: string) => {
         const history = manager.getAllHistory();
-        return history.filter(
-          entry =>
-            entry.message.toLowerCase().includes(keyword.toLowerCase()) ||
-            JSON.stringify(entry.data)
-              .toLowerCase()
-              .includes(keyword.toLowerCase())
-        );
+        const needle = keyword.toLowerCase();
+        return history.filter(entry => {
+          if (entry.message.toLowerCase().includes(needle)) return true;
+          // Guard against entries without data: JSON.stringify(undefined)
+          // returns undefined, so calling .toLowerCase() would throw.
+          if (entry.data === undefined) return false;
+          const dataJson = JSON.stringify(entry.data);
+          return (
+            typeof dataJson === 'string' &&
+            dataJson.toLowerCase().includes(needle)
+          );
+        });
       },
 
       /**

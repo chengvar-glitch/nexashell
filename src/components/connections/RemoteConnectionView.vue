@@ -13,6 +13,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
 import { themeManager } from '@/core/utils/theme-manager';
+import { rafThrottle } from '@/core/utils/rAF';
 import {
   resolveTerminalTheme,
   toXtermTheme,
@@ -48,8 +49,24 @@ const latestStatus = shallowRef<ServerStatus | null>(null);
 let statusUnlisten: UnlistenFn | null = null;
 let lastStatusSession = '';
 
+// Tracks the in-flight `setupStatusListener` registration. When a listener is
+// being registered asynchronously, `statusUnlisten` is still null — a second
+// call would register a duplicate. The token lets the second call defer until
+// the first settles instead of racing it.
+let statusRegisterToken: Promise<void> | null = null;
+
 const setupStatusListener = async () => {
-  if (statusUnlisten) statusUnlisten();
+  // If a registration is already in flight, chain behind it so listeners are
+  // never double-registered nor torn down mid-await.
+  if (statusRegisterToken) {
+    await statusRegisterToken;
+  }
+
+  const runGeneration = generation;
+  if (statusUnlisten) {
+    statusUnlisten();
+    statusUnlisten = null;
+  }
   // Reset history only when the session changed (first mount or a new
   // session); re-activating the same tab keeps its existing buffer.
   if (lastStatusSession !== props.sessionId) {
@@ -59,16 +76,38 @@ const setupStatusListener = async () => {
   }
   if (!props.sessionId) return;
 
-  statusUnlisten = await listen<ServerStatus>(
-    `ssh-status-${props.sessionId}`,
-    event => {
-      latestStatus.value = event.payload;
-      if (!showDashboard.value) return;
-      const next = statusHistory.value.concat(event.payload);
-      statusHistory.value =
-        next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
+  const sid = props.sessionId;
+  // `let` + assignment so the async closure's finally can reference the same
+  // promise without tripping a "used before being assigned" circular check.
+  let token: Promise<void> | undefined;
+  token = (async () => {
+    try {
+      const unlisten = await listen<ServerStatus>(`ssh-status-${sid}`, event => {
+        // Ignore events once the component moved on (switched/unmounted) —
+        // the listener may still fire for a tick after unlisten resolves.
+        if (runGeneration !== generation) return;
+        latestStatus.value = event.payload;
+        if (!showDashboard.value) return;
+        const next = statusHistory.value.concat(event.payload);
+        statusHistory.value =
+          next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
+      });
+      // Guard against an early teardown happening while we awaited listen.
+      if (runGeneration !== generation || sid !== props.sessionId) {
+        unlisten();
+        return;
+      }
+      statusUnlisten = unlisten;
+    } catch (error) {
+      // Registration failed (e.g. window dropped). Leave statusUnlisten null so
+      // a later setup call can retry instead of being permanently stuck.
+      logger.error('Failed to register status listener', error);
+    } finally {
+      if (statusRegisterToken === token) statusRegisterToken = null;
     }
-  );
+  })();
+  statusRegisterToken = token;
+  await token;
 };
 
 // When the sidebar is reopened, backfill the visible history from the latest
@@ -132,6 +171,29 @@ let fitAddon: FitAddon | null = null;
 let searchAddon: SearchAddon | null = null;
 let disposeIMEFix: (() => void) | null = null;
 
+// Generation counter: incremented whenever the terminal is torn down or the
+// session switches. Any async continuation (buffer poll, input pipeline,
+// status listener) captures the generation it started under and bails out
+// early if the counter has moved on — so a stale task can never write to a
+// disposed terminal or register a listener for a session we no longer own.
+let generation = 0;
+
+// User-visible connection error state: set when a connect attempt throws or
+// the session drops spontaneously, and cleared on a successful connect. Renders
+// an inline banner with a retry button instead of silently swallowing failures.
+const connectError = ref<string>('');
+// True while a reconnect is in flight, to disable the retry button.
+const reconnecting = ref(false);
+
+// Cached at connect time so keystroke handling doesn't re-query the reactive
+// session store on every keypress. Nulled once the terminal/session is torn down.
+let connectedSessionId: string | null = null;
+
+// Keystroke FIFO: emits are queued so input reaches the backend in order even
+// when a previous Tauri emit is still in flight. Fire-and-forget — we never
+// await each keystroke in the onData handler.
+let inputChain: Promise<void> = Promise.resolve();
+
 // Upload task tracking
 
 const uploadTasks = shallowRef<UploadTask[]>([]);
@@ -148,7 +210,7 @@ const addUploadTask = (fileName: string, direction: 'upload' | 'download' = 'upl
       direction,
       status: 'pending',
       progress: 0,
-      message: 'Preparing...',
+      message: t('upload.preparing'),
       timestamp: Date.now(),
     },
     ...uploadTasks.value,
@@ -376,7 +438,7 @@ const processFileUpload = async (path: string, targetDirOverride?: string) => {
     updateUploadTask(taskId, {
       status: 'uploading',
       progress: 10,
-      message: `Preparing upload...`,
+      message: t('upload.preparingUpload'),
       remotePath,
     });
 
@@ -405,7 +467,7 @@ const processFileUpload = async (path: string, targetDirOverride?: string) => {
       updateUploadTask(taskId, {
         status: 'error',
         progress: 0,
-        message: `Failed to start: ${errorMessage}`,
+        message: `${t('upload.startFailed')}: ${errorMessage}`,
         error: errorMessage,
       });
 
@@ -425,7 +487,7 @@ const processFileUpload = async (path: string, targetDirOverride?: string) => {
     updateUploadTask(taskId, {
       status: 'error',
       progress: 0,
-      message: `Failed to prepare: ${errorMessage}`,
+      message: `${t('upload.prepareFailed')}: ${errorMessage}`,
       error: errorMessage,
     });
 
@@ -484,8 +546,11 @@ const resumeUploadTask = async (taskId: string) => {
 
 /** Cancel a running or paused upload/download task. */
 const cancelUploadTask = async (taskId: string) => {
-  const task = uploadTasks.value.find(t => t.id === taskId);
-  const isDownload = task?.direction === 'download';
+  // Look the task up FIRST so we still have its name/direction to restore if
+  // the backend cancellation fails — removing it first then re-finding always
+  // returns undefined and loses those details.
+  const previous = uploadTasks.value.find(t => t.id === taskId);
+  const isDownload = previous?.direction === 'download';
   // Optimistically remove the task so the list is clean instantly. If the
   // backend cancellation fails, surface an error entry so the user knows.
   removeUploadTask(taskId);
@@ -496,7 +561,6 @@ const cancelUploadTask = async (taskId: string) => {
     });
   } catch (err) {
     logger.error('Failed to cancel transfer', err);
-    const previous = uploadTasks.value.find(t => t.id === taskId);
     // Re-insert a terminal error entry (the cancelled-pending remote file may
     // be left behind if the backend cancellation truly failed).
     uploadTasks.value = [
@@ -636,72 +700,111 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
 
   const sessionExists = sessionStore.hasSession(props.sessionId);
 
-  try {
-    if (!sessionExists) {
-      if (props.tabType === 'terminal') {
-        logger.info('Creating local terminal session', {
-          sessionId: props.sessionId,
-        });
-        await sessionStore.createLocalSession(
-          props.sessionId,
-          props.sessionId,
-          cols,
-          rows
-        );
-      } else {
-        // Get session info from store (includes serverName)
-        const session = sessionStore.getSession(props.sessionId);
-        const serverName =
-          session?.connectionParams?.serverName || props.ip || 'Unknown';
+  if (!sessionExists) {
+    if (props.tabType === 'terminal') {
+      logger.info('Creating local terminal session', {
+        sessionId: props.sessionId,
+      });
+      await sessionStore.createLocalSession(
+        props.sessionId,
+        props.sessionId,
+        cols,
+        rows
+      );
+    } else {
+      // Get session info from store (includes serverName)
+      const session = sessionStore.getSession(props.sessionId);
+      const serverName =
+        session?.connectionParams?.serverName || props.ip || 'Unknown';
 
-        // Split panes resolve credentials from the non-reactive cache
-        // (pre-seeded by splitActivePane keyed by pane/session id)
-        const cached = sessionStore.getCachedCredentials(props.sessionId);
+      // Split panes resolve credentials from the non-reactive cache
+      // (pre-seeded by splitActivePane keyed by pane/session id)
+      const cached = sessionStore.getCachedCredentials(props.sessionId);
 
-        await sessionStore.createSSHSession(
-          props.sessionId,
-          props.sessionId,
-          serverName,
-          props.ip || '',
-          props.port || 22,
-          props.username || '',
-          props.password || cached?.password || '',
-          props.privateKeyPath || cached?.privateKeyPath || null,
-          props.keyPassphrase || cached?.keyPassphrase || null,
-          cols,
-          rows
-        );
-      }
+      await sessionStore.createSSHSession(
+        props.sessionId,
+        props.sessionId,
+        serverName,
+        props.ip || '',
+        props.port || 22,
+        props.username || '',
+        props.password || cached?.password || '',
+        props.privateKeyPath || cached?.privateKeyPath || null,
+        props.keyPassphrase || cached?.keyPassphrase || null,
+        cols,
+        rows
+      );
     }
+  }
 
-    if (props.tabType !== 'terminal') {
-      // The welcome banner / MOTD is buffered by the backend for a short
-      // window after connect. Poll the buffer instead of sleeping a fixed
-      // amount so we return as soon as content is ready (and never block on a
-      // magic timer). `writeBufferedOutput` dedupes against live events.
-      const maxAttempts = 14;
-      let attempts = 0;
-      while (attempts < maxAttempts) {
-        if (await writeBufferedOutput()) break;
-        attempts += 1;
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
+  if (props.tabType !== 'terminal') {
+    // The welcome banner / MOTD is buffered by the backend for a short
+    // window after connect. Poll the buffer instead of sleeping a fixed
+    // amount so we return as soon as content is ready (and never block on a
+    // magic timer). `writeBufferedOutput` dedupes against live events.
+    const maxAttempts = 14;
+    const runGeneration = generation;
+    let attempts = 0;
+    while (attempts < maxAttempts) {
+      if (runGeneration !== generation) break;
+      if (await writeBufferedOutput()) break;
+      attempts += 1;
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
-  } catch (error) {
-    logger.error('Connection failed', error);
-    throw error;
   }
 };
+
+/**
+ * Fit the terminal to its container.
+ *
+ * `fit()` measures DOM geometry and recomputes cols/rows, which can trigger
+ * `onResize` → a backend resize emit. It is invoked by several sources that
+ * fire together within one animation frame — window resize, the ResizeObserver
+ * on the terminal container (which also fires continuously while CSS
+ * transitions such as the sidebar margin animation are running), and tab
+ * activation. All of them observe the same intermediate layout, so executing
+ * fit more than once per frame is pure waste; `rafThrottle` collapses each
+ * frame's triggers into a single trailing call.
+ */
+const fitTerminal = (): void => {
+  if (!fitAddon) return;
+  try {
+    fitAddon.fit();
+  } catch (e) {
+    logger.error('Fit error', e);
+  }
+};
+const scheduleFit = rafThrottle(fitTerminal);
 
 /**
  * Window resize handler (managed via onActivated/onDeactivated for KeepAlive).
  * Defined at setup top-level so the lifecycle hooks can reference it.
  */
 const handleResize = (): void => {
-  if (fitAddon) {
-    fitAddon.fit();
-  }
+  scheduleFit();
 };
+
+let lastEmittedCols = 0;
+let lastEmittedRows = 0;
+
+/**
+ * Emit the terminal's current dimensions to the backend as `ssh-resize-{id}`,
+ * skipping no-op and invalid (0x0 / 0-col) sizes so a hidden or zero-size
+ * terminal doesn't push a malformed resize to the backend. Coalesced with a
+ * rAF throttle because window resize, ResizeObserver and tab activation can
+ * all fire the same layout change within a frame.
+ */
+const emitSshResize = (sid: string): void => {
+  if (!terminal) return;
+  const cols = terminal.cols;
+  const rows = terminal.rows;
+  if (!cols || !rows) return;
+  if (cols === lastEmittedCols && rows === lastEmittedRows) return;
+  lastEmittedCols = cols;
+  lastEmittedRows = rows;
+  emit(`ssh-resize-${sid}`, { cols, rows });
+};
+const scheduleSshResize = rafThrottle((sid: string) => emitSshResize(sid));
 
 let resizeObserver: ResizeObserver | null = null;
 
@@ -774,6 +877,10 @@ const setupDisconnectListener = async (sessionId: string): Promise<void> => {
       terminal.write('\r\n\x1b[31m[connection lost]\x1b[0m\r\n');
     }
 
+    // Surface the drop to the user with a retry path instead of leaving the
+    // terminal looking alive-but-dead.
+    connectError.value = t('ssh.connectionLost');
+
     // Mark the session as disconnected so the rest of the app (tab badges,
     // session stats) reflects reality, without removing it — the user can
     // still re-open the tab to reconnect.
@@ -787,6 +894,7 @@ const setupDisconnectListener = async (sessionId: string): Promise<void> => {
  */
 const connectToSession = async (sessionId: string): Promise<void> => {
   if (!sessionId) return;
+  const gen = generation;
   lastSeq = 0;
 
   try {
@@ -794,30 +902,70 @@ const connectToSession = async (sessionId: string): Promise<void> => {
     await setupSSHOutputListener(sessionId);
     await setupDisconnectListener(sessionId);
 
-    if (terminal) {
+    if (terminal && gen === generation) {
       // First, ensure we have the correct size before connecting
       if (fitAddon) {
         fitAddon.fit();
       }
 
       await connectSession(terminal.cols, terminal.rows);
+      // Bail out if the component was torn down / session switched while we
+      // were connecting — do not mark a stale session as the active one.
+      if (gen !== generation || sessionId !== props.sessionId) return;
+      connectedSessionId = sessionId;
+      // A successful connect clears any previous error banner.
+      connectError.value = '';
 
       // Re-sync after a short delay to ensure backend is ready and listener is active
       if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
       pendingResizeTimer = setTimeout(() => {
-        if (!terminal) return;
+        if (!terminal || gen !== generation) return;
         if (fitAddon && props.sessionId === sessionId) {
           fitAddon.fit();
-          emit(`ssh-resize-${sessionId}`, {
-            cols: terminal.cols,
-            rows: terminal.rows,
-          });
+          emitSshResize(sessionId);
         }
       }, 500);
     }
   } catch (error) {
     logger.error('Connection failed', error);
+    connectError.value =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : String(error);
+    connectedSessionId = null;
   }
+};
+
+/**
+ * Force a full session rebuild and reconnect.
+ *
+ * The session store refuses to overwrite a session that already exists, so a
+ * spontaneously disconnected (or error) session can't be recreated in place.
+ * Tearing it down first (the backend has already dropped it on a spontaneous
+ * disconnect) then re-running the connect flow gives a clean rebuild. Wired to
+ * the retry button on the connection-error banner.
+ */
+const handleReconnect = async (): Promise<void> => {
+  const sid = props.sessionId;
+  if (!sid) return;
+  if (reconnecting.value) return;
+  reconnecting.value = true;
+  connectError.value = '';
+
+  try {
+    if (sessionStore.hasSession(sid)) {
+      await sessionStore.disconnectSession(sid);
+    }
+  } catch (error) {
+    logger.error('Failed to tear down session before reconnect', error);
+  }
+
+  // Reset the buffer dedup so the welcome banner is written once more.
+  lastSeq = 0;
+  await connectToSession(sid);
+  reconnecting.value = false;
 };
 
 // Watch sessionId changes and connect/disconnect accordingly
@@ -825,6 +973,13 @@ watch(
   () => props.sessionId,
   (newSessionId, oldSessionId) => {
     if (newSessionId && newSessionId !== oldSessionId) {
+      // Invalidate any in-flight work tied to the previous session (buffer
+      // polls, listeners, pending resizes) so it can't touch the new one.
+      generation += 1;
+      connectedSessionId = null;
+      // Rebind the status-metrics listener for the new session (the history
+      // reset lives inside setupStatusListener, keyed on the session change).
+      void setupStatusListener();
       void connectToSession(newSessionId);
     }
   }
@@ -856,7 +1011,7 @@ watch(
   newSize => {
     if (terminal) {
       terminal.options.fontSize = newSize;
-      fitAddon?.fit();
+      scheduleFit();
     }
   }
 );
@@ -918,17 +1073,14 @@ watch(
 // Handle activation when switching back to this tab (KeepAlive support)
 onActivated(() => {
   nextTick(() => {
-    if (fitAddon) {
-      fitAddon.fit();
-      terminal?.focus();
+    // fit() via the throttled, try/catch-wrapped path so a stray 0x0 measure
+    // during the tab-switch layout can never throw.
+    scheduleFit();
+    terminal?.focus();
 
-      // Re-sync terminal dimensions with the backend after activation
-      if (terminal && props.sessionId) {
-        emit(`ssh-resize-${props.sessionId}`, {
-          cols: terminal.cols,
-          rows: terminal.rows,
-        });
-      }
+    // Re-sync terminal dimensions with the backend after activation
+    if (props.sessionId) {
+      emitSshResize(props.sessionId);
     }
     // Re-establish the metrics listener that was torn down on deactivate.
     void setupStatusListener();
@@ -956,7 +1108,14 @@ onDeactivated(() => {
  */
 onUnmounted(async () => {
   window.removeEventListener('resize', handleResize);
+  // Drop any fit still queued on the animation frame — the terminal is being
+  // disposed and a trailing fit would measure a detached/zero-size container.
+  scheduleFit.cancel();
+  scheduleSshResize.cancel();
   if (pendingResizeTimer) clearTimeout(pendingResizeTimer);
+  // Invalidate in-flight connect work / listeners settled after unmount.
+  generation += 1;
+  connectedSessionId = null;
   if (terminalRef.value && handleTerminalContextMenu) {
     terminalRef.value.removeEventListener(
       'contextmenu',
@@ -983,12 +1142,24 @@ onUnmounted(async () => {
  * unmounting the original pane's component).
  */
 const cleanupResources = async (): Promise<void> => {
+  // Invalidate every in-flight async continuation (buffer poll, input chain,
+  // connect work) so none of them touch the disposed terminal or re-register
+  // listeners for a session we no longer own.
+  generation += 1;
+  connectedSessionId = null;
+
   if (disposeIMEFix) {
     disposeIMEFix();
     disposeIMEFix = null;
   }
 
   terminal?.dispose();
+  // Critical: null the reference after dispose. The buffered-output poll and
+  // the resize/input handlers check `terminal` for liveness — if we left the
+  // dead Terminal instance here they'd keep writing to a disposed object.
+  terminal = null;
+  fitAddon = null;
+  searchAddon = null;
 
   if (unlistenFn) {
     try {
@@ -1358,15 +1529,11 @@ const initialize = async (): Promise<void> => {
     return true;
   });
 
-  // Use ResizeObserver for robust layout management
+  // Use ResizeObserver for robust layout management. Fires on every container
+  // box change (including the sidebar/tunnel-panel margin animation), so the
+  // actual fit is rAF-throttled to at most once per frame.
   resizeObserver = new ResizeObserver(() => {
-    if (fitAddon) {
-      try {
-        fitAddon.fit();
-      } catch (e) {
-        logger.error('Fit error', e);
-      }
-    }
+    scheduleFit();
   });
 
   if (terminalRef.value) {
@@ -1377,37 +1544,41 @@ const initialize = async (): Promise<void> => {
   fitAddon.fit();
   terminal.focus();
 
-  // Handle terminal resize and notify backend
-  terminal.onResize(({ cols, rows }) => {
+  // Handle terminal resize and notify backend. Coalesced + guarded so a
+  // hidden/zero-size terminal never emits 0x0 and no-op sizes are skipped.
+  terminal.onResize(() => {
     if (props.sessionId) {
-      emit(`ssh-resize-${props.sessionId}`, { cols, rows });
+      scheduleSshResize(props.sessionId);
     }
   });
 
   /**
    * Handle terminal input
    * Using onData instead of onKey to properly handle IME (Chinese input)
+   *
+   * Keystrokes are serialized through a FIFO promise chain and emitted
+   * fire-and-forget (never awaited per keystroke), using the session reference
+   * cached at connect time instead of re-querying the reactive store on every
+   * key. When the connection failed, dropped, or the component is torn down,
+   * input is skipped entirely — no misleading local echo that makes a dead
+   * session look alive.
    */
-  terminal.onData(async (data: string) => {
-    const session = props.sessionId
-      ? sessionStore.getSession(props.sessionId)
-      : undefined;
-    const hasSession = !!session;
-    const isDead =
-      session && (session.status === 'disconnected' || session.status === 'error');
-
-    if (hasSession && !isDead) {
-      // Send data immediately to ensure interactive tools (vim, ssh, etc.)
-      // work correctly without broken escape sequences or latency.
-      try {
-        await emit(`ssh-input-${props.sessionId}`, { input: data });
-      } catch (error) {
+  terminal.onData((data: string) => {
+    if (connectedSessionId !== props.sessionId) return;
+    if (connectError.value) return;
+    const sid = props.sessionId;
+    const gen = generation;
+    // Chain into the FIFO so input reaches the backend in order even while a
+    // previous Tauri emit is still in flight.
+    inputChain = inputChain
+      .catch(() => undefined)
+      .then(() => {
+        if (gen !== generation || connectedSessionId !== sid) return;
+        return emit(`ssh-input-${sid}`, { input: data });
+      })
+      .catch(error => {
         logger.error('Input emit failed', error);
-      }
-    } else if (data.length === 1 && data >= ' ' && data !== '\x7f') {
-      // No active session: echo printable characters locally
-      terminal?.write(data);
-    }
+      });
   });
 
   // Initial connection is handled when a valid `sessionId` is provided
@@ -1431,6 +1602,23 @@ const initialize = async (): Promise<void> => {
       @cancel-task="cancelUploadTask"
     />
     <div ref="terminalRef" class="terminal-container" />
+
+    <!-- Connection error banner: shown when a connect attempt fails or the
+         session drops spontaneously. Gives the user the actual error plus a
+         retry path instead of silently swallowing the failure. -->
+    <div v-if="connectError" class="connection-error-banner" role="alert">
+      <div class="connection-error-text">
+        {{ connectError }}
+      </div>
+      <button
+        type="button"
+        class="connection-retry-btn"
+        :disabled="reconnecting"
+        @click="handleReconnect"
+      >
+        {{ reconnecting ? t('ssh.reconnecting') : t('ssh.retry') }}
+      </button>
+    </div>
 
     <!-- Open the standalone file manager for this session -->
     <button
@@ -1499,7 +1687,7 @@ const initialize = async (): Promise<void> => {
           <button
             type="button"
             class="upload-confirm-close"
-            aria-label="Close"
+            :aria-label="t('upload.closeDialog')"
             @click="closeUploadConfirm"
           >
             ×
@@ -1680,7 +1868,7 @@ const initialize = async (): Promise<void> => {
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  pointer-events: none; /* 让事件穿透到 Tauri 的系统监听 */
+  pointer-events: none; /* Let events pass through to Tauri's system listener */
   border: 2px dashed #facc15;
   box-sizing: border-box;
 }
@@ -1790,6 +1978,50 @@ const initialize = async (): Promise<void> => {
   width: 100%;
   height: 100%;
   transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Connection error banner (floating, top-center so the terminal stays usable) */
+.connection-error-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: var(--radius-md, 6px);
+  background: var(--color-bg-elevated, #2a2a2a);
+  border: 1px solid var(--color-danger, #ef4444);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color: var(--color-text-primary, #fff);
+}
+
+.connection-error-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+  word-break: break-word;
+  flex: 1;
+}
+
+.connection-retry-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: none;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-accent, #facc15);
+  color: var(--color-bg-primary, #000);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.connection-retry-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /*

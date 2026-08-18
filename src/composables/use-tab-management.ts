@@ -273,8 +273,18 @@ export function useTabManagement() {
         (tabToClose.type === 'terminal' || tabToClose.type === 'ssh');
 
       if (isCurrentActiveTab && tabs.value.length > 1) {
-        const newIndex = Math.min(index, tabs.value.length - 2);
-        activeTabId.value = tabs.value[newIndex].id as string;
+        // When closing a non-final tab, adopt the one to its right; when
+        // closing the final tab, adopt the one to its left. The previous
+        // `Math.min(index, length - 2)` pointed at the tab being deleted for
+        // any non-final index, leaving a dangling activeTabId and a blank
+        // workspace. `length > 1` guarantees index-1 is never negative.
+        const newIndex = index < tabs.value.length - 1 ? index + 1 : index - 1;
+        const nextTab = tabs.value[newIndex];
+        activeTabId.value = nextTab.id as string;
+        // Re-derive the active pane so the newly active tab renders immediately
+        // instead of keeping a stale pane id from the closing tab.
+        activePaneId.value =
+          nextTab.panes && nextTab.panes.length > 0 ? nextTab.panes[0].id : '';
       }
 
       if (isTerminalTab) {

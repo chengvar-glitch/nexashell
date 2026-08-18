@@ -166,6 +166,15 @@ export const useSessionStore = defineStore('session', () => {
     cols: number,
     rows: number
   ): Promise<void> => {
+    // Same duplicate guard as createSSHSession: never silently overwrite an
+    // existing session record / tab mapping with a brand-new connection.
+    if (hasSession(sessionId) || hasSessionForTab(tabId)) {
+      logger.warn('Session already exists, refusing to overwrite', {
+        sessionId,
+        tabId,
+      });
+      return;
+    }
     try {
       const session: SessionState = {
         id: sessionId,
@@ -204,50 +213,53 @@ export const useSessionStore = defineStore('session', () => {
   };
 
   const disconnectSession = async (sessionId: string): Promise<void> => {
+    const session = sessions.value[sessionId];
+    if (!session) {
+      logger.warn('Session not found', { sessionId });
+      return;
+    }
+
+    logger.debug('disconnectSession: initiating disconnect', {
+      sessionId,
+      tabId: session.tabId,
+      type: session.type,
+    });
+
     try {
-      const session = sessions.value[sessionId];
-      if (!session) {
-        logger.warn('Session not found', { sessionId });
-        return;
-      }
-
-      logger.debug('disconnectSession: initiating disconnect', {
-        sessionId,
-        tabId: session.tabId,
-        type: session.type,
-      });
-
       if (session.type === 'ssh') {
-        try {
-          await sessionApi.disconnectSSH(sessionId);
-        } catch (error) {
-          logger.error('Failed to disconnect SSH session on backend', error);
-        }
+        await sessionApi.disconnectSSH(sessionId);
         // Tear down any active port-forwarding tunnels for this session.
+        // Best-effort: tunnels are torn down by the backend when the SSH
+        // session itself drops, so a failure here must not block the
+        // disconnect, BUT it must also not orphan live connections.
         try {
           await tunnelApi.stopSessionTunnels(sessionId);
         } catch (error) {
           logger.error('Failed to stop session tunnels', error);
         }
       } else if (session.type === 'terminal') {
-        try {
-          await sessionApi.disconnectLocal(sessionId);
-        } catch (error) {
-          logger.error('Failed to disconnect local session on backend', error);
-        }
+        await sessionApi.disconnectLocal(sessionId);
       }
-
-      delete sessions.value[sessionId];
-      delete tabToSessionMap.value[session.tabId];
-      credentialCache.delete(sessionId);
-
-      logger.info('disconnectSession: removed session state locally', {
-        sessionId,
-      });
     } catch (error) {
-      logger.error('Failed to disconnect session', error);
+      logger.error('Failed to disconnect session on backend', error);
+      // The backend did not actually tear the connection down. Deleting the
+      // local record here would leave an orphaned live connection with no
+      // way to manage or close it — so keep the record and surface the
+      // failure instead of silently dropping state.
+      session.status = 'error';
+      session.errorMessage =
+        error instanceof Error ? error.message : String(error);
       throw error;
     }
+
+    // Success — only now remove local state.
+    delete sessions.value[sessionId];
+    delete tabToSessionMap.value[session.tabId];
+    credentialCache.delete(sessionId);
+
+    logger.info('disconnectSession: removed session state locally', {
+      sessionId,
+    });
   };
 
   const disconnectByTabId = async (tabId: string): Promise<void> => {

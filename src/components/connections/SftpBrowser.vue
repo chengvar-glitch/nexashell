@@ -103,20 +103,51 @@ const formatMtime = (mtime?: number): string => {
   });
 };
 
+// --- Input sanitization ------------------------------------------------
+// Reject names that would escape the current directory (`..`), create nested
+// paths (`/` / `\`), or that are empty. Windows virtual drive handling
+// (`/C:/`) is unaffected: this validates the *name* the user types for a new
+// folder / rename, never the path prefix.
+const validateEntryName = (name: string): string | null => {
+  const trimmed = name.trim();
+  if (!trimmed) return t('sftp.errorNameEmpty');
+  if (trimmed === '.' || trimmed === '..') return t('sftp.errorNameDot');
+  if (trimmed.includes('/') || trimmed.includes('\\')) {
+    return t('sftp.errorNameSeparator');
+  }
+  return null;
+};
+
 const enterPath = async (entry: SftpEntry) => {
-  if (!entry.isDir) return;
+  // Symlinks can point at directories even when `isDir` is false, so allow
+  // navigating into them; report a navigation error when it fails.
+  if (!entry.isDir && !entry.isSymlink) return;
+  actionError.value = '';
   const ok = await sftp.navigate(entry.path);
-  if (ok) selectedPath.value = null;
+  if (ok) {
+    selectedPath.value = null;
+    actionError.value = '';
+  } else {
+    actionError.value = sftp.error.value;
+  }
 };
 
 const onMkdir = async () => {
+  // Clear any stale error banner at the start of the action.
+  actionError.value = '';
   const name = mkdirName.value.trim();
   if (!name) {
     showMkdir.value = false;
     return;
   }
+  const validationError = validateEntryName(name);
+  if (validationError) {
+    actionError.value = validationError;
+    return;
+  }
   const ok = await sftp.mkdir(name);
   if (!ok) actionError.value = sftp.error.value;
+  else actionError.value = '';
   mkdirName.value = '';
   showMkdir.value = false;
 };
@@ -148,8 +179,10 @@ const confirmDelete = async () => {
   const entry = entryToDelete.value;
   entryToDelete.value = null;
   if (!entry) return;
+  actionError.value = '';
   const ok = await sftp.remove(entry);
   if (!ok) actionError.value = sftp.error.value;
+  else actionError.value = '';
 };
 
 const startRename = (entry: SftpEntry) => {
@@ -159,13 +192,22 @@ const startRename = (entry: SftpEntry) => {
 
 const onRename = async () => {
   if (!editingPath.value) return;
+  // Clear any stale error banner at the start of the action.
+  actionError.value = '';
   const entry = sftp.entries.value.find(e => e.path === editingPath.value);
   if (!entry) {
     editingPath.value = null;
     return;
   }
-  const ok = await sftp.rename(entry, editingName.value.trim());
+  const newName = editingName.value.trim();
+  const validationError = validateEntryName(newName);
+  if (validationError) {
+    actionError.value = validationError;
+    return;
+  }
+  const ok = await sftp.rename(entry, newName);
   if (!ok) actionError.value = sftp.error.value;
+  else actionError.value = '';
   editingPath.value = null;
 };
 
@@ -175,8 +217,6 @@ const cancelRename = () => {
 };
 
 onMounted(() => {
-  // Detect the remote OS once (Windows hosts need drive-aware path handling).
-  void sftp.probePlatform();
   // Open the requested initial path (e.g. the terminal's CWD), falling back
   // to the root when none is provided.
   void sftp.go(normalizePath(props.initialPath || '/'));
@@ -218,6 +258,10 @@ defineExpose({
   newFolder: () => {
     showMkdir.value = true;
   },
+  /** Whether a directory listing is currently in flight (blocks uploads). */
+  loading: sftp.loading,
+  /** Whether an entry with this name exists in the current directory. */
+  exists: (name: string) => sftp.entries.value.some(e => e.name === name),
 });
 </script>
 

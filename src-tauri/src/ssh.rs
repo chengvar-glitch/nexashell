@@ -1,4 +1,4 @@
-use crate::common::{OutputChunk, SessionId};
+use crate::common::{OutputBatchPolicy, OutputChunk, SessionId, flush_utf8};
 use serde::Serialize;
 use ssh2::{
     ExtensiblePtyModeOpcode, FileStat, OpenFlags, OpenType, PtyModeOpcode, PtyModes, Session,
@@ -17,7 +17,7 @@ use tokio::sync::mpsc;
 mod hostkey;
 use hostkey::verify_host_key;
 
-const MAX_CACHED_INITIAL_CHUNKS: usize = 200;
+const MAX_CACHED_INITIAL_CHUNKS: usize = 1000;
 
 // ============================================================================
 // Error Types
@@ -70,7 +70,11 @@ pub enum SshError {
 const SSH_BUFFER_SIZE: usize = 4096;
 const INITIAL_BATCH_SIZE_THRESHOLD: usize = 200;
 const INITIAL_BATCH_TIME_MS: u64 = 100;
-const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000;
+// A more generous buffering window than before: the frontend subscribes to
+// `ssh-output-{id}` before calling connect_ssh, so this cache only needs to
+// cover the small gap between the first output and the frontend's
+// get_buffered_ssh_output poll. 8s comfortably covers slow shells/MOTDs.
+const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 8000;
 const NORMAL_BATCH_SIZE_THRESHOLD: usize = 1024;
 const NORMAL_BATCH_TIME_MS: u64 = 5;
 
@@ -180,6 +184,12 @@ pub struct SshChannelInfo {
     /// Active SFTP download controls keyed by task id, mirroring `uploads`.
     pub downloads: Arc<RwLock<HashMap<String, Arc<UploadControl>>>>,
 
+    /// Shared join handles of in-flight upload/download worker tasks, keyed by
+    /// task id. Each handle sits in an `Arc<Mutex<Option<...>>>` so either the
+    /// task's own watcher (to await it) or `disconnect_ssh` (to abort it) can
+    /// take it exactly once. Removed from the map when the worker settles.
+    pub transfers: Arc<RwLock<HashMap<String, Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>>>>,
+
     pub input_listener_id: Option<tauri::EventId>,
     pub resize_listener_id: Option<tauri::EventId>,
     pub app_handle: Option<tauri::AppHandle>,
@@ -265,6 +275,17 @@ impl SshManager {
 
         let addr = format!("{}:{}", ip, port);
         let host_for_err = addr.clone();
+
+        // Re-connecting with an id already in use must not silently overwrite the
+        // live entry: the old listener registrations would leak (their EventIds
+        // are dropped without `unlisten`) and the old I/O/monitoring tasks would
+        // keep running and keep receiving ssh-input-{id} keystrokes. Clean up the
+        // old session fully instead (this also cancels any in-flight transfers).
+        if self.channels.read().map(|m| m.contains_key(&session_id)).unwrap_or(false) {
+            log::info!("Replacing existing SSH session entry for {}", session_id.0);
+            self.disconnect_ssh(&session_id)?;
+        }
+
         let auth = SshAuth {
             username: username.clone(),
             password,
@@ -299,6 +320,7 @@ impl SshManager {
         let helper_arc = Arc::new(tokio::sync::Mutex::new(helper_sess));
         let uploads_map = Arc::new(RwLock::new(HashMap::new()));
         let downloads_map = Arc::new(RwLock::new(HashMap::new()));
+        let transfers_map = Arc::new(RwLock::new(HashMap::new()));
 
         let (input_listener_id, resize_listener_id) = if let Some(h) = &app_handle {
             let input_id = Self::register_input_listener(h, &session_id, &input_sender, &stop_flag);
@@ -348,6 +370,7 @@ impl SshManager {
                     helper_sess: helper_arc,
                     uploads: uploads_map,
                     downloads: downloads_map,
+                    transfers: transfers_map,
                     input_listener_id,
                     resize_listener_id,
                     app_handle: app_handle.clone(),
@@ -357,6 +380,51 @@ impl SshManager {
         }
 
         Ok(())
+    }
+
+    /// Open a TCP connection to `addr:port` with DNS resolution and OS keepalive.
+    /// Shared by the interactive/helper establishment and the transfer path so
+    /// the two copies cannot drift.
+    fn open_tcp_connection(
+        addr: &str,
+        host_for_err: &str,
+        port: u16,
+    ) -> Result<TcpStream, SshError> {
+        use std::net::ToSocketAddrs;
+
+        let socket_addr = addr
+            .to_socket_addrs()
+            .map_err(|e| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: format!("Failed to resolve address: {}", e),
+            })?
+            .next()
+            .ok_or_else(|| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: "No addresses found".to_string(),
+            })?;
+
+        let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(
+            |e| SshError::ConnectionFailed {
+                host: host_for_err.to_string(),
+                port,
+                reason: e.to_string(),
+            },
+        )?;
+
+        // Enable OS-level TCP keepalive so idle connections stay alive
+        // through cloud security groups / NAT (which reap idle TCP
+        // flows after ~3-5 min). The kernel sends keepalive probes
+        // autonomously, independent of libssh2's non-blocking SSH I/O.
+        let sock = socket2::SockRef::from(&tcp);
+        let keepalive = socket2::TcpKeepalive::new()
+            .with_time(Duration::from_secs(15))
+            .with_interval(Duration::from_secs(5));
+        let _ = sock.set_tcp_keepalive(&keepalive);
+
+        Ok(tcp)
     }
 
     /// Open, handshake, verify host key, and authenticate two independent SSH
@@ -369,44 +437,6 @@ impl SshManager {
         cols: u32,
         rows: u32,
     ) -> Result<(Session, ssh2::Channel, Session), SshError> {
-        use std::net::ToSocketAddrs;
-
-        let open_tcp =
-            || -> Result<TcpStream, SshError> {
-                let socket_addr = addr
-                    .to_socket_addrs()
-                    .map_err(|e| SshError::ConnectionFailed {
-                        host: host_for_err.to_string(),
-                        port,
-                        reason: format!("Failed to resolve address: {}", e),
-                    })?
-                    .next()
-                    .ok_or_else(|| SshError::ConnectionFailed {
-                        host: host_for_err.to_string(),
-                        port,
-                        reason: "No addresses found".to_string(),
-                    })?;
-
-                let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30))
-                    .map_err(|e| SshError::ConnectionFailed {
-                        host: host_for_err.to_string(),
-                        port,
-                        reason: e.to_string(),
-                    })?;
-
-                // Enable OS-level TCP keepalive so idle connections stay alive
-                // through cloud security groups / NAT (which reap idle TCP
-                // flows after ~3-5 min). The kernel sends keepalive probes
-                // autonomously, independent of libssh2's non-blocking SSH I/O.
-                let sock = socket2::SockRef::from(&tcp);
-                let keepalive = socket2::TcpKeepalive::new()
-                    .with_time(Duration::from_secs(15))
-                    .with_interval(Duration::from_secs(5));
-                let _ = sock.set_tcp_keepalive(&keepalive);
-
-                Ok(tcp)
-            };
-
         let make_session = |tcp: TcpStream| -> Result<Session, SshError> {
             let mut sess = Session::new().map_err(|e| {
                 SshError::OperationFailed(format!("Failed to create session: {}", e))
@@ -421,57 +451,22 @@ impl SshManager {
             sess.set_tcp_stream(tcp);
             sess.handshake()
                 .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
-            // Handshake complete — clear the blocking timeout so subsequent
-            // (non-blocking) I/O is never subject to it.
-            sess.set_timeout(0);
+            // Handshake complete — replace the handshake-only timeout with a
+            // bounded blocking timeout so no post-handshake blocking call
+            // (helper SFTP reads, monitoring execs, transfer I/O) can hang
+            // forever against a stalled peer that keeps the connection alive.
+            // libssh2's timeout only bounds individual blocking calls, so a
+            // long-lived idle session is unaffected. The interactive session
+            // overrides this to 20ms right after (see connect_ssh).
+            sess.set_timeout(30_000);
             Ok(sess)
         };
 
-        let authenticate = |sess: &Session| -> Result<(), SshError> {
-            let mut authenticated = false;
-            if let Some(ref key_path) = auth.private_key_path {
-                let path = Path::new(key_path);
-                if path.exists() {
-                    let key_result = if let Some(ref passphrase) = auth.key_passphrase {
-                        sess.userauth_pubkey_file(&auth.username, None, path, Some(passphrase))
-                    } else {
-                        sess.userauth_pubkey_file(&auth.username, None, path, None)
-                    };
-                    match key_result {
-                        Ok(()) => authenticated = sess.authenticated(),
-                        Err(e) => {
-                            log::warn!(
-                                "Public key auth failed for '{}': {}; trying password",
-                                auth.username,
-                                e
-                            );
-                        }
-                    }
-                } else {
-                    log::warn!("Private key file not found: {}", key_path);
-                }
-            }
-
-            if !authenticated {
-                sess.userauth_password(&auth.username, &auth.password)
-                    .map_err(|e| {
-                        SshError::AuthenticationFailed(format!("Authentication failed: {}", e))
-                    })?;
-            }
-
-            if !sess.authenticated() {
-                return Err(SshError::AuthenticationFailed(
-                    "Authentication failed".to_string(),
-                ));
-            }
-            Ok(())
-        };
-
         // Main session
-        let main_tcp = open_tcp()?;
+        let main_tcp = Self::open_tcp_connection(addr, host_for_err, port)?;
         let main_sess = make_session(main_tcp)?;
         verify_host_key(&main_sess, host_for_err)?;
-        authenticate(&main_sess)?;
+        Self::authenticate_with(&main_sess, auth)?;
 
         let mut channel = main_sess
             .channel_session()
@@ -496,14 +491,14 @@ impl SshManager {
         main_sess.set_timeout(20);
 
         // Helper session (blocking, for SFTP/monitoring/probing)
-        let helper_tcp = open_tcp()?;
+        let helper_tcp = Self::open_tcp_connection(addr, host_for_err, port)?;
         let helper_sess = make_session(helper_tcp)?;
         // Verify the host key on the helper connection too: each connection is
         // resolved independently (DNS rotation could pin them to different
         // endpoints), so skipping verification here would let an attacker MITM
         // SFTP uploads / monitoring / probing traffic.
         verify_host_key(&helper_sess, host_for_err)?;
-        authenticate(&helper_sess)?;
+        Self::authenticate_with(&helper_sess, auth)?;
         // helper_sess stays in blocking mode (default)
 
         Ok((main_sess, channel, helper_sess))
@@ -586,7 +581,15 @@ impl SshManager {
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut buffer = [0u8; SSH_BUFFER_SIZE];
-            let mut pending_output = String::new();
+            // Bytes accumulate here and are emitted as one event once the
+            // batch policy fires (size threshold, time threshold, or an
+            // urgent flush right after user input) instead of one event per
+            // OS read.
+            let mut pending_output = Vec::<u8>::with_capacity(SSH_BUFFER_SIZE * 4);
+            // Incomplete UTF-8 tail from the previous flush — reattached on
+            // the next flush so a multi-byte char split across reads decodes
+            // intact instead of becoming U+FFFD.
+            let mut utf8_carry = Vec::<u8>::with_capacity(4);
             let mut last_emit = std::time::Instant::now();
             let mut seen_first_output = false;
             let mut urgent_flush = false;
@@ -675,10 +678,20 @@ impl SshManager {
 
                 match read_result {
                     Some(Ok(n)) => {
-                        pending_output.push_str(&String::from_utf8_lossy(&buffer[..n]));
+                        pending_output.extend_from_slice(&buffer[..n]);
                     }
                     Some(Err(e)) => {
                         log::warn!("[SSH {}] I/O loop ending: {}", session_id.0, e);
+                        // Flush anything still buffered so the trailing output
+                        // before a disconnect is not lost to the batching window.
+                        if !pending_output.is_empty() || !utf8_carry.is_empty() {
+                            let seq = next_seq.fetch_add(1, Ordering::SeqCst);
+                            let output = flush_utf8(&mut pending_output, &mut utf8_carry);
+                            let chunk = OutputChunk::new(seq, output);
+                            if let Some(h) = &app_handle {
+                                let _ = h.emit(&format!("ssh-output-{}", session_id.0), &chunk);
+                            }
+                        }
                         if let Some(h) = &app_handle {
                             let _ = h.emit(
                                 &format!("ssh-disconnected-{}", session_id.0),
@@ -703,21 +716,25 @@ impl SshManager {
                     in_initial_buffering = false;
                 }
 
-                let (size_threshold, time_threshold_ms) =
-                    if in_initial_buffering && !seen_first_output {
-                        (INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
-                    } else {
-                        (NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
-                    };
+                let batch_policy = if in_initial_buffering && !seen_first_output {
+                    OutputBatchPolicy::new(INITIAL_BATCH_SIZE_THRESHOLD, INITIAL_BATCH_TIME_MS)
+                } else {
+                    OutputBatchPolicy::new(NORMAL_BATCH_SIZE_THRESHOLD, NORMAL_BATCH_TIME_MS)
+                };
 
+                // The in_initial branch drains whatever accumulated while the
+                // (now-ended) initial buffering window was open, so a slow but
+                // steady early output is not stuck behind the tiny initial
+                // thresholds.
                 if (!pending_output.is_empty() && in_initial)
-                    || (!pending_output.is_empty()
-                        && (pending_output.len() > size_threshold
-                            || urgent_flush
-                            || last_emit.elapsed() > Duration::from_millis(time_threshold_ms)))
+                    || batch_policy.should_flush(
+                        pending_output.len() + utf8_carry.len(),
+                        last_emit.elapsed(),
+                        urgent_flush,
+                    )
                 {
                     let seq = next_seq.fetch_add(1, Ordering::SeqCst);
-                    let output = std::mem::take(&mut pending_output);
+                    let output = flush_utf8(&mut pending_output, &mut utf8_carry);
                     let chunk = OutputChunk::new(seq, output);
 
                     if in_initial_buffering {
@@ -1142,11 +1159,10 @@ impl SshManager {
             .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
 
         if let Some(channel_info) = channels.get(session_id) {
-            let outputs = channel_info
-                .initial_outputs
-                .try_lock()
-                .map(|g| g.clone())
-                .unwrap_or_default();
+            // Use the blocking lock rather than try_lock so an unlucky race
+            // with the I/O task's cache push cannot return an EMPTY buffer and
+            // permanently lose the pre-subscribe banner output.
+            let outputs = channel_info.initial_outputs.blocking_lock().clone();
             Ok(outputs)
         } else {
             Err(SshError::SessionNotFound(session_id.0.to_string()))
@@ -1176,6 +1192,18 @@ impl SshManager {
                 for control in downloads.values() {
                     control.cancel.store(true, Ordering::SeqCst);
                     control.paused.1.notify_all();
+                }
+            }
+
+            // Abort every in-flight transfer worker. The blocking closure
+            // observes cancel/stop on its next chunk boundary and exits; abort
+            // guarantees the tokio task itself is cancelled even if the OS
+            // thread is mid-call.
+            if let Ok(mut transfers) = info.transfers.write() {
+                for (_, shared) in transfers.drain() {
+                    if let Some(handle) = shared.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                        handle.abort();
+                    }
                 }
             }
 
@@ -1233,7 +1261,7 @@ impl SshManager {
         local_path: String,
         remote_path: String,
     ) -> Result<(), SshError> {
-        let (addr, host_for_err, port, auth, stop_flag, uploads) = {
+        let (addr, host_for_err, port, auth, stop_flag, uploads, transfers) = {
             let channels = self
                 .channels
                 .read()
@@ -1248,6 +1276,7 @@ impl SshManager {
                 info.auth.clone(),
                 info.stop_flag.clone(),
                 info.uploads.clone(),
+                info.transfers.clone(),
             )
         };
 
@@ -1263,15 +1292,27 @@ impl SshManager {
                 .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
             uploads.insert(task_id.clone(), control.clone());
         }
-        // Clean up the control entry once the upload terminates (success/error/cancel).
+
+        // Normalize the remote path ONCE in the outer scope so both the file
+        // open and the user-cancel partial-file cleanup use the same (correct)
+        // path — the cancel arm previously used the raw un-normalized input,
+        // so Windows-style (`C:\...`) partial files were never deleted.
+        let normalized_remote = Self::normalize_remote_path(&remote_path);
+
+        // Control-map cleanup + transfer-handle deregistration move into the
+        // watcher (below) instead of the end of the blocking closure, so a
+        // panicking task cannot leak either entry.
         let uploads_cleanup = uploads.clone();
-        let cleanup_task_id = task_id.clone();
+        let uploads_cleanup_task_id = task_id.clone();
+        let transfers_registry = transfers.clone();
+        let transfers_registry_task_id = task_id.clone();
 
         let upload_handle = tokio::task::spawn_blocking(move || {
             let sid = session_id.as_ref().to_string();
             let upload_start = std::time::Instant::now();
             let event_name = format!("ssh-upload-progress-{}", sid);
             let control = control.clone();
+            let remote_path = normalized_remote;
 
             let result: Result<u64, SshError> = (|| {
                 let mut local_file = std::fs::File::open(&local_path).map_err(|e| {
@@ -1297,9 +1338,6 @@ impl SshManager {
                 // continues writing at the same offset. (`sess` is kept alive
                 // because the Sftp borrows from it.)
                 let (sess, sftp) = Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
-                // Normalize the remote path (Windows backslashes -> `/`) so
-                // `C:\dir\file` uploads correctly to Windows SFTP servers.
-                let remote_path = Self::normalize_remote_path(&remote_path);
 
                 let mut remote_file = sftp
                     .open_mode(
@@ -1319,6 +1357,11 @@ impl SshManager {
                     // Cancel has priority over pause: a cancelled task must
                     // leave the pause wait immediately.
                     if control.cancel.load(Ordering::SeqCst) {
+                        // Remove the partial file on the SAME transfer
+                        // connection (still open here) so the cleanup cannot
+                        // fail because a fresh connection is impossible after
+                        // session teardown.
+                        let _ = sftp.unlink(Path::new(&remote_path));
                         return Err(SshError::UploadCancelled);
                     }
                     if stop_flag.load(Ordering::SeqCst) {
@@ -1332,7 +1375,11 @@ impl SshManager {
                     // status is reported exactly once per pause/resume cycle.
                     {
                         let (pause_lock, cvar) = &*control.paused;
-                        let mut paused = pause_lock.lock().unwrap();
+                        let mut paused = pause_lock
+                            .lock()
+                            .map_err(|_| {
+                                SshError::OperationFailed("Pause lock poisoned".to_string())
+                            })?;
                         if *paused {
                             let _ = app_handle.emit(
                                 &event_name,
@@ -1354,6 +1401,9 @@ impl SshManager {
                             );
                             while *paused {
                                 if control.cancel.load(Ordering::SeqCst) {
+                                    // Remove the partial file on the same
+                                    // transfer connection (still open).
+                                    let _ = sftp.unlink(Path::new(&remote_path));
                                     return Err(SshError::UploadCancelled);
                                 }
                                 if stop_flag.load(Ordering::SeqCst) {
@@ -1461,14 +1511,10 @@ impl SshManager {
                 }
                 Err(SshError::UploadCancelled) => {
                     log::info!("[SFTP {}] upload cancelled by user", sid);
-                    // Delete the partial remote file left behind by the
-                    // interrupted transfer (best-effort) on a fresh connection.
-                    {
-                        let conn = Self::open_transfer_sftp(&addr, &host_for_err, port, &auth);
-                        if let Ok((_sess, sftp)) = conn {
-                            let _ = sftp.unlink(Path::new(&remote_path));
-                        }
-                    }
+                    // The partial remote file was already removed on the
+                    // transfer connection (see the cancel branches above); do
+                    // NOT open a fresh SSH connection here — the session may
+                    // already be torn down.
                     let _ = app_handle.emit(
                         &event_name,
                         UploadProgress {
@@ -1503,15 +1549,45 @@ impl SshManager {
                 }
             }
 
-            // Drop the per-task control reference so stale entries do not
-            // accumulate for terminated uploads.
-            if let Ok(mut uploads) = uploads_cleanup.write() {
-                uploads.remove(&cleanup_task_id);
-            }
+            // Control-map cleanup moved to the watcher (below) so a panicking
+            // closure cannot leak the entry.
         });
 
+        // Register this worker in the session's transfer registry (a shared
+        // Arc<Mutex<Option<JoinHandle>>>) so either disconnect_ssh (abort) or
+        // the watcher (await) can take the handle exactly once.
+        let shared_handle = Arc::new(std::sync::Mutex::new(Some(upload_handle)));
+        {
+            let mut registry = transfers_registry
+                .write()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            registry.insert(transfers_registry_task_id.clone(), shared_handle.clone());
+        }
+
+        let uploads_cleanup_task = uploads_cleanup_task_id.clone();
+        let transfers_cleanup = transfers_registry.clone();
         tokio::spawn(async move {
-            if let Err(join_err) = upload_handle.await {
+            // Take the handle now: if disconnect_ssh already took (and aborted)
+            // it, we just skip the await — the worker is being torn down.
+            let handle = shared_handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take();
+            let join_result = match handle {
+                Some(h) => h.await,
+                None => Ok(()),
+            };
+
+            // Remove the control entry and the transfer-handle entry now that
+            // the worker has settled — runs on Ok, Err(join), and the abort path.
+            if let Ok(mut uploads) = uploads_cleanup.write() {
+                uploads.remove(&uploads_cleanup_task);
+            }
+            if let Ok(mut transfers) = transfers_cleanup.write() {
+                transfers.remove(&watcher_task_id);
+            }
+
+            if let Err(join_err) = join_result {
                 log::error!("[SFTP upload] task panicked: {}", join_err);
                 let _ = watcher_app.emit(
                     &format!("ssh-upload-progress-{}", watcher_sid),
@@ -1608,7 +1684,9 @@ impl SshManager {
     pub fn pause_upload(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
         if let Some(control) = self.upload_control(session_id, task_id)? {
             let (lock, _cvar) = &*control.paused;
-            let mut paused = lock.lock().unwrap();
+            let mut paused = lock
+                .lock()
+                .map_err(|_| SshError::LockPoisoned("upload pause lock".to_string()))?;
             *paused = true;
             // No notify needed: the upload loop polls `paused` each iteration.
         }
@@ -1619,7 +1697,9 @@ impl SshManager {
     pub fn resume_upload(&self, session_id: &SessionId, task_id: &str) -> Result<(), SshError> {
         if let Some(control) = self.upload_control(session_id, task_id)? {
             let (lock, cvar) = &*control.paused;
-            let mut paused = lock.lock().unwrap();
+            let mut paused = lock
+                .lock()
+                .map_err(|_| SshError::LockPoisoned("upload pause lock".to_string()))?;
             *paused = false;
             cvar.notify_all();
         }
@@ -1633,7 +1713,9 @@ impl SshManager {
             control.cancel.store(true, Ordering::SeqCst);
             // Wake any park wait so a paused upload aborts immediately.
             let (lock, cvar) = &*control.paused;
-            let mut paused = lock.lock().unwrap();
+            let mut paused = lock
+                .lock()
+                .map_err(|_| SshError::LockPoisoned("upload pause lock".to_string()))?;
             *paused = false;
             cvar.notify_all();
         }
@@ -1671,34 +1753,7 @@ impl SshManager {
         port: u16,
         auth: &SshAuth,
     ) -> Result<Session, SshError> {
-        use std::net::ToSocketAddrs;
-
-        let socket_addr = addr
-            .to_socket_addrs()
-            .map_err(|e| SshError::ConnectionFailed {
-                host: host_for_err.to_string(),
-                port,
-                reason: format!("Failed to resolve address: {}", e),
-            })?
-            .next()
-            .ok_or_else(|| SshError::ConnectionFailed {
-                host: host_for_err.to_string(),
-                port,
-                reason: "No addresses found".to_string(),
-            })?;
-
-        let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(30)).map_err(
-            |e| SshError::ConnectionFailed {
-                host: host_for_err.to_string(),
-                port,
-                reason: e.to_string(),
-            },
-        )?;
-        let sock = socket2::SockRef::from(&tcp);
-        let keepalive = socket2::TcpKeepalive::new()
-            .with_time(Duration::from_secs(15))
-            .with_interval(Duration::from_secs(5));
-        let _ = sock.set_tcp_keepalive(&keepalive);
+        let tcp = Self::open_tcp_connection(addr, host_for_err, port)?;
 
         let mut sess = Session::new().map_err(|e| {
             SshError::OperationFailed(format!("Failed to create session: {}", e))
@@ -1707,7 +1762,10 @@ impl SshManager {
         sess.set_tcp_stream(tcp);
         sess.handshake()
             .map_err(|e| SshError::OperationFailed(format!("Handshake failed: {}", e)))?;
-        sess.set_timeout(0);
+        // Bound post-handshake blocking calls (transfer reads/writes) so a
+        // stalled peer cannot hang the transfer task forever; idle sessions are
+        // unaffected because the timeout only bounds individual blocking calls.
+        sess.set_timeout(30_000);
 
         verify_host_key(&sess, host_for_err)?;
         Self::authenticate_with(&sess, auth)?;
@@ -1943,7 +2001,9 @@ impl SshManager {
         .map_err(|e| SshError::TaskError(e.to_string()))?
     }
 
-    /// Remove a remote file (`is_dir == false`) or an empty directory.
+    /// Remove a remote file or a directory (recursively, so non-empty
+    /// directories can be removed — matching the UI's "and its contents" copy).
+    /// Symbolic links are unlinked, never followed.
     pub async fn sftp_remove(
         &self,
         session_id: &SessionId,
@@ -1960,12 +2020,7 @@ impl SshManager {
             })?;
             let remote_path = Self::normalize_remote_path(&remote_path);
             if is_dir {
-                sftp.rmdir(Path::new(&remote_path)).map_err(|e| {
-                    SshError::OperationFailed(format!(
-                        "Failed to remove directory {}: {}",
-                        remote_path, e
-                    ))
-                })
+                Self::remove_dir_recursive(&sftp, &remote_path)
             } else {
                 sftp.unlink(Path::new(&remote_path)).map_err(|e| {
                     SshError::OperationFailed(format!(
@@ -1977,6 +2032,79 @@ impl SshManager {
         })
         .await
         .map_err(|e| SshError::TaskError(e.to_string()))?
+    }
+
+    /// Recursively delete directory `path` and all its contents. Symlinks are
+    /// unlinked rather than followed. Refuses to operate on `/` or a drive root
+    /// (`/C:/`) as a guard against wiping the remote root.
+    fn remove_dir_recursive(sftp: &ssh2::Sftp, path: &str) -> Result<(), SshError> {
+        // Guard: never allow recursion on `/` or a virtual drive root.
+        let trimmed = path.trim_end_matches('/');
+        if trimmed == "" || trimmed == "/" {
+            return Err(SshError::OperationFailed(
+                "Refusing to remove the remote root directory".to_string(),
+            ));
+        }
+        // A virtual drive root like `/C:/` also counts as a root.
+        if trimmed.len() == 4 && trimmed.ends_with(":/") {
+            return Err(SshError::OperationFailed(
+                "Refusing to remove a remote drive root".to_string(),
+            ));
+        }
+
+        let entries = sftp.readdir(Path::new(path));
+        match entries {
+            Ok(entries) => {
+                for (entry_path, stat) in entries {
+                    let name = entry_path
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    if name == "." || name == ".." {
+                        continue;
+                    }
+                    let is_sym = is_symlink(&stat);
+                    let child = Self::join_remote_path(path, &name, stat.is_dir());
+                    if stat.is_dir() && !is_sym {
+                        Self::remove_dir_recursive(sftp, &child).map_err(|e| {
+                            SshError::OperationFailed(format!(
+                                "Failed during recursive delete of {}: {}",
+                                child, e
+                            ))
+                        })?;
+                        sftp.rmdir(Path::new(&child)).map_err(|e| {
+                            SshError::OperationFailed(format!(
+                                "Failed to remove directory {}: {}",
+                                child, e
+                            ))
+                        })?;
+                    } else {
+                        sftp.unlink(Path::new(&child)).map_err(|e| {
+                            SshError::OperationFailed(format!(
+                                "Failed to remove file {}: {}",
+                                child, e
+                            ))
+                        })?;
+                    }
+                }
+                sftp.rmdir(Path::new(path)).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to remove directory {}: {}",
+                        path, e
+                    ))
+                })
+            }
+            Err(_) => {
+                // readdir failed — treat as "not a readable directory" and fall
+                // back to a plain rmdir so the empty-directory case still works.
+                sftp.rmdir(Path::new(path)).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to remove directory {}: {}",
+                        path, e
+                    ))
+                })
+            }
+        }
     }
 
     /// Create a remote directory.
@@ -2070,7 +2198,7 @@ impl SshManager {
         remote_path: String,
         local_path: String,
     ) -> Result<(), SshError> {
-        let (addr, host_for_err, port, auth, stop_flag, downloads) = {
+        let (addr, host_for_err, port, auth, stop_flag, downloads, transfers) = {
             let channels = self
                 .channels
                 .read()
@@ -2085,6 +2213,7 @@ impl SshManager {
                 info.auth.clone(),
                 info.stop_flag.clone(),
                 info.downloads.clone(),
+                info.transfers.clone(),
             )
         };
 
@@ -2100,9 +2229,22 @@ impl SshManager {
                 .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
             downloads.insert(task_id.clone(), control.clone());
         }
-        // Clean up the control entry once the download terminates.
+
+        // Normalize the remote path once so open and error paths agree.
+        let normalized_remote = Self::normalize_remote_path(&remote_path);
+
+        // Download to a temporary `<name>.part` file and atomically rename over
+        // the target only on success: a cancelled or failed transfer must never
+        // truncate/delete a pre-existing local file.
+        let part_path = format!("{}.part", local_path);
+        let final_path = local_path.clone();
+
+        // Control-map cleanup + transfer-handle deregistration live in the
+        // watcher (below) so a panicking task cannot leak either entry.
         let downloads_cleanup = downloads.clone();
-        let cleanup_task_id = task_id.clone();
+        let downloads_cleanup_task_id = task_id.clone();
+        let transfers_registry = transfers.clone();
+        let transfers_registry_task_id = task_id.clone();
 
         let download_handle = tokio::task::spawn_blocking(move || {
             let sid = session_id.as_ref().to_string();
@@ -2114,8 +2256,7 @@ impl SshManager {
                 // Dedicated connection for this transfer.
                 let (sess, sftp) =
                     Self::open_transfer_sftp(&addr, &host_for_err, port, &auth)?;
-                // Normalize the remote path (Windows backslashes -> `/`).
-                let remote_path = Self::normalize_remote_path(&remote_path);
+                let remote_path = normalized_remote;
 
                 let mut remote_file = sftp
                     .open_mode(
@@ -2136,14 +2277,14 @@ impl SshManager {
                     .map(|s| s.size.unwrap_or(0))
                     .unwrap_or(0);
 
-                // Create parent directory & local file once before the loop.
-                if let Some(parent) = Path::new(&local_path).parent() {
+                // Create parent directory & write to the `.part` temp file.
+                if let Some(parent) = Path::new(&part_path).parent() {
                     let _ = std::fs::create_dir_all(parent);
                 }
-                let mut local_file = std::fs::File::create(&local_path).map_err(|e| {
+                let mut local_file = std::fs::File::create(&part_path).map_err(|e| {
                     SshError::OperationFailed(format!(
                         "Failed to create local file {}: {}",
-                        local_path, e
+                        part_path, e
                     ))
                 })?;
 
@@ -2222,6 +2363,15 @@ impl SshManager {
                 drop(sftp);
                 drop(sess);
 
+                // Atomically promote the `.part` temp file over the final target
+                // now that the transfer fully succeeded.
+                std::fs::rename(&part_path, &final_path).map_err(|e| {
+                    SshError::OperationFailed(format!(
+                        "Failed to finalize downloaded file {}: {}",
+                        final_path, e
+                    ))
+                })?;
+
                 Ok(total_written)
             })();
 
@@ -2250,8 +2400,9 @@ impl SshManager {
                 }
                 Err(SshError::DownloadCancelled) => {
                     log::info!("[SFTP {}] download cancelled by user", sid);
-                    // Best-effort: remove the partial local file.
-                    let _ = std::fs::remove_file(&local_path);
+                    // Best-effort: remove only the `.part` temp file. Any
+                    // pre-existing file at the final target is left untouched.
+                    let _ = std::fs::remove_file(&part_path);
                     let _ = app_handle.emit(
                         &event_name,
                         UploadProgress {
@@ -2269,6 +2420,9 @@ impl SshManager {
                 }
                 Err(e) => {
                     log::error!("[SFTP {}] download failed: {}", sid, e);
+                    // Clean up the `.part` temp file; any pre-existing file at
+                    // the final target was never touched.
+                    let _ = std::fs::remove_file(&part_path);
                     let _ = app_handle.emit(
                         &event_name,
                         UploadProgress {
@@ -2286,15 +2440,45 @@ impl SshManager {
                 }
             }
 
-            // Drop the per-task control reference so stale entries do not
-            // accumulate for terminated downloads.
-            if let Ok(mut downloads) = downloads_cleanup.write() {
-                downloads.remove(&cleanup_task_id);
-            }
+            // Control-map cleanup moved to the watcher (below) so a panicking
+            // closure cannot leak the entry.
         });
 
+        // Register this worker in the session's transfer registry (a shared
+        // Arc<Mutex<Option<JoinHandle>>>) so either disconnect_ssh (abort) or
+        // the watcher (await) can take the handle exactly once.
+        let shared_handle = Arc::new(std::sync::Mutex::new(Some(download_handle)));
+        {
+            let mut registry = transfers_registry
+                .write()
+                .map_err(|e| SshError::LockPoisoned(e.to_string()))?;
+            registry.insert(transfers_registry_task_id.clone(), shared_handle.clone());
+        }
+
+        let downloads_cleanup_task = downloads_cleanup_task_id.clone();
+        let transfers_cleanup = transfers_registry.clone();
         tokio::spawn(async move {
-            if let Err(join_err) = download_handle.await {
+            // Take the handle now: if disconnect_ssh already took (and aborted)
+            // it, we just skip the await — the worker is being torn down.
+            let handle = shared_handle
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .take();
+            let join_result = match handle {
+                Some(h) => h.await,
+                None => Ok(()),
+            };
+
+            // Remove the control entry and the transfer-handle entry now that
+            // the worker has settled — runs on Ok, Err(join), and the abort path.
+            if let Ok(mut downloads) = downloads_cleanup.write() {
+                downloads.remove(&downloads_cleanup_task);
+            }
+            if let Ok(mut transfers) = transfers_cleanup.write() {
+                transfers.remove(&watcher_task_id);
+            }
+
+            if let Err(join_err) = join_result {
                 log::error!("[SFTP download] task panicked: {}", join_err);
                 let _ = watcher_app.emit(
                     &format!("ssh-download-progress-{}", watcher_sid),
@@ -2322,7 +2506,9 @@ impl SshManager {
         if let Some(control) = self.download_control(session_id, task_id)? {
             control.cancel.store(true, Ordering::SeqCst);
             let (lock, cvar) = &*control.paused;
-            let mut paused = lock.lock().unwrap();
+            let mut paused = lock
+                .lock()
+                .map_err(|_| SshError::LockPoisoned("download pause lock".to_string()))?;
             *paused = false;
             cvar.notify_all();
         }
@@ -2384,6 +2570,13 @@ pub fn get_buffered_ssh_output(
     sessionId: String,
 ) -> Result<Vec<OutputChunk>, SshError> {
     state.get_buffered_ssh_output(&SessionId::from(sessionId))
+}
+
+/// Remove a host's pinned TOFU key so the next connection re-enters the
+/// accept-and-pin path (remediation for a rotated/mismatched host key).
+#[tauri::command]
+pub fn forget_host_key(host: String) -> Result<(), String> {
+    hostkey::forget_host_key(&host)
 }
 
 #[tauri::command]
@@ -2671,6 +2864,7 @@ mod upload_control_tests {
             helper_sess: Arc::new(tokio::sync::Mutex::new(SshSession::new().unwrap())),
             uploads,
             downloads,
+            transfers: Arc::new(RwLock::new(HashMap::new())),
             input_listener_id: None,
             resize_listener_id: None,
             app_handle: None,

@@ -40,11 +40,36 @@ interface GitHubTag {
   name?: string;
 }
 
+/* global AbortController */
+
+/** Timeout (ms) applied to every outbound GitHub API request. */
+const FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * fetch() wrapper that aborts via AbortController after a timeout so a hung
+ * network request cannot block the update check (or the UI) forever.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init?: Parameters<typeof fetch>[1]
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Highest version tag among all repo tags, or null when none are valid. */
 async function fetchLatestVersionTag(): Promise<string | null> {
-  const response = await fetch(TAGS_API_URL, {
-    headers: { Accept: 'application/vnd.github+json' },
-  });
+  // per_page=100 returns the newest tags in one page for this small repo; the
+  // docs note that deeper history would require paging, which is out of scope.
+  const response = await fetchWithTimeout(
+    `${TAGS_API_URL}?per_page=100`,
+    { headers: { Accept: 'application/vnd.github+json' } }
+  );
   if (!response.ok) {
     throw new Error(`GitHub tags API responded with ${response.status}`);
   }
@@ -77,7 +102,7 @@ export async function checkForUpdates(
     // release is still a draft (the `/releases/latest` endpoint only sees
     // published releases).
     try {
-      const releaseResponse = await fetch(RELEASES_API_URL, {
+      const releaseResponse = await fetchWithTimeout(RELEASES_API_URL, {
         headers: { Accept: 'application/vnd.github+json' },
       });
       if (releaseResponse.ok) {

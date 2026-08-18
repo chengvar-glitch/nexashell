@@ -182,11 +182,11 @@ sequenceDiagram
 
 后端命令注册于 `src-tauri/src/lib.rs`（约 70 个 invoke 处理器）。分组概览：
 
-- **系统与窗口**：`get_platform`、`get_arch`、`is_macos`/`is_windows`/`is_linux`、`quit_app`、`toggle_maximize`、`minimize_window`、`close_window`、`read_file_preview`、`get_file_size`
-- **SSH 连接**：`connect_ssh`、`disconnect_ssh`、`send_ssh_input`、`get_buffered_ssh_output`、`set_ssh_status_refresh_rate`、`probe_remote_path`
+- **系统与窗口**：`get_platform`、`get_arch`、`is_macos`/`is_windows`/`is_linux`、`quit_app`、`toggle_maximize`、`minimize_window`、`close_window`
+- **SSH 连接**：`connect_ssh`、`disconnect_ssh`、`send_ssh_input`、`get_buffered_ssh_output`、`set_ssh_status_refresh_rate`、`probe_remote_path`、`forget_host_key`
 - **SFTP**：`upload_file_sftp`、`pause_upload`、`resume_upload`、`cancel_upload`、`sftp_list_dir`、`sftp_download_file`、`cancel_download`、`sftp_remove`、`sftp_mkdir`、`sftp_rename`
 - **本地终端**：`connect_local`、`disconnect_local`
-- **会话**：`add_session`、`save_session`、`save_session_with_credentials`、`update_session_timestamp`、`list_sessions`、`get_session_credentials`、`get_sessions`、`get_sessions_with_relations`、`edit_session`、`delete_session`、`toggle_favorite`
+- **会话**：`save_session`、`save_session_with_credentials`、`update_session_timestamp`、`list_sessions`、`get_session_credentials`、`get_sessions`、`get_sessions_with_relations`、`edit_session`、`delete_session`、`toggle_favorite`
 - **分组 / 标签**：`add_group` / `add_tag`、`list_groups` / `list_tags`、`edit_group` / `edit_tag`、`delete_group` / `delete_tag`、`link_session_group` / `link_session_tag`、`unlink_session_group` / `unlink_session_tag`、`list_groups_for_session` / `list_tags_for_session`
 - **导入/导出**：`export_sessions`、`import_sessions`
 - **隧道**：`start_session_tunnels`、`start_tunnel_rule`、`stop_session_tunnels`、`stop_tunnel_rule`、`list_tunnel_status`，以及 `add_tunnel_rule`、`list_tunnel_rules`、`update_tunnel_rule`、`delete_tunnel_rule`、`delete_tunnel_rules_for_session`

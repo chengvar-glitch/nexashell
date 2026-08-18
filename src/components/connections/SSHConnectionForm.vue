@@ -1,9 +1,5 @@
 <template>
-  <div
-    class="modal-form"
-    style="position: relative"
-    @keydown.tab="handleTabKey"
-  >
+  <div class="modal-form" style="position: relative">
     <div class="modal-header">
       <h3 class="modal-title">
         {{ $t('ssh.title') }}
@@ -17,7 +13,6 @@
           <label for="name">{{ $t('ssh.name') }} *</label>
           <input
             id="name"
-            ref="nameInput"
             v-model="formData.server_name"
             type="text"
             :placeholder="$t('ssh.namePlaceholder')"
@@ -39,7 +34,6 @@
             <label for="host">{{ $t('ssh.host') }} *</label>
             <input
               id="host"
-              ref="hostInput"
               v-model="formData.addr"
               type="text"
               :placeholder="$t('ssh.hostPlaceholder')"
@@ -56,7 +50,6 @@
             <label for="port">{{ $t('ssh.port') }}</label>
             <input
               id="port"
-              ref="portInput"
               v-model.number="formData.port"
               type="number"
               min="1"
@@ -77,9 +70,10 @@
           <label for="username">{{ $t('ssh.username') }} *</label>
           <input
             id="username"
-            ref="usernameInput"
             v-model="formData.username"
             type="text"
+            autocomplete="off"
+            spellcheck="false"
             :placeholder="$t('ssh.usernamePlaceholder')"
             class="input"
             :class="{ error: validationErrors.username }"
@@ -98,9 +92,10 @@
           <div class="password-input-container">
             <input
               id="password"
-              ref="passwordInput"
               v-model="formData.password"
               :type="showPassword ? 'text' : 'password'"
+              autocomplete="new-password"
+              spellcheck="false"
               :placeholder="$t('ssh.passwordPlaceholder')"
               class="input"
             />
@@ -127,7 +122,6 @@
           <label for="privateKey">{{ $t('ssh.privateKey') }}</label>
           <input
             id="privateKey"
-            ref="privateKeyInput"
             v-model="formData.private_key_path"
             type="text"
             :placeholder="$t('ssh.privateKeyPlaceholder')"
@@ -141,9 +135,10 @@
           <div class="password-input-container">
             <input
               id="keyPassphrase"
-              ref="keyPassphraseInput"
               v-model="formData.key_passphrase"
               :type="showKeyPassphrase ? 'text' : 'password'"
+              autocomplete="new-password"
+              spellcheck="false"
               :placeholder="$t('ssh.passphrasePlaceholder')"
               class="input"
             />
@@ -165,6 +160,18 @@
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- Only for existing sessions: an explicit way to clear the stored
+           password/passphrase instead of silently leaving the ciphertext. -->
+      <div v-if="isEditMode" class="modal-form-row checkbox-row">
+        <label class="checkbox-container">
+          <input
+            v-model="clearStoredCredentials"
+            type="checkbox"
+          />
+          <span class="checkbox-label">{{ $t('ssh.clearStoredPassword') }}</span>
+        </label>
       </div>
 
       <div class="modal-form-row tags-row">
@@ -200,7 +207,6 @@
       <div class="modal-form-row checkbox-row">
         <label class="checkbox-container">
           <input
-            ref="saveSessionInput"
             v-model="formData.save_session"
             type="checkbox"
           />
@@ -210,7 +216,6 @@
 
       <div class="modal-form-actions">
         <button
-          ref="connectButton"
           type="submit"
           class="modal-btn modal-btn-primary"
           :disabled="isLoading"
@@ -226,7 +231,6 @@
           {{ $t('ssh.saveOnly') }}
         </button>
         <button
-          ref="cancelButton"
           type="button"
           class="modal-btn modal-btn-secondary"
           :disabled="isLoading"
@@ -253,7 +257,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted, onUnmounted, watch } from 'vue';
+import { reactive, ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
@@ -271,7 +275,6 @@ type ConnectionStatus = 'connecting' | 'success' | 'error';
 
 interface Props {
   isLoading?: boolean;
-  errorMessage?: string | null;
   initialData?: SSHConnectionFormData;
   // Status and progress for ConnectionProgressBar
   showProgress?: boolean;
@@ -290,12 +293,16 @@ interface SSHConnectionFormData {
   addr: string;
   port: number | null;
   username: string;
-  password: string;
+  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode. */
+  password?: string;
   private_key_path: string;
-  key_passphrase: string;
+  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode. */
+  key_passphrase?: string;
   save_session: boolean;
   groups?: string[];
   tags?: string[];
+  /** True when the user explicitly asked to clear any stored credentials. */
+  clearCredentials?: boolean;
 }
 
 interface ValidationErrors {
@@ -307,7 +314,6 @@ interface ValidationErrors {
 
 const props = withDefaults(defineProps<Props>(), {
   isLoading: false,
-  errorMessage: null,
   initialData: undefined,
   showProgress: false,
   connectionStatus: 'connecting',
@@ -386,23 +392,18 @@ const emit = defineEmits<{
 const showPassword = ref(false);
 const showKeyPassphrase = ref(false);
 
+// Whether this form is editing an existing saved session (has an id). In edit
+// mode empty secret fields are omitted from submissions so stored credentials
+// are preserved (see buildSubmitData), and the clear toggle explicitly nulls
+// them so the backend can drop the stored ciphertext.
+const isEditMode = computed(() => !!props.initialData?.id);
+const clearStoredCredentials = ref(false);
+
 // Groups and Tags state
 const allGroups = ref<MetadataItem[]>([]);
 const allTags = ref<MetadataItem[]>([]);
 const newlyCreatedGroups = ref<string[]>([]);
 const newlyCreatedTags = ref<string[]>([]);
-
-// Form input references for tab navigation
-const nameInput = ref<HTMLInputElement | null>(null);
-const hostInput = ref<HTMLInputElement | null>(null);
-const portInput = ref<HTMLInputElement | null>(null);
-const usernameInput = ref<HTMLInputElement | null>(null);
-const passwordInput = ref<HTMLInputElement | null>(null);
-const privateKeyInput = ref<HTMLInputElement | null>(null);
-const keyPassphraseInput = ref<HTMLInputElement | null>(null);
-const saveSessionInput = ref<HTMLInputElement | null>(null);
-const connectButton = ref<HTMLElement | null>(null);
-const cancelButton = ref<HTMLElement | null>(null);
 
 // Fetch groups and tags on component mount
 onMounted(async () => {
@@ -469,8 +470,11 @@ const validateForm = (): boolean => {
     isValid = false;
   }
 
-  // Validate port
-  if (formData.port !== null && (formData.port < 1 || formData.port > 65535)) {
+  // Normalize an empty port ('' from the number input) to null first, so a
+  // blank port is treated as "use the default 22" rather than a validation
+  // error from comparing '' against the 1-65535 range.
+  const port = normalizePort(formData.port);
+  if (port !== null && (port < 1 || port > 65535)) {
     validationErrors.port = t('ssh.errorPort');
     isValid = false;
   }
@@ -484,56 +488,79 @@ const validateForm = (): boolean => {
   return isValid;
 };
 
+/** Collapse an empty/invalid port into `null` so the caller falls back to 22. */
+const normalizePort = (port: unknown): number | null => {
+  if (port === undefined || port === null || port === '') return null;
+  const num = typeof port === 'number' ? port : Number(port);
+  return Number.isFinite(num) ? num : null;
+};
+
+/**
+ * Build the payload shared by Connect and Save-Only, normalizing the port and
+ * dropping empty groups/tags. In edit mode, empty secret fields are stripped
+ * (not sent as empty strings) so the backend keeps the stored ciphertext,
+ * unless the user explicitly asked to clear them — then `null` is sent.
+ */
+const buildSubmitData = (): SSHConnectionFormData => {
+  const data: SSHConnectionFormData = {
+    ...formData,
+    port: normalizePort(formData.port) ?? 22,
+  };
+
+  // Remove empty groups and tags arrays
+  if (!data.groups || data.groups.length === 0) {
+    delete data.groups;
+  }
+  if (!data.tags || data.tags.length === 0) {
+    delete data.tags;
+  }
+
+  // Edit mode: don't clobber stored credentials with empty strings. If the
+  // user typed nothing, omit the field so the backend leaves the ciphertext
+  // untouched; only an explicit "clear" sends nulls to clear them.
+  if (isEditMode.value) {
+    if (clearStoredCredentials.value) {
+      data.password = null as unknown as string;
+    } else if (!data.password) {
+      delete data.password;
+    }
+    if (clearStoredCredentials.value) {
+      data.key_passphrase = null as unknown as string;
+    } else if (!data.key_passphrase) {
+      delete data.key_passphrase;
+    }
+    data.clearCredentials = clearStoredCredentials.value;
+  }
+
+  return data;
+};
+
+/**
+ * After a successful save/connect, the groups/tags that were created live
+ * through this form are persisted, so they must NOT be rolled back later if
+ * the user cancels the (already succeeded) flow.
+ */
+const markMetadataCommitted = () => {
+  newlyCreatedGroups.value = [];
+  newlyCreatedTags.value = [];
+};
+
 const onSubmit = () => {
   if (!validateForm()) {
     return;
   }
-
-  // Ensure port has a default value
-  const port = formData.port || 22;
-
-  // Build connection data
-  const submitData: SSHConnectionFormData = {
-    ...formData,
-    port: port,
-  };
-
-  // Remove empty groups and tags arrays
-  if (!submitData.groups || submitData.groups.length === 0) {
-    delete submitData.groups;
-  }
-  if (!submitData.tags || submitData.tags.length === 0) {
-    delete submitData.tags;
-  }
-
+  markMetadataCommitted();
   // Send session data to parent component for unified saving/processing
-  emit('connect', submitData);
+  emit('connect', buildSubmitData());
 };
 
 const onSaveOnly = () => {
   if (!validateForm()) {
     return;
   }
-
-  // Ensure port has a default value
-  const port = formData.port || 22;
-
-  // Build connection data
-  const submitData: SSHConnectionFormData = {
-    ...formData,
-    port: port,
-  };
-
-  // Remove empty groups and tags arrays
-  if (!submitData.groups || submitData.groups.length === 0) {
-    delete submitData.groups;
-  }
-  if (!submitData.tags || submitData.tags.length === 0) {
-    delete submitData.tags;
-  }
-
+  markMetadataCommitted();
   // Send session data to parent component for only save logic
-  emit('save', submitData);
+  emit('save', buildSubmitData());
 };
 
 const onCancel = async () => {
@@ -577,51 +604,6 @@ const onRetry = () => {
 
 const onCloseProgress = () => {
   emit('close-progress');
-};
-
-// Handle Tab key navigation
-const handleTabKey = (event: KeyboardEvent) => {
-  // Only handle Tab key
-  if (event.key !== 'Tab') return;
-
-  // Get all focusable elements in the form
-  const focusableElements = [
-    nameInput.value,
-    hostInput.value,
-    portInput.value,
-    usernameInput.value,
-    passwordInput.value,
-    privateKeyInput.value,
-    keyPassphraseInput.value,
-    saveSessionInput.value,
-    connectButton.value,
-    cancelButton.value,
-  ].filter(element => element !== null) as HTMLElement[];
-
-  // Find the currently focused element
-  const currentIndex = focusableElements.findIndex(
-    element => element === document.activeElement
-  );
-
-  let nextIndex;
-
-  if (event.shiftKey) {
-    // Shift + Tab: move to previous element
-    nextIndex =
-      currentIndex <= 0 ? focusableElements.length - 1 : currentIndex - 1;
-  } else {
-    // Tab: move to next element
-    nextIndex =
-      currentIndex < 0 || currentIndex >= focusableElements.length - 1
-        ? 0
-        : currentIndex + 1;
-  }
-
-  // Focus the next element
-  if (focusableElements[nextIndex]) {
-    event.preventDefault(); // Prevent default tab behavior
-    focusableElements[nextIndex].focus();
-  }
 };
 </script>
 
@@ -775,18 +757,6 @@ const handleTabKey = (event: KeyboardEvent) => {
 .modal-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.form-general-error {
-  width: 100%;
-  padding: 8px;
-  background-color: rgba(255, 71, 87, 0.1);
-  border: 1px solid #ff4757;
-  border-radius: var(--radius-sm);
-  color: #ff4757;
-  font-size: 0.85em;
-  margin-bottom: 8px;
-  text-align: center;
 }
 
 /* Specific style for short input fields like port */

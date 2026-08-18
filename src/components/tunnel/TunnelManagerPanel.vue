@@ -267,12 +267,16 @@ const acceptedCount = (ruleId: string): number =>
 
 const refreshData = async (): Promise<void> => {
   if (!props.sessionId) return;
-  const [nextRules, nextStatuses] = await Promise.all([
-    tunnelApi.listTunnelRules(props.sessionId),
-    tunnelApi.listTunnelStatus(props.sessionId),
-  ]);
-  rules.value = nextRules;
-  statuses.value = nextStatuses;
+  try {
+    const [nextRules, nextStatuses] = await Promise.all([
+      tunnelApi.listTunnelRules(props.sessionId),
+      tunnelApi.listTunnelStatus(props.sessionId),
+    ]);
+    rules.value = nextRules;
+    statuses.value = nextStatuses;
+  } catch (e) {
+    logger.warn('Failed to refresh tunnel rules/status', e);
+  }
 };
 
 const startRefreshTimer = (): void => {
@@ -308,6 +312,14 @@ const handleAddRule = async (): Promise<void> => {
     return;
   }
 
+  // Trim the listen host; keep the default 127.0.0.1 semantics when blank
+  // (the backend only binds the loopback address by default).
+  const listenHost = draft.listenHost.trim() || '127.0.0.1';
+  if (!listenHost) {
+    formError.value = t('tunnel.errorListenHost');
+    return;
+  }
+
   if (draft.direction === 'local') {
     if (!draft.targetHost.trim()) {
       formError.value = t('tunnel.errorTargetRequired');
@@ -325,11 +337,23 @@ const handleAddRule = async (): Promise<void> => {
     }
   }
 
+  // Conflict check: reject a rule that would bind the same host:port twice.
+  const duplicate = rules.value.some(
+    r =>
+      r.direction === draft.direction &&
+      r.listenHost === listenHost &&
+      r.listenPort === listenPort
+  );
+  if (duplicate) {
+    formError.value = t('tunnel.errorDuplicate');
+    return;
+  }
+
   try {
     const ruleId = await tunnelApi.addTunnelRule({
       sessionId: props.sessionId,
       direction: draft.direction,
-      listenHost: draft.listenHost || '127.0.0.1',
+      listenHost,
       listenPort: listenPort,
       targetHost:
         draft.direction === 'local' ? draft.targetHost.trim() : '',
@@ -343,6 +367,7 @@ const handleAddRule = async (): Promise<void> => {
       statuses.value = await tunnelApi.listTunnelStatus(props.sessionId);
     } catch (e) {
       logger.warn('Failed to start newly added tunnel rule', e);
+      formError.value = t('tunnel.errorStartFailed');
     }
     // Reset local form fields
     draft.listenHost = '127.0.0.1';
@@ -364,8 +389,11 @@ const handleToggleRule = async (rule: TunnelRule): Promise<void> => {
       await tunnelApi.startTunnelRule(props.sessionId, rule.id);
     }
     statuses.value = await tunnelApi.listTunnelStatus(props.sessionId);
+    formError.value = '';
   } catch (error) {
     logger.error('Failed to toggle tunnel rule', error);
+    // Surface start/stop failures instead of letting them disappear.
+    formError.value = t('tunnel.errorToggleFailed');
   }
 };
 
@@ -402,7 +430,8 @@ watch(
     } else {
       stopRefreshTimer();
     }
-  }
+  },
+  { immediate: true }
 );
 
 onBeforeUnmount(() => {

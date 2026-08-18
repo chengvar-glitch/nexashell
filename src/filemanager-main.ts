@@ -6,9 +6,24 @@ import { createPinia } from 'pinia';
 import FileManagerWindow from '@/components/filemanager/FileManagerWindow.vue';
 import { i18n } from '@/core/i18n';
 import { themeManager } from '@/core/utils/theme-manager';
+import { createLogger } from '@/core/utils/logger';
 import { setupLoggerDevTools } from '@/core/utils/logger-devtools';
 import './styles/design-system.css';
 import './styles/common.css';
+
+const bootLogger = createLogger('BOOT');
+
+// Route otherwise-unhandled async rejections and runtime errors into the
+// central logger instead of leaving them silently unobserved.
+window.addEventListener('unhandledrejection', event => {
+  bootLogger.error('Unhandled promise rejection', event.reason);
+});
+window.addEventListener('error', event => {
+  bootLogger.error(`Uncaught error in ${event.message}`, {
+    filename: event.filename,
+    lineno: event.lineno,
+  });
+});
 
 // Apply the persisted theme (written by the main window) so this window opens
 // with the same light/dark background instead of only following the OS

@@ -100,8 +100,11 @@ class SessionAPI {
         (result as Array<{ seq: number; output: string; ts: number }>) || []
       );
     } catch (error) {
+      // Surface backend failures instead of conflating them with an empty
+      // buffer — callers must be able to distinguish "no buffered output"
+      // from "the backend is broken".
       logger.error('Failed to get buffered SSH output', error);
-      return [];
+      throw error;
     }
   }
 
@@ -165,8 +168,10 @@ class SessionAPI {
       const sessions = await invoke<SavedSession[]>('list_sessions');
       return sessions || [];
     } catch (error) {
+      // Rethrow so callers can tell "no saved sessions" apart from a broken
+      // backend instead of silently treating the failure as an empty list.
       logger.error('Failed to list sessions', error);
-      return [];
+      throw error;
     }
   }
 }

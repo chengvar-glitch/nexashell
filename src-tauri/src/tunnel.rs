@@ -17,10 +17,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+/// Upper bound on simultaneous accepted connections per tunnel rule, guarding
+/// against unbounded thread/SSH-session creation on an inbound flood.
+const MAX_CONCURRENT_TUNNEL_CONNECTIONS: usize = 64;
 
 /// How this tunnel forwards connections.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +83,10 @@ struct SshTunnel {
     rule_id: String,
     status: Arc<RwLock<TunnelStatus>>,
     stop: Arc<AtomicBool>,
+    /// Holds the bound listener while the tunnel is running. `stop_*` drops
+    /// it (sets to None) to close the listening socket and unblock the accept
+    /// loop, so a stopped tunnel's port is immediately released.
+    listener: Arc<Mutex<Option<TcpListener>>>,
     join: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
@@ -111,6 +119,7 @@ impl TunnelManager {
                 rule_id: rule.id.clone(),
                 status: status.clone(),
                 stop: Arc::new(AtomicBool::new(false)),
+                listener: Arc::new(Mutex::new(None)),
                 join: Arc::new(Mutex::new(None)),
             });
 
@@ -118,12 +127,13 @@ impl TunnelManager {
             let au = conn.3.clone();
             let tstop = tunnel.stop.clone();
             let tstatus = status.clone();
+            let tlistener = tunnel.listener.clone();
 
             let rule_id = rule.id.clone();
             let thread_name = format!("nexashell-tunnel-{}", rule_id);
             let handle = std::thread::Builder::new()
                 .name(thread_name)
-                .spawn(move || Self::run_listener(a, h, p, au, rule, tstop, tstatus));
+                .spawn(move || Self::run_listener(a, h, p, au, rule, tstop, tstatus, tlistener));
 
             match handle {
                 Ok(h) => {
@@ -186,12 +196,7 @@ impl TunnelManager {
         };
         if let Some(list) = removed {
             for t in &list {
-                t.stop.store(true, Ordering::SeqCst);
-            }
-            for t in list {
-                if let Some(h) = t.join.lock().unwrap().take() {
-                    h.thread().unpark();
-                }
+                Self::stop_tunnel_inner(t);
             }
             true
         } else {
@@ -214,7 +219,7 @@ impl TunnelManager {
             }
         };
         if let Some(t) = target {
-            t.stop.store(true, Ordering::SeqCst);
+            Self::stop_tunnel_inner(&t);
         }
         let empty = self
             .tunnels
@@ -228,6 +233,27 @@ impl TunnelManager {
         }
     }
 
+    /// Set stop, close the listener (releasing the port), and reap the accept
+    /// thread for a single tunnel. The listener is dropped so an immediate
+    /// re-bind on the same port succeeds; the join runs on a reaper thread so
+    /// the caller never blocks, even on a pathological accept loop.
+    fn stop_tunnel_inner(t: &Arc<SshTunnel>) {
+        t.stop.store(true, Ordering::SeqCst);
+        if let Some(listener) = t
+            .listener
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            drop(listener);
+        }
+        if let Some(handle) = t.join.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            std::thread::spawn(move || {
+                let _ = handle.join();
+            });
+        }
+    }
+
     /// Current status of all tunnels for a session.
     pub fn status_all(&self, session_id: &str) -> Vec<TunnelStatus> {
         let map = self.tunnels.read().unwrap();
@@ -238,6 +264,18 @@ impl TunnelManager {
             }
         }
         out
+    }
+
+    /// Stop every tunnel across all sessions. Used for app-exit cleanup (so a
+    /// shutdown can never leave forwarding ports bound).
+    pub fn disconnect_all(&self) {
+        let session_ids: Vec<String> = {
+            let map = self.tunnels.read().unwrap();
+            map.keys().cloned().collect()
+        };
+        for session_id in session_ids {
+            self.stop_session_tunnels(&session_id);
+        }
     }
 
     fn initial_status(rule: &TunnelRule) -> TunnelStatus {
@@ -254,7 +292,10 @@ impl TunnelManager {
         }
     }
 
-    /// Own the accept loop for a single tunnel rule until `stop` is set.
+    /// Own the accept loop for a single tunnel rule until `stop` is set or the
+    /// shared listener is dropped. The listener lives in `listener_holder` so a
+    /// `stop_*` call can drop it to release the port; the accept loop polls
+    /// non-blocking so it never holds the mutex across a blocking accept.
     fn run_listener(
         conn_addr: String,
         host_for_err: String,
@@ -263,6 +304,7 @@ impl TunnelManager {
         rule: TunnelRule,
         stop: Arc<AtomicBool>,
         status: Arc<RwLock<TunnelStatus>>,
+        listener_holder: Arc<Mutex<Option<TcpListener>>>,
     ) {
         let listener = match TcpListener::bind((rule.listen_host.as_str(), rule.listen_port)) {
             Ok(l) => {
@@ -279,6 +321,18 @@ impl TunnelManager {
                 return;
             }
         };
+        if let Err(e) = listener.set_nonblocking(true) {
+            let mut st = status.write().unwrap();
+            st.state = "failed";
+            st.error = Some(format!("Failed to set listener non-blocking: {}", e));
+            return;
+        }
+        {
+            let mut guard = listener_holder
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            *guard = Some(listener);
+        }
         log::info!(
             "Tunnel {} listening on {}:{} -> {}:{}",
             rule.id,
@@ -287,12 +341,49 @@ impl TunnelManager {
             rule.target_host,
             rule.target_port
         );
+        // Warn when binding a non-loopback interface: the unauthenticated
+        // forward/SOCKS proxy then becomes reachable by other hosts.
+        if rule.listen_host != "127.0.0.1" && rule.listen_host != "::1" && rule.listen_host != "localhost" {
+            log::warn!(
+                "Tunnel {} binds non-loopback interface {}:{} — the forwarding rule is reachable by other hosts on the network",
+                rule.id,
+                rule.listen_host,
+                rule.listen_port
+            );
+        }
+
+        // Cap concurrent per-rule connections so a flood of inbound connects
+        // cannot spawn unbounded threads + SSH sessions.
+        let active_conns = Arc::new(AtomicUsize::new(0));
 
         while !stop.load(Ordering::SeqCst) {
-            match listener.accept() {
+            let accept_res = {
+                let guard = listener_holder
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                match guard.as_ref() {
+                    Some(l) => l.accept(),
+                    None => {
+                        // Listener was dropped by stop — exit the loop.
+                        break;
+                    }
+                }
+            };
+            match accept_res {
                 Ok((stream, peer)) => {
                     if stop.load(Ordering::SeqCst) {
                         break;
+                    }
+                    if active_conns.fetch_add(1, Ordering::SeqCst) >= MAX_CONCURRENT_TUNNEL_CONNECTIONS {
+                        active_conns.fetch_sub(1, Ordering::SeqCst);
+                        log::warn!(
+                            "Tunnel {} hit connection cap ({}); dropping inbound connect from {}",
+                            rule.id,
+                            MAX_CONCURRENT_TUNNEL_CONNECTIONS,
+                            peer
+                        );
+                        let _ = stream.shutdown(std::net::Shutdown::Both);
+                        continue;
                     }
                     let (a, h, p) = (conn_addr.clone(), host_for_err.clone(), conn_port);
                     let au = auth.clone();
@@ -301,6 +392,7 @@ impl TunnelManager {
                     let direction = rule.direction;
                     let target_host = rule.target_host.clone();
                     let target_port = rule.target_port;
+                    let active = active_conns.clone();
                     status.write().unwrap().accepted += 1;
 
                     let _ = std::thread::Builder::new()
@@ -318,7 +410,12 @@ impl TunnelManager {
                                 target_port,
                                 &tstop,
                             );
+                            active.fetch_sub(1, Ordering::SeqCst);
                         });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No pending connection — poll again briefly.
+                    std::thread::sleep(Duration::from_millis(10));
                 }
                 Err(e) => {
                     if !stop.load(Ordering::SeqCst) {
@@ -389,13 +486,58 @@ fn pump_bidirectional(
     let mut client_buf = [0u8; 16384];
     let _ = client.set_read_timeout(Some(Duration::from_millis(40)));
 
-    loop {
+    // Phase 1: pump both directions.
+    'pump: loop {
         if stop.load(Ordering::SeqCst) {
             break;
         }
         // SSH channel -> client
         match chan.read(&mut chan_buf) {
-            Ok(0) => break, // EOF on channel
+            Ok(0) => break 'pump, // EOF on channel (remote closed)
+            Ok(n) => {
+                if client.write_all(&chan_buf[..n]).is_err() {
+                    break 'pump;
+                }
+                if client.flush().is_err() {
+                    break 'pump;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => break 'pump,
+        }
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        // client -> SSH channel
+        match client.read(&mut client_buf) {
+            Ok(0) => {
+                // The local client half-closed its write side but may still be
+                // reading its response: signal SSH EOF and continue draining
+                // channel -> client until the remote side finishes.
+                let _ = chan.eof();
+                break 'pump;
+            }
+            Ok(n) => {
+                if chan.write_all(&client_buf[..n]).is_err() {
+                    break 'pump;
+                }
+                let _ = chan.flush();
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            Err(_) => break 'pump,
+        }
+    }
+
+    // Phase 2: after a local half-close, keep draining channel -> client so the
+    // remote's final response reaches the client before the channel is closed.
+    loop {
+        if stop.load(Ordering::SeqCst) {
+            break;
+        }
+        match chan.read(&mut chan_buf) {
+            Ok(0) => break,
             Ok(n) => {
                 if client.write_all(&chan_buf[..n]).is_err() {
                     break;
@@ -404,30 +546,16 @@ fn pump_bidirectional(
                     break;
                 }
             }
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-            Err(_) => break,
-        }
-        if stop.load(Ordering::SeqCst) {
-            break;
-        }
-        // client -> SSH channel
-        match client.read(&mut client_buf) {
-            Ok(0) => {
-                let _ = chan.eof();
-                break; // client closed
-            }
-            Ok(n) => {
-                if chan.write_all(&client_buf[..n]).is_err() {
-                    break;
-                }
-                let _ = chan.flush();
-            }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(2));
             }
             Err(_) => break,
         }
     }
+
+    // Cleanly close the SSH channel once pumping finishes.
+    let _ = chan.close();
+    let _ = chan.wait_close();
 }
 
 /// Perform a SOCKS5 handshake on `stream` and return the requested destination
@@ -441,86 +569,103 @@ fn socks5_negotiate(stream: &mut TcpStream) -> Result<(String, u16), String> {
         .set_write_timeout(Some(Duration::from_secs(30)))
         .map_err(|e| e.to_string())?;
 
-    // Greeting: VER(5) NMETHODS methods...
-    let mut header = [0u8; 2];
-    stream.read_exact(&mut header).map_err(|e| format!("SOCKS read greeting: {}", e))?;
-    if header[0] != 0x05 {
-        return Err(format!("Not a SOCKS5 client (ver={})", header[0]));
-    }
-    let nmethods = header[1] as usize;
-    let mut methods = vec![0u8; nmethods];
-    stream.read_exact(&mut methods).map_err(|e| format!("SOCKS read methods: {}", e))?;
-    // Reply: no-auth
-    stream.write_all(&[0x05, 0x00]).map_err(|e| format!("SOCKS write method reply: {}", e))?;
-
-    // Request: VER(5) CMD(1) RSV(1) ATYP(1) ADDR PORT(2)
-    let mut req0 = [0u8; 4];
-    stream.read_exact(&mut req0).map_err(|e| format!("SOCKS read request: {}", e))?;
-    if req0[0] != 0x05 {
-        return Err(format!("SOCKS5 request bad ver: {}", req0[0]));
-    }
-    if req0[1] != 0x01 {
-        return Err(format!("Only CONNECT supported (cmd={})", req0[1]));
-    }
-    let atyp = req0[3];
-    let host = match atyp {
-        0x01 => {
-            // IPv4
-            let mut a = [0u8; 4];
-            stream.read_exact(&mut a).map_err(|e| format!("SOCKS read ipv4: {}", e))?;
-            a.iter()
-                .map(|b| b.to_string())
-                .collect::<Vec<_>>()
-                .join(".")
+    let result = (|| -> Result<(String, u16), String> {
+        // Greeting: VER(5) NMETHODS methods...
+        let mut header = [0u8; 2];
+        stream.read_exact(&mut header).map_err(|e| format!("SOCKS read greeting: {}", e))?;
+        if header[0] != 0x05 {
+            return Err(format!("Not a SOCKS5 client (ver={})", header[0]));
         }
-        0x03 => {
-            // Domain name
-            let mut lenb = [0u8; 1];
-            stream.read_exact(&mut lenb).map_err(|e| format!("SOCKS read domain len: {}", e))?;
-            let mut dom = vec![0u8; lenb[0] as usize];
-            stream.read_exact(&mut dom).map_err(|e| format!("SOCKS read domain: {}", e))?;
-            String::from_utf8_lossy(&dom).to_string()
+        let nmethods = header[1] as usize;
+        let mut methods = vec![0u8; nmethods];
+        stream.read_exact(&mut methods).map_err(|e| format!("SOCKS read methods: {}", e))?;
+        // Only reply no-auth (0x00) if the client actually offered it.
+        if !methods.contains(&0x00) {
+            return Err("Client offers no acceptable auth method".to_string());
         }
-        0x04 => {
-            // IPv6
-            let mut a = [0u8; 16];
-            stream
-                .read_exact(&mut a)
-                .map_err(|e| format!("SOCKS read ipv6: {}", e))?;
-            let octets = a
-                .chunks(2)
-                .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
-                .collect::<Vec<_>>();
-            [
-                octets[0].clone(),
-                octets[1].clone(),
-                octets[2].clone(),
-                octets[3].clone(),
-                octets[4].clone(),
-                octets[5].clone(),
-                octets[6].clone(),
-                octets[7].clone(),
-            ]
-            .join(":")
+        // Reply: no-auth
+        stream.write_all(&[0x05, 0x00]).map_err(|e| format!("SOCKS write method reply: {}", e))?;
+
+        // Request: VER(5) CMD(1) RSV(1) ATYP(1) ADDR PORT(2)
+        let mut req0 = [0u8; 4];
+        stream.read_exact(&mut req0).map_err(|e| format!("SOCKS read request: {}", e))?;
+        if req0[0] != 0x05 {
+            return Err(format!("SOCKS5 request bad ver: {}", req0[0]));
         }
-        _ => return Err(format!("Unsupported SOCKS5 address type: {}", atyp)),
-    };
-    let mut portb = [0u8; 2];
-    stream
-        .read_exact(&mut portb)
-        .map_err(|e| format!("SOCKS read port: {}", e))?;
-    let port = u16::from_be_bytes(portb);
+        if req0[1] != 0x01 {
+            return Err(format!("Only CONNECT supported (cmd={})", req0[1]));
+        }
+        let atyp = req0[3];
+        let host = match atyp {
+            0x01 => {
+                // IPv4
+                let mut a = [0u8; 4];
+                stream.read_exact(&mut a).map_err(|e| format!("SOCKS read ipv4: {}", e))?;
+                a.iter()
+                    .map(|b| b.to_string())
+                    .collect::<Vec<_>>()
+                    .join(".")
+            }
+            0x03 => {
+                // Domain name
+                let mut lenb = [0u8; 1];
+                stream.read_exact(&mut lenb).map_err(|e| format!("SOCKS read domain len: {}", e))?;
+                let mut dom = vec![0u8; lenb[0] as usize];
+                stream.read_exact(&mut dom).map_err(|e| format!("SOCKS read domain: {}", e))?;
+                String::from_utf8_lossy(&dom).to_string()
+            }
+            0x04 => {
+                // IPv6
+                let mut a = [0u8; 16];
+                stream
+                    .read_exact(&mut a)
+                    .map_err(|e| format!("SOCKS read ipv6: {}", e))?;
+                let octets = a
+                    .chunks(2)
+                    .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
+                    .collect::<Vec<_>>();
+                [
+                    octets[0].clone(),
+                    octets[1].clone(),
+                    octets[2].clone(),
+                    octets[3].clone(),
+                    octets[4].clone(),
+                    octets[5].clone(),
+                    octets[6].clone(),
+                    octets[7].clone(),
+                ]
+                .join(":")
+            }
+            _ => return Err(format!("Unsupported SOCKS5 address type: {}", atyp)),
+        };
+        let mut portb = [0u8; 2];
+        stream
+            .read_exact(&mut portb)
+            .map_err(|e| format!("SOCKS read port: {}", e))?;
+        let port = u16::from_be_bytes(portb);
 
-    // Success reply.
-    stream
-        .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
-        .map_err(|e| format!("SOCKS write reply: {}", e))?;
+        // Success reply.
+        stream
+            .write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+            .map_err(|e| format!("SOCKS write reply: {}", e))?;
 
-    let _ = stream.set_read_timeout(None);
-    let _ = stream.set_write_timeout(None);
-    stream.set_nodelay(true).ok();
+        Ok((host, port))
+    })();
 
-    Ok((host, port))
+    match result {
+        Ok((host, port)) => {
+            let _ = stream.set_read_timeout(None);
+            let _ = stream.set_write_timeout(None);
+            stream.set_nodelay(true).ok();
+            Ok((host, port))
+        }
+        Err(e) => {
+            // Write an RFC 1928 failure reply (VER 0x05, REP 0x07) so the client
+            // fails fast instead of hanging until its own timeout.
+            let _ = stream.write_all(&[0x05, 0x07, 0x00, 0x01, 0, 0, 0, 0, 0, 0]);
+            Err(e)
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -528,8 +673,14 @@ fn socks5_negotiate(stream: &mut TcpStream) -> Result<(String, u16), String> {
 // ----------------------------------------------------------------------------
 
 /// Convert a DB tunnel-rule row into the tunnel subsystem's rule shape.
-fn rule_from_row(row: crate::db::TunnelRuleRow) -> TunnelRule {
-    TunnelRule {
+/// Ports are validated (not silently truncated) so a corrupt/out-of-range row
+/// fails loudly instead of binding the wrong port.
+fn rule_from_row(row: crate::db::TunnelRuleRow) -> Result<TunnelRule, String> {
+    let listen_port = u16::try_from(row.listen_port)
+        .map_err(|_| format!("Listen port out of range: {}", row.listen_port))?;
+    let target_port = u16::try_from(row.target_port)
+        .map_err(|_| format!("Target port out of range: {}", row.target_port))?;
+    Ok(TunnelRule {
         id: row.id,
         direction: if row.direction == "dynamic" {
             TunnelDirection::Dynamic
@@ -537,11 +688,11 @@ fn rule_from_row(row: crate::db::TunnelRuleRow) -> TunnelRule {
             TunnelDirection::Local
         },
         listen_host: row.listen_host,
-        listen_port: row.listen_port as u16,
+        listen_port,
         target_host: row.target_host,
-        target_port: row.target_port as u16,
+        target_port,
         enabled: row.enabled,
-    }
+    })
 }
 
 /// Start every enabled, persisted tunnel rule for a live session.
@@ -553,7 +704,10 @@ pub fn start_session_tunnels(
     sessionId: String,
 ) -> Result<Vec<TunnelStatus>, String> {
     let rules = crate::db::list_tunnel_rules(sessionId.clone())?;
-    let rules: Vec<TunnelRule> = rules.into_iter().map(rule_from_row).collect();
+    let rules: Vec<TunnelRule> = rules
+        .into_iter()
+        .map(rule_from_row)
+        .collect::<Result<_, _>>()?;
     let conn = ssh_state
         .session_connection(&crate::common::SessionId::from(sessionId.clone()))
         .map_err(|e| format!("Session is not connected: {}", e))?;
@@ -578,7 +732,7 @@ pub fn start_tunnel_rule(
     let conn = ssh_state
         .session_connection(&crate::common::SessionId::from(sessionId.clone()))
         .map_err(|e| format!("Session is not connected: {}", e))?;
-    Ok(tunnel_state.start_tunnel(&sessionId, rule_from_row(rule), conn))
+    Ok(tunnel_state.start_tunnel(&sessionId, rule_from_row(rule)?, conn))
 }
 
 /// Stop all tunnels for a session.

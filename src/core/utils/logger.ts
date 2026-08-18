@@ -35,6 +35,66 @@ export interface LoggerConfig {
 }
 
 /**
+ * Sensitive object keys whose values are replaced with '[REDACTED]' when
+ * logging. Matching is case-insensitive.
+ */
+const SENSITIVE_KEYS = [
+  'password',
+  'passphrase',
+  'secret',
+  'token',
+  'privatekey',
+  'authorization',
+  'cookie',
+];
+
+/**
+ * Recursively replace sensitive values with '[REDACTED]'.
+ * Arrays and plain objects are traversed; other values are returned as-is.
+ * Cycles are avoided via a seen-set so a self-referencing object cannot hang.
+ */
+export function redactSensitive(value: unknown, seen = new Set<object>()): unknown {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[REDACTED]';
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    return value.map(item => redactSensitive(item, seen));
+  }
+
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+    if (SENSITIVE_KEYS.includes(key.toLowerCase())) {
+      out[key] = '[REDACTED]';
+    } else {
+      out[key] = redactSensitive(val, seen);
+    }
+  }
+  return out;
+}
+
+/**
+ * Escape a value for use as a CSV cell: quote embedded quotes/newlines and
+ * prefix formula-leading cells with a single-quote to prevent CSV injection.
+ */
+function csvCell(value: unknown): string {
+  let str =
+    typeof value === 'string' ? value : JSON.stringify(value ?? '') ?? '';
+  // Neutralize spreadsheet formulas (=, +, -, @) at the start of the cell.
+  if (/^[=+\-@]/.test(str)) {
+    str = `'${str}`;
+  }
+  return `"${str.replace(/"/g, '""')}"`;
+}
+
+/** Build a CSV body from a header row and data rows (both escaped). */
+function toCSV(headers: string[], rows: unknown[][]): string {
+  return [headers.map(csvCell).join(','), ...rows.map(row => row.map(csvCell).join(','))].join(
+    '\n'
+  );
+}
+
+/**
  * Module Logger class
  */
 class ModuleLogger {
@@ -104,12 +164,16 @@ class ModuleLogger {
       return;
     }
 
+    // Never store or export sensitive values (passwords, tokens, cookies ...).
+    // Redaction is applied recursively so nested objects are covered too.
+    const redactedData = data === undefined ? undefined : redactSensitive(data);
+
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
       module: this.moduleName,
       message,
-      data,
+      data: redactedData,
     };
 
     // Record to history
@@ -208,15 +272,10 @@ class ModuleLogger {
       entry.level,
       entry.module,
       entry.message,
-      JSON.stringify(entry.data || ''),
+      JSON.stringify(entry.data ?? ''),
     ]);
 
-    const csv = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
-    ].join('\n');
-
-    return csv;
+    return toCSV(headers, rows);
   }
 }
 
@@ -320,15 +379,10 @@ class LoggerManager {
       entry.level,
       entry.module,
       entry.message,
-      JSON.stringify(entry.data || ''),
+      JSON.stringify(entry.data ?? ''),
     ]);
 
-    const csv = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(',')),
-    ].join('\n');
-
-    return csv;
+    return toCSV(headers, rows);
   }
 
   /**

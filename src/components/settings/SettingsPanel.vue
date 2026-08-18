@@ -8,8 +8,13 @@
         @click="handleClose"
       >
         <div
+          ref="settingsPanelRef"
           class="settings-panel panel"
           :class="{ 'modal-system-panel': !useTeleport }"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
+          @keydown.tab="handleTabTrap"
           @click.stop
         >
           <div class="settings-header border-bottom draggable">
@@ -20,7 +25,7 @@
                 @click="handleClose"
               />
             </div>
-            <h2 class="settings-title">
+            <h2 id="settings-title" class="settings-title">
               {{ $t('settings.title') }}
             </h2>
           </div>
@@ -250,7 +255,7 @@
                       <button
                         v-else
                         class="update-check-btn"
-                        :disabled="updateState === 'checking'"
+                        :disabled="!versionReady || updateState === 'checking'"
                         @click="handleCheckForUpdates"
                       >
                         {{ updateButtonLabel }}
@@ -353,6 +358,12 @@ const activeMenu = ref('appearance');
 const selectedTheme = ref<ThemeMode>('auto');
 const selectedAccent = ref<AccentKey>('blue');
 const appVersion = ref('0.1.0');
+// The "check for updates" button must not compare the placeholder version
+// (0.1.0) before getVersion() resolves, or it reports a false update.
+const versionReady = ref(false);
+
+const settingsPanelRef = ref<HTMLElement | null>(null);
+let previouslyFocused: HTMLElement | null = null;
 
 type UpdateState = 'idle' | 'checking' | 'upToDate' | 'available' | 'error';
 const updateState = ref<UpdateState>('idle');
@@ -401,16 +412,25 @@ const updateButtonLabel = computed(() => {
 });
 
 const handleCheckForUpdates = async () => {
-  if (updateState.value === 'checking') return;
+  if (!versionReady.value || updateState.value === 'checking') return;
   updateState.value = 'checking';
-  const result = await checkForUpdates(appVersion.value);
-  if (result.status === 'available') {
-    latestVersion.value = result.latestVersion ?? '';
-    releaseUrl.value = result.releaseUrl ?? RELEASE_PAGE_URL;
-    updateState.value = 'available';
-  } else if (result.status === 'upToDate') {
-    updateState.value = 'upToDate';
-  } else {
+  try {
+    const result = await checkForUpdates(appVersion.value);
+    if (result.status === 'available') {
+      latestVersion.value = result.latestVersion ?? '';
+      releaseUrl.value = result.releaseUrl ?? RELEASE_PAGE_URL;
+      updateState.value = 'available';
+    } else {
+      // Reset stale version/release state so a prior successful check can't
+      // linger after a later failed or up-to-date response.
+      latestVersion.value = '';
+      releaseUrl.value = RELEASE_PAGE_URL;
+      updateState.value = result.status === 'upToDate' ? 'upToDate' : 'error';
+    }
+  } catch (err) {
+    logger.error('Update check threw unexpectedly', err);
+    latestVersion.value = '';
+    releaseUrl.value = RELEASE_PAGE_URL;
     updateState.value = 'error';
   }
 };
@@ -491,6 +511,28 @@ const handleMenuClick = (key: string) => {
   }
 };
 
+// --- Focus management (dialog semantics) --------------------------------
+const FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+const handleTabTrap = (event: KeyboardEvent) => {
+  const panel = settingsPanelRef.value;
+  if (!panel) return;
+  const focusable = Array.from(
+    panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)
+  ).filter(el => !el.hasAttribute('disabled'));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+};
+
 const initObserver = () => {
   if (observer) observer.disconnect();
 
@@ -503,17 +545,22 @@ const initObserver = () => {
   observer = new IntersectionObserver(entries => {
     if (isManualScrolling) return;
 
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        // Find which section this element belongs to
-        for (const [key, el] of Object.entries(sectionRefs.value)) {
-          if (el === entry.target) {
-            activeMenu.value = key;
-            break;
-          }
-        }
+    // Pick the topmost intersecting section so the sidebar highlights the
+    // section actually at the top of the viewport (previously any intersecting
+    // section could win, causing a wrong highlight).
+    const intersecting = entries.filter(entry => entry.isIntersecting);
+    if (intersecting.length === 0) return;
+    const topmost = intersecting.reduce((best, entry) =>
+      entry.boundingClientRect.top < best.boundingClientRect.top
+        ? entry
+        : best
+    );
+    for (const [key, el] of Object.entries(sectionRefs.value)) {
+      if (el === topmost.target) {
+        activeMenu.value = key;
+        break;
       }
-    });
+    }
   }, options);
 
   Object.values(sectionRefs.value).forEach(section => {
@@ -525,6 +572,7 @@ watch(
   () => props.visible,
   async visible => {
     if (visible) {
+      previouslyFocused = document.activeElement as HTMLElement | null;
       isManualScrolling = true;
       activeMenu.value = props.initialSection || 'appearance';
       await nextTick();
@@ -543,11 +591,28 @@ watch(
       }
 
       initObserver();
+      // Bring focus into the dialog so keyboard interaction starts inside it.
+      const panel = settingsPanelRef.value;
+      if (panel) {
+        const first = panel.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+        first?.focus();
+      }
       // Short delay to allow initial intersection events to pass
       if (scrollResetTimer) clearTimeout(scrollResetTimer);
       scrollResetTimer = setTimeout(() => {
         isManualScrolling = false;
       }, 150);
+    } else {
+      // Tear down the observer on close too (not just on unmount) and return
+      // focus to the element that opened the dialog.
+      if (observer) {
+        observer.disconnect();
+        observer = null;
+      }
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+      previouslyFocused = null;
     }
   }
 );
@@ -605,8 +670,11 @@ onMounted(async () => {
 
   try {
     appVersion.value = await getVersion();
+    versionReady.value = true;
   } catch (err) {
     logger.warn('Failed to get app version:', err);
+    // Keep the update check disabled so it never compares the placeholder
+    // version (0.1.0) against GitHub and reports a false update.
   }
 });
 

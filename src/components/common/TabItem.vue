@@ -89,7 +89,7 @@ const handleContextMenuSelect = (key: string) => {
     <Server v-else-if="type === 'ssh'" class="tab-icon ssh-icon" :size="14" />
     <span class="tab-label">{{ label }}</span>
     <div v-if="closable" class="close-btn-wrapper">
-      <button class="close-btn" aria-label="Close tab" @click="handleClose">
+      <button class="close-btn" :aria-label="t('common.closeTab')" @click="handleClose">
         <svg width="10" height="10" viewBox="0 0 12 12">
           <path
             d="M2,2 L10,10 M10,2 L2,10"

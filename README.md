@@ -213,11 +213,11 @@ sequenceDiagram
 
 Backend commands are registered in `src-tauri/src/lib.rs` (`~70` invoke handlers). Grouped overview:
 
-- **System & Window**: `get_platform`, `get_arch`, `is_macos`/`is_windows`/`is_linux`, `quit_app`, `toggle_maximize`, `minimize_window`, `close_window`, `read_file_preview`, `get_file_size`
-- **SSH Connection**: `connect_ssh`, `disconnect_ssh`, `send_ssh_input`, `get_buffered_ssh_output`, `set_ssh_status_refresh_rate`, `probe_remote_path`
+- **System & Window**: `get_platform`, `get_arch`, `is_macos`/`is_windows`/`is_linux`, `quit_app`, `toggle_maximize`, `minimize_window`, `close_window`
+- **SSH Connection**: `connect_ssh`, `disconnect_ssh`, `send_ssh_input`, `get_buffered_ssh_output`, `set_ssh_status_refresh_rate`, `probe_remote_path`, `forget_host_key`
 - **SFTP**: `upload_file_sftp`, `pause_upload`, `resume_upload`, `cancel_upload`, `sftp_list_dir`, `sftp_download_file`, `cancel_download`, `sftp_remove`, `sftp_mkdir`, `sftp_rename`
 - **Local Terminal**: `connect_local`, `disconnect_local`
-- **Sessions**: `add_session`, `save_session`, `save_session_with_credentials`, `update_session_timestamp`, `list_sessions`, `get_session_credentials`, `get_sessions`, `get_sessions_with_relations`, `edit_session`, `delete_session`, `toggle_favorite`
+- **Sessions**: `save_session`, `save_session_with_credentials`, `update_session_timestamp`, `list_sessions`, `get_session_credentials`, `get_sessions`, `get_sessions_with_relations`, `edit_session`, `delete_session`, `toggle_favorite`
 - **Groups / Tags**: `add_group` / `add_tag`, `list_groups` / `list_tags`, `edit_group` / `edit_tag`, `delete_group` / `delete_tag`, `link_session_group` / `link_session_tag`, `unlink_session_group` / `unlink_session_tag`, `list_groups_for_session` / `list_tags_for_session`
 - **Import/Export**: `export_sessions`, `import_sessions`
 - **Tunnels**: `start_session_tunnels`, `start_tunnel_rule`, `stop_session_tunnels`, `stop_tunnel_rule`, `list_tunnel_status`, plus `add_tunnel_rule`, `list_tunnel_rules`, `update_tunnel_rule`, `delete_tunnel_rule`, `delete_tunnel_rules_for_session`

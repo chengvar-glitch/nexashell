@@ -147,6 +147,8 @@ const handleClickOutside = (event: MouseEvent) => {
 
 // Module-level hide timeout (not stored on window to avoid global pollution)
 let hideTimeout: ReturnType<typeof setTimeout> | null = null;
+// Deferred click-outside listener registration timer.
+let outsideTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const handleMouseEnterMenu = () => {
   if (hideTimeout) {
@@ -170,13 +172,21 @@ const handleVisibleChange = (newVal: boolean) => {
     adjustedY.value = props.y;
     // Calculation internally handles wait for DOM
     updatePosition();
-    setTimeout(() => {
-      document.addEventListener('click', handleClickOutside);
+    outsideTimeout = setTimeout(() => {
+      // Guard against mounting the listener after the menu was already
+      // closed/unmounted (which would otherwise leak the listener).
+      if (props.visible) {
+        document.addEventListener('click', handleClickOutside);
+      }
     }, 0);
   } else {
     document.removeEventListener('click', handleClickOutside);
     activeSubMenu.value = null;
     isPositioned.value = false;
+    if (outsideTimeout) {
+      clearTimeout(outsideTimeout);
+      outsideTimeout = null;
+    }
     if (hideTimeout) {
       clearTimeout(hideTimeout);
       hideTimeout = null;
@@ -200,6 +210,10 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside);
+  if (outsideTimeout) {
+    clearTimeout(outsideTimeout);
+    outsideTimeout = null;
+  }
   if (hideTimeout) {
     clearTimeout(hideTimeout);
     hideTimeout = null;

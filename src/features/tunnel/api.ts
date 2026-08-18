@@ -68,8 +68,10 @@ class TunnelAPI {
       } as Record<string, unknown>);
       return result || [];
     } catch (error) {
+      // Rethrow so the UI can distinguish "no running tunnels" from a backend
+      // error instead of silently showing an empty status.
       logger.error('Failed to list tunnel status', error);
-      return [];
+      throw error;
     }
   }
 
@@ -102,8 +104,10 @@ class TunnelAPI {
       } as Record<string, unknown>);
       return rules || [];
     } catch (error) {
+      // Rethrow so the UI can distinguish "no configured rules" from a backend
+      // error instead of silently returning an empty list.
       logger.error('Failed to list tunnel rules', error);
-      return [];
+      throw error;
     }
   }
 

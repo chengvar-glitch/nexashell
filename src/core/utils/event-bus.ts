@@ -44,7 +44,12 @@ class EventBus {
     const wrappedHandler: WrappedHandler = (e: Event) => {
       if (e instanceof CustomEvent) {
         try {
-          handler(...(e.detail || []));
+          // Promise.resolve also surfaces async rejections; the .catch
+          // prevents an unhandled rejection from an async subscriber.
+          Promise.resolve(handler(...(e.detail || []))).catch(err => {
+            // A failing subscriber must not break dispatchEvent for others.
+            console.error('[EventBus] async handler error', err);
+          });
         } catch (err) {
           // A failing subscriber must not break dispatchEvent for others.
           console.error('[EventBus] handler error', err);

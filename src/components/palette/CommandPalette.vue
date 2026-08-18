@@ -12,6 +12,7 @@
           autocomplete="off"
           spellcheck="false"
           @input="highlightedIndex = 0"
+          @focus="onPaletteFocus"
           @keydown="onSearchKeydown"
         />
         <button class="palette-esc" title="ESC" @click="closePalette">ESC</button>
@@ -101,7 +102,8 @@
         <span v-if="query">{{ filteredSnippets.length }} {{ t('palette.matches') }}</span>
         <span v-else>{{ t('palette.footerHint') }}</span>
         <span class="palette-footer-spacer" />
-        <span v-if="activeSessionHint" class="palette-session-hint">
+        <span v-if="feedback" class="palette-feedback">{{ feedback }}</span>
+        <span v-else-if="activeSessionHint" class="palette-session-hint">
           {{ activeSessionHint }}
         </span>
       </div>
@@ -110,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from 'vue';
+import { computed, inject, nextTick, ref, watch, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Pencil, Search, Terminal, Trash2 } from 'lucide-vue-next';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
@@ -133,6 +135,18 @@ const highlightedIndex = ref(0);
 const editingId = ref<string | null | 'new'>(null);
 const draft = ref<SnippetDraft>({ name: '', command: '', description: '' });
 const activeSessionHint = ref('');
+// Transient inline feedback for actions that can't proceed (e.g. running a
+// snippet while there is no active SSH session target).
+const feedback = ref('');
+let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+const showFeedback = (message: string) => {
+  feedback.value = message;
+  if (feedbackTimer) clearTimeout(feedbackTimer);
+  feedbackTimer = setTimeout(() => {
+    feedback.value = '';
+    feedbackTimer = null;
+  }, 2500);
+};
 
 interface TabLike {
   id: string;
@@ -182,7 +196,12 @@ async function refreshActiveHint() {
 }
 
 async function refreshSnippets() {
-  snippets.value = await snippetApi.listSnippets();
+  try {
+    snippets.value = await snippetApi.listSnippets();
+  } catch (err) {
+    logger.warn('Failed to load snippets', err);
+    snippets.value = [];
+  }
 }
 
 const clearQuery = () => {
@@ -225,7 +244,12 @@ function onSearchKeydown(e: KeyboardEvent) {
 
 async function executeSnippet(snippet: Snippet) {
   const sid = activeSshSessionId();
-  if (!sid) return;
+  if (!sid) {
+    // No active SSH session to run into — surface this instead of silently
+    // doing nothing.
+    showFeedback(t('palette.noTargetSession'));
+    return;
+  }
   try {
     // Send the snippet command followed by Enter, mirroring "paste + run".
     await sessionApi.sendSSHInput(sid, `${snippet.command}\r`);
@@ -233,6 +257,7 @@ async function executeSnippet(snippet: Snippet) {
     closePalette();
   } catch (error) {
     logger.error('Failed to execute snippet', error);
+    showFeedback(t('palette.runFailed'));
   }
 }
 
@@ -294,6 +319,23 @@ watch(
     }
   }
 );
+
+// Refresh the "running into <session>" hint when the active tab changes while
+// the palette is open, so it never shows a stale target.
+watch(
+  () => tabManagement?.activeTabId.value,
+  () => {
+    if (props.visible) refreshActiveHint();
+  }
+);
+
+const onPaletteFocus = () => {
+  if (props.visible) refreshActiveHint();
+};
+
+onUnmounted(() => {
+  if (feedbackTimer) clearTimeout(feedbackTimer);
+});
 </script>
 
 <style scoped>
@@ -566,6 +608,14 @@ watch(
 
 .palette-session-hint {
   color: var(--color-text-secondary);
+  max-width: 60%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.palette-feedback {
+  color: var(--color-danger, #ef4444);
   max-width: 60%;
   white-space: nowrap;
   overflow: hidden;

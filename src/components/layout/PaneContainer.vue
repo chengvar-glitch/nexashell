@@ -29,16 +29,25 @@ provide(PANE_SIZES_COMMIT_KEY, (node: SplitNode, sizes: number[]) => {
 });
 
 /**
- * Single render path for both single-pane and split-pane tabs: when there's
- * no split tree we synthesize a one-pane tree. SplitRenderer keys leaf panes
- * by their stable pane id, so splitting/collapsing never unmounts an
- * existing pane's RemoteConnectionView — its xterm history survives.
+ * Single render path for both single-pane and split-pane tabs: a single pane
+ * is synthesized as a one-child SPLIT tree so SplitRenderer always recurses
+ * through its stable keyed `pane-{id}` wrapper. This is what keeps the source
+ * pane's RemoteConnectionView (and its xterm history) mounted when a split
+ * turns that one-child tree into a two-child tree — the first child keeps the
+ * same id/key, so Vue reuses the same pane instance instead of unmounting it.
+ * (Rendering the single pane as a bare `{ kind: 'pane' }` node would make the
+ * top-level vnode change shape on split and remount the xterm.)
  */
 const renderNode = computed<SplitNode | null>(() => {
   if (props.tab.splitTree) return props.tab.splitTree;
   const pane = props.tab.panes?.[0];
   if (!pane) return null;
-  return { kind: 'pane', paneId: pane.id, connect: pane.connect };
+  return {
+    kind: 'split',
+    direction: 'horizontal',
+    children: [{ kind: 'pane', paneId: pane.id, connect: pane.connect }],
+    sizes: [100],
+  };
 });
 
 const handlePaneClick = (paneId: string) => {

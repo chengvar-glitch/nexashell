@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, nextTick, onUnmounted } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isMacOSBrowser,
@@ -12,6 +13,7 @@ import { eventBus } from '@/core/utils/event-bus';
 import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('WINDOW_TITLE_BAR');
+const { t } = useI18n({ useScope: 'global' });
 
 /**
  * WindowTitleBar Component
@@ -232,7 +234,7 @@ const handleMaximize = async () => {
       >
         <button
           class="windows-control-btn minimize-btn"
-          aria-label="Minimize"
+          :aria-label="t('window.minimize')"
           @click="handleMinimize"
         >
           <svg width="10" height="10" viewBox="0 0 10 10">
@@ -241,7 +243,7 @@ const handleMaximize = async () => {
         </button>
         <button
           class="windows-control-btn maximize-btn"
-          aria-label="Maximize"
+          :aria-label="t('window.maximize')"
           @click="handleMaximize"
         >
           <svg v-if="!isMaximized" width="10" height="10" viewBox="0 0 10 10">
@@ -275,7 +277,7 @@ const handleMaximize = async () => {
         </button>
         <button
           class="windows-control-btn close-btn"
-          aria-label="Close"
+          :aria-label="t('window.close')"
           @click="handleClose"
         >
           <svg width="10" height="10" viewBox="0 0 10 10">
@@ -294,6 +296,7 @@ const handleMaximize = async () => {
       v-model:visible="showSearchDropdown"
       :anchor-element="searchBoxElement"
       :search-query="searchQuery"
+      @update:search-query="searchQuery = $event"
     />
   </div>
 </template>

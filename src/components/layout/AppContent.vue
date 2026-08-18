@@ -42,6 +42,26 @@ const currentComponent = computed(() => {
   }
 });
 
+// KeepAlive matches its `include` list against the cached component's NAME.
+// Because KeepAlive has no per-key eviction API, we prune by component name:
+// when no open tab renders a given type, that name leaves the list and ALL of
+// its cached (closed-tab) vnodes are unmounted — freeing the deactivated
+// RemoteConnectionView/xterm buffers instead of letting them linger until the
+// max-size cache evicts them. This is the safest eviction we can drive from
+// here (a global generation key would remount every open tab's xterm on each
+// close). Closing one of several same-type tabs still relies on the max cap.
+const openComponentNames = computed(() => {
+  const names = new Set<string>();
+  for (const tab of tabs.value) {
+    if (tab.type === 'terminal' || tab.type === 'ssh') {
+      names.add('PaneContainer');
+    } else {
+      names.add('NexaShellHome');
+    }
+  }
+  return Array.from(names);
+});
+
 const currentActiveTab = computed(() => {
   if (!activeTabId.value) return null;
   return tabs.value.find(tab => tab.id === activeTabId.value) || null;
@@ -61,7 +81,7 @@ const handleConnect = (data: Record<string, unknown>) => {
 <template>
   <div class="app-content">
     <Transition name="tab-switch" mode="out-in">
-      <KeepAlive :max="16">
+      <KeepAlive :max="16" :include="openComponentNames">
         <component
           :is="currentComponent"
           :key="activeTabId"

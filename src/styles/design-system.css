@@ -84,11 +84,13 @@ html,
 body {
   margin: 0;
   padding: 0;
-  /* 工业级全球语言字体栈：
-     1. 西文 (macOS/Win)：-apple-system, Segoe UI (覆盖俄语、拉丁、希腊语)
-     2. 日文 (macOS/Win)：PingFang SC, Hiragino, Yu Gothic UI (防止回退到中文字体导致字形错误)
-     3. 中文：Microsoft YaHei, 微软雅黑
-     4. 韩文：Malgun Gothic
+  /* Global production font stack:
+     1. Latin (macOS/Win): -apple-system, Segoe UI (covers Cyrillic/Latin/Greek)
+     2. Japanese (macOS/Win): PingFang SC, Hiragino, Yu Gothic UI (avoids
+        falling back to CJK fonts that render the wrong glyphs)
+     3. Chinese: Microsoft YaHei, '微软雅黑' (the CJK name is required so Windows
+        resolves the Microsoft YaHei font for simplified Chinese)
+     4. Korean: Malgun Gothic
   */
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue',
@@ -103,57 +105,14 @@ body {
   overflow: hidden;
 }
 
-/* Dark theme styles - applied via class or system preference */
-@media (prefers-color-scheme: dark) {
-  :root:not(.theme-light) {
-    --color-bg-primary: #1c1c1e;
-    --color-bg-secondary: #2c2c2e;
-    --color-bg-tertiary: #3a3a3c;
-    --color-bg-elevated: #2c2c2e;
-    --color-bg-overlay: rgba(0, 0, 0, 0.6);
-    /* Acrylic menu surface (dark) */
-    --color-bg-menu: rgba(44, 44, 46, 0.82);
-
-    --color-border-primary: rgba(255, 255, 255, 0.15);
-    --color-border-secondary: rgba(255, 255, 255, 0.1);
-    --color-border-tertiary: rgba(255, 255, 255, 0.05);
-
-    --color-text-primary: #f5f5f7;
-    --color-text-secondary: #d1d1d6;
-    --color-text-tertiary: #98989d;
-    --color-text-placeholder: #6e6e73;
-
-    --color-interactive-hover: rgba(255, 255, 255, 0.1);
-    --color-interactive-active: rgba(255, 255, 255, 0.15);
-    --color-interactive-selected: rgba(10, 132, 255, 0.2);
-
-    /* macOS dark mode shadows - deeper for dark mode */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 5px rgba(0, 0, 0, 0.3);
-    --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
-    --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.7), 0 8px 28px rgba(0, 0, 0, 0.5);
-    --shadow-xl: 0 8px 28px rgba(0, 0, 0, 0.8), 0 16px 48px rgba(0, 0, 0, 0.6);
-    --shadow-2xl:
-      0 20px 52px rgba(0, 0, 0, 0.9), 0 36px 80px rgba(0, 0, 0, 0.7);
-    --shadow-3xl:
-      0 32px 72px rgba(0, 0, 0, 0.95), 0 48px 100px rgba(0, 0, 0, 0.8);
-    --shadow-float:
-      0 2px 8px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
-
-    --shadow-alpha: 0.45;
-
-    --focus-ring: 0 0 0 3px rgba(10, 132, 255, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(10, 132, 255, 0.4);
-
-    --color-primary: #0a84ff;
-    --color-primary-hover: #409cff;
-    --color-danger: #ff453a;
-
-    --color-macos-close: #ff5f57;
-    --color-macos-close-hover: #ff6b63;
-  }
-}
-
-/* Manual dark theme override */
+/* Dark theme palette.
+ *
+ * theme-manager always resolves the active mode to a `.theme-dark` or
+ * `.theme-light` class on <html> (both entry points call initialize()), so the
+ * dark variables live HERE in one place instead of being duplicated between an
+ * `@media (prefers-color-scheme: dark)` block and a `.theme-dark` block. The
+ * light palette is defined on `:root` above.
+ */
 :root.theme-dark {
   --color-bg-primary: #1c1c1e;
   --color-bg-secondary: #2c2c2e;
@@ -176,15 +135,17 @@ body {
   --color-interactive-active: rgba(255, 255, 255, 0.15);
   --color-interactive-selected: rgba(10, 132, 255, 0.2);
 
-  /* macOS dark mode shadows */
+  /* macOS dark mode shadows - deeper for dark mode */
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 5px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.6), 0 4px 16px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.7), 0 8px 28px rgba(0, 0, 0, 0.5);
   --shadow-xl: 0 8px 28px rgba(0, 0, 0, 0.8), 0 16px 48px rgba(0, 0, 0, 0.6);
-  --shadow-2xl: 0 20px 52px rgba(0, 0, 0, 0.9), 0 36px 80px rgba(0, 0, 0, 0.7);
+  --shadow-2xl:
+    0 20px 52px rgba(0, 0, 0, 0.9), 0 36px 80px rgba(0, 0, 0, 0.7);
   --shadow-3xl:
     0 32px 72px rgba(0, 0, 0, 0.95), 0 48px 100px rgba(0, 0, 0, 0.8);
-  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
+  --shadow-float:
+    0 2px 8px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.6);
 
   --shadow-alpha: 0.45;
 
@@ -205,8 +166,8 @@ body {
  * Blue is the baseline default (no override needed). These rules are placed
  * AFTER the light/dark mode blocks so they win on the primary/interactive/
  * focus vars only. Each palette provides light-mode values (inherited from
- * :root) plus dark-mode values for both auto (media query) and manual
- * (`.theme-dark`) dark modes.
+ * :root) plus dark-mode values via the `.theme-dark` selector, mirroring the
+ * base dark palette above (theme-manager always sets a theme class).
  */
 
 html[data-accent='graphite'] {
@@ -243,44 +204,6 @@ html[data-accent='orange'] {
   --color-interactive-selected: rgba(255, 149, 0, 0.14);
   --focus-ring: 0 0 0 3px rgba(255, 149, 0, 0.16);
   --focus-ring-intense: 0 0 0 4px rgba(255, 149, 0, 0.25);
-}
-
-@media (prefers-color-scheme: dark) {
-  html[data-accent='graphite']:not(.theme-light) {
-    --color-primary: #98989d;
-    --color-primary-hover: #b0b0b5;
-    --color-accent: #98989d;
-    --color-interactive-selected: rgba(152, 152, 157, 0.22);
-    --focus-ring: 0 0 0 3px rgba(152, 152, 157, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(152, 152, 157, 0.42);
-  }
-
-  html[data-accent='purple']:not(.theme-light) {
-    --color-primary: #bf5af2;
-    --color-primary-hover: #d18bff;
-    --color-accent: #bf5af2;
-    --color-interactive-selected: rgba(191, 90, 242, 0.22);
-    --focus-ring: 0 0 0 3px rgba(191, 90, 242, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(191, 90, 242, 0.42);
-  }
-
-  html[data-accent='green']:not(.theme-light) {
-    --color-primary: #30d158;
-    --color-primary-hover: #63e085;
-    --color-accent: #30d158;
-    --color-interactive-selected: rgba(48, 209, 88, 0.22);
-    --focus-ring: 0 0 0 3px rgba(48, 209, 88, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(48, 209, 88, 0.42);
-  }
-
-  html[data-accent='orange']:not(.theme-light) {
-    --color-primary: #ff9f0a;
-    --color-primary-hover: #ffb340;
-    --color-accent: #ff9f0a;
-    --color-interactive-selected: rgba(255, 159, 10, 0.22);
-    --focus-ring: 0 0 0 3px rgba(255, 159, 10, 0.3);
-    --focus-ring-intense: 0 0 0 4px rgba(255, 159, 10, 0.42);
-  }
 }
 
 html[data-accent='graphite'].theme-dark {

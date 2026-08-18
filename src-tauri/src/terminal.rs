@@ -1,4 +1,4 @@
-use crate::common::{OutputChunk, SessionId};
+use crate::common::{OutputBatchPolicy, OutputChunk, SessionId, flush_utf8};
 use portable_pty::{Child, CommandBuilder, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -29,6 +29,14 @@ pub enum TerminalError {
 
 const TERMINAL_BUFFER_SIZE: usize = 4096;
 
+/// Coalescing thresholds for local PTY output before it crosses the IPC
+/// boundary (mirrors the SSH I/O task). Without batching, sustained output
+/// (`yes`, `find /`, large logs) emits one Tauri event per OS read — at
+/// 4096-byte reads that can reach a thousand+ events/s, each with its own
+/// serialization + WebView dispatch cost.
+const LOCAL_BATCH_SIZE_THRESHOLD: usize = 1024;
+const LOCAL_BATCH_TIME_MS: u64 = 5;
+
 // ============================================================================
 // Data Structures
 // ============================================================================
@@ -58,6 +66,21 @@ impl TerminalManager {
         rows: u16,
     ) -> Result<(), TerminalError> {
         let channels_arc = Arc::clone(&self.channels);
+
+        // Re-connecting for a session that already has a live terminal would
+        // silently insert a second TerminalInfo, orphaning the previous child
+        // shell, PTY, listeners and tasks. Tear the old one down first.
+        {
+            let has_existing = self
+                .channels
+                .read()
+                .map_err(|e| TerminalError::LockPoisoned(e.to_string()))?
+                .contains_key(&session_id);
+            if has_existing {
+                log::info!("Replacing existing local terminal session {}", session_id.0);
+                let _ = self.disconnect_local(&session_id);
+            }
+        }
 
         let pty_system = native_pty_system();
         let pair = pty_system
@@ -116,6 +139,19 @@ impl TerminalManager {
 
         let output_handle = tokio::task::spawn_blocking(move || {
             let mut buffer = [0u8; TERMINAL_BUFFER_SIZE];
+            // Bytes accumulate here and are emitted as one event once the
+            // batch policy fires, instead of one event per read.
+            let mut pending_output = Vec::<u8>::with_capacity(TERMINAL_BUFFER_SIZE * 4);
+            // Incomplete UTF-8 tail from the previous flush, reattached on the
+            // next flush so a multi-byte char split across reads decodes
+            // intact.
+            let mut utf8_carry = Vec::<u8>::with_capacity(4);
+            let mut last_emit = std::time::Instant::now();
+            let batch_policy =
+                OutputBatchPolicy::new(LOCAL_BATCH_SIZE_THRESHOLD, LOCAL_BATCH_TIME_MS);
+            // True when the loop ended because the child exited (EOF / read
+            // error) rather than a user-initiated disconnect.
+            let mut child_exited = false;
 
             loop {
                 if stop_flag_reader.load(Ordering::SeqCst) {
@@ -123,22 +159,62 @@ impl TerminalManager {
                 }
 
                 match reader_clone.read(&mut buffer) {
-                    Ok(0) => break,
+                    Ok(0) => {
+                        child_exited = true;
+                        break;
+                    }
                     Ok(n) => {
-                        let seq = next_seq_reader.fetch_add(1, Ordering::SeqCst);
-                        let output = String::from_utf8_lossy(&buffer[..n]).into_owned();
-                        let chunk = OutputChunk::new(seq, output);
+                        pending_output.extend_from_slice(&buffer[..n]);
+                        if batch_policy.should_flush(
+                            pending_output.len() + utf8_carry.len(),
+                            last_emit.elapsed(),
+                            false,
+                        ) {
+                            let seq = next_seq_reader.fetch_add(1, Ordering::SeqCst);
+                            let output = flush_utf8(&mut pending_output, &mut utf8_carry);
+                            let chunk = OutputChunk::new(seq, output);
 
-                        if let Some(h) = &app_handle_clone {
-                            let _ = h.emit(&format!("ssh-output-{}", session_id_clone.0), &chunk);
+                            if let Some(h) = &app_handle_clone {
+                                let _ = h.emit(
+                                    &format!("ssh-output-{}", session_id_clone.0),
+                                    &chunk,
+                                );
+                            }
+                            last_emit = std::time::Instant::now();
                         }
                     }
                     Err(e) => {
                         log::debug!("[local PTY] read ended: {}", e);
+                        child_exited = true;
                         break;
                     }
                 }
             }
+
+            // Flush anything left so the final partial output (e.g. the last
+            // prompt echo before close) is not lost to the batching window.
+            if !pending_output.is_empty() || !utf8_carry.is_empty() {
+                let seq = next_seq_reader.fetch_add(1, Ordering::SeqCst);
+                let output = flush_utf8(&mut pending_output, &mut utf8_carry);
+                let chunk = OutputChunk::new(seq, output);
+                if let Some(h) = &app_handle_clone {
+                    let _ = h.emit(&format!("ssh-output-{}", session_id_clone.0), &chunk);
+                }
+            }
+
+            // Propagate a natural shell exit to the UI (mirrors how the SSH
+            // manager emits `ssh-disconnected-{id}`) so a finished child shell
+            // does not leave the frontend in a stale "connected" state.
+            if child_exited
+                && !stop_flag_reader.load(Ordering::SeqCst)
+                && let Some(h) = &app_handle_clone
+            {
+                let _ = h.emit(
+                    &format!("ssh-disconnected-{}", session_id_clone.0),
+                    serde_json::json!({ "reason": "shell exited" }),
+                );
+            }
+
             stop_flag_reader.store(true, Ordering::SeqCst);
         });
 
@@ -249,9 +325,11 @@ impl TerminalManager {
     }
 
     pub fn disconnect_local(&self, session_id: &SessionId) -> Result<(), TerminalError> {
-        if let Ok(mut channels) = self.channels.write()
-            && let Some(mut info) = channels.remove(session_id)
-        {
+        let mut channels = self
+            .channels
+            .write()
+            .map_err(|e| TerminalError::LockPoisoned(e.to_string()))?;
+        if let Some(mut info) = channels.remove(session_id) {
             info.stop_flag.store(true, Ordering::SeqCst);
 
             if let Some(handle) = info.output_handle.take() {

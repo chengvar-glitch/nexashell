@@ -105,21 +105,6 @@ const handleTabClose = async (id: string) => {
   await tabManagement.closeTab(id);
 };
 
-const handleAddTab = async () => {
-  const currentCounter = tabCounter++;
-  const newTab = {
-    id: uuidv4(),
-    label: `${t('settings.newLocalTab')} ${currentCounter}`,
-    type: 'terminal' as const,
-    closable: true,
-    panes: [{ id: uuidv4(), type: 'terminal' as const }],
-  };
-  tabManagement.addTab(newTab);
-
-  await nextTick();
-  scrollToActiveTab();
-};
-
 const toggleDropdown = (event: MouseEvent) => {
   event.stopPropagation();
   if (!isDropdownOpen.value) {
@@ -192,10 +177,6 @@ const handleNewSSHTab = async () => {
   }
 };
 
-const handleNewTabShortcut = () => {
-  handleAddTab();
-};
-
 // Saved connections dropdown (shown by the "+" button)
 const translatedSavedConnections = computed<Array<{
   key: string;
@@ -250,11 +231,24 @@ const translatedSavedConnections = computed<Array<{
   return items;
 });
 
+// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
+// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
+// failure. The space→'T' + 'Z' normalization keeps the parse valid in WebKit
+// (WKWebView), where the raw space-separated value fails to parse.
+const parseDbTimestamp = (value?: string | null): number => {
+  if (!value) return 0;
+  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
+    ? value
+    : value.replace(' ', 'T') + 'Z';
+  const parsed = new Date(iso);
+  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+};
+
 const sortSavedConnections = (list: SavedSession[]): SavedSession[] => {
   const byRecent = (a: SavedSession, b: SavedSession): number => {
-    const timeOf = (value?: string | null): number =>
-      value ? new Date(value.replace(' ', 'T') + 'Z').getTime() : 0;
-    return timeOf(b.updated_at) - timeOf(a.updated_at);
+    return (
+      parseDbTimestamp(b.updated_at) - parseDbTimestamp(a.updated_at)
+    );
   };
   return [...list].sort(byRecent);
 };
@@ -274,9 +268,14 @@ const toggleSavedConnections = async (event: MouseEvent) => {
       savedConnections.value.length === 0 ||
       now - savedConnectionsLoadedAt > SAVED_CONNECTIONS_CACHE_TTL
     ) {
-      const list = await sessionApi.listSessions();
-      savedConnections.value = sortSavedConnections(list);
-      savedConnectionsLoadedAt = now;
+      try {
+        const list = await sessionApi.listSessions();
+        savedConnections.value = sortSavedConnections(list);
+        savedConnectionsLoadedAt = now;
+      } catch (err) {
+        logger.warn('Failed to load saved connections', err);
+        // Keep whatever is cached on a transient failure.
+      }
     }
   }
   savedConnectionsOpen.value = !savedConnectionsOpen.value;
@@ -337,7 +336,6 @@ const scrollToActiveTab = () => {
 
 onMounted(() => {
   eventBus.on(APP_EVENTS.CLOSE_TAB, handleCloseTabShortcut);
-  eventBus.on(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.on(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.on(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   eventBus.on(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
@@ -347,7 +345,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   eventBus.off(APP_EVENTS.CLOSE_TAB, handleCloseTabShortcut);
-  eventBus.off(APP_EVENTS.NEW_TAB, handleNewTabShortcut);
   eventBus.off(APP_EVENTS.NEW_LOCAL_TAB, handleNewLocalTab);
   eventBus.off(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   eventBus.off(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
@@ -395,11 +392,11 @@ onBeforeUnmount(() => {
             <Plus :size="14" />
           </button>
         </ShortcutHint>
-        <ShortcutHint text="More options" position="bottom">
+        <ShortcutHint :text="t('common.moreOptions')" position="bottom">
           <button
             class="action-btn dropdown-btn"
             :class="{ 'is-active': isDropdownOpen }"
-            aria-label="More options"
+            :aria-label="t('common.moreOptions')"
             @click="toggleDropdown"
           >
           <ChevronDown :size="14" />
@@ -409,8 +406,11 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="right-actions" data-tauri-drag-region>
-      <ShortcutHint text="Window Actions" position="bottom">
-        <button class="action-btn more-btn" aria-label="More">
+      <ShortcutHint :text="t('common.windowActions')" position="bottom">
+        <button
+          class="action-btn more-btn"
+          :aria-label="t('common.windowActions')"
+        >
           <MoreHorizontal :size="16" />
         </button>
       </ShortcutHint>

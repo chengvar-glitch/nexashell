@@ -106,4 +106,6 @@ pnpm tauri build
 
 - Package manager is pnpm (>=9).
 - Rust deps in `src-tauri/Cargo.toml`, JS deps in root `package.json`.
+- `edition = "2024"` requires **Rust >= 1.85** (stable since Feb 2025). CI
+  pins `dtolnay/rust-toolchain@stable`; local builds need a 2025+ toolchain.
 - VSCode extensions: Vue (Volar), Tauri, rust-analyzer.
