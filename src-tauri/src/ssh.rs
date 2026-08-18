@@ -72,7 +72,7 @@ const INITIAL_BATCH_SIZE_THRESHOLD: usize = 200;
 const INITIAL_BATCH_TIME_MS: u64 = 100;
 const INITIAL_BUFFERING_TIMEOUT_MS: u64 = 2000;
 const NORMAL_BATCH_SIZE_THRESHOLD: usize = 1024;
-const NORMAL_BATCH_TIME_MS: u64 = 20;
+const NORMAL_BATCH_TIME_MS: u64 = 5;
 
 // ============================================================================
 // Data Structures
@@ -485,13 +485,15 @@ impl SshManager {
             .map_err(|e| SshError::ChannelError(format!("Failed to start shell: {}", e)))?;
 
         // Keep the main session in BLOCKING mode, but bound each blocking call
-        // to 100ms via libssh2's own timeout. Blocking mode is the officially
+        // to 20ms via libssh2's own timeout. Blocking mode is the officially
         // recommended usage for ssh2-rs and avoids libssh2 1.11.1's known
         // non-blocking bug (send_existing fails to set OUTBOUND on EAGAIN,
         // which corrupts the transport and causes spurious "transport read"
-        // disconnects while typing). The 100ms ceiling lets the I/O loop drain
-        // user input with sub-100ms latency instead of stalling forever.
-        main_sess.set_timeout(100);
+        // disconnects while typing). The 20ms ceiling keeps idle-wakeup
+        // granularity — and therefore input-drain + echo-flush latency — at
+        // ~20ms instead of 100ms. An idle loop waking every 20ms costs
+        // negligible CPU because the blocking read parks in the OS poll.
+        main_sess.set_timeout(20);
 
         // Helper session (blocking, for SFTP/monitoring/probing)
         let helper_tcp = open_tcp()?;
@@ -587,9 +589,10 @@ impl SshManager {
             let mut pending_output = String::new();
             let mut last_emit = std::time::Instant::now();
             let mut seen_first_output = false;
+            let mut urgent_flush = false;
             let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
-            // Blocking reads are bounded to 100ms by the session timeout, so an
+            // Blocking reads are bounded to 20ms by the session timeout, so an
             // idle loop naturally paces itself (no busy-poll backoff needed).
 
             loop {
@@ -598,10 +601,14 @@ impl SshManager {
                 }
 
                 // Process user input FIRST for low-latency IME response.
-                // The main session is blocking with a 100ms timeout, so a full
+                // The main session is blocking with a 20ms timeout, so a full
                 // channel/TCP buffer surfaces as WouldBlock/TimedOut — retry
                 // with backoff instead of dropping the remainder of the input.
                 while let Ok(input) = input_receiver.try_recv() {
+                    // Any input written now should be echoed back to the screen
+                    // as soon as the next read yields data — skip the batch
+                    // timer for the immediate echo (interactive typing).
+                    urgent_flush = true;
                     let mut sess_lock = sess_arc.lock().await;
                     let mut ch = channel_arc.lock().await;
                     let bytes = input.as_bytes();
@@ -706,6 +713,7 @@ impl SshManager {
                 if (!pending_output.is_empty() && in_initial)
                     || (!pending_output.is_empty()
                         && (pending_output.len() > size_threshold
+                            || urgent_flush
                             || last_emit.elapsed() > Duration::from_millis(time_threshold_ms)))
                 {
                     let seq = next_seq.fetch_add(1, Ordering::SeqCst);
@@ -725,6 +733,7 @@ impl SshManager {
 
                     last_emit = std::time::Instant::now();
                     seen_first_output = true;
+                    urgent_flush = false;
                 }
             }
         })
