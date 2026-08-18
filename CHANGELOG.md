@@ -7,6 +7,7 @@
 
 ### Fixed
 
+- **安全：移除导入功能中泄露的真实服务器凭据**：导入对话框的示例文案（placeholder）及 `import_export.rs` 的文档/单测曾使用真实的服务器 IP 与明文密码（`8.166.133.7` / `fofo0898.`），该内容随 v1.20.0+ 版本进入公开仓库与发布包。已全部替换为虚构占位数据（`192.168.1.100` / `your-password`）。**注意：该密码已公开在 git 历史与旧版发布包中，必须立即更换服务器密码**
 - **GitHub Release 的 macOS DMG 下载后提示「已损坏，无法打开」**：CI 产物未签名，arm64 应用被打上隔离属性后被 Gatekeeper 判定为损坏（Windows 无此机制故正常）。修复：
   - `tauri.conf.json` 默认配置 `signingIdentity: "-"`（ad-hoc 签名），产物带有效签名，「已损坏」降级为可绕过的「无法验证开发者」（右键打开 / 系统设置→隐私与安全性→仍要打开）
   - `release.yml` 新增 Apple 证书导入与公证凭据透传：仓库配置 `APPLE_CERTIFICATE` / `APPLE_SIGNING_IDENTITY` / `APPLE_ID` 等 secrets 后，CI 自动执行 Developer ID 签名 + 公证，全新安装无任何提示；未配置时自动回退 ad-hoc，不会构建失败

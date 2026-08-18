@@ -56,7 +56,7 @@ export default {
     subtitle:
       '兼容 XTerminal 导出/导入的文本格式：支持「名称/地址/端口/用户/密码」标签块、host=... 键值对、以及 host|user|pass|title 竖线格式。',
     placeholder:
-      '在此粘贴 XTerminal 导出的内容，例如：\n名称: fofo\n地址: 8.166.133.7\n端口: 22\n用户: root\n密码: fofo0898.',
+      '在此粘贴 XTerminal 导出的内容，例如：\n名称: 我的服务器\n地址: 192.168.1.100\n端口: 22\n用户: root\n密码: your-password',
     confirm: '确认导入',
     importing: '导入中…',
     success: '成功导入 {imported} 个会话',

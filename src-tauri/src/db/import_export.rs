@@ -270,11 +270,11 @@ pub fn import_sessions(json_data: String, password: String) -> Result<(), String
 // XTerminal's export ("复制到剪贴板" / server list) uses one labeled block per
 // session, e.g.:
 //
-//   名称: fofo
-//   地址: 8.166.133.7
+//   名称: 我的服务器
+//   地址: 192.168.1.100
 //   端口: 22
 //   用户: root
-//   密码: fofo0898.
+//   密码: your-password
 //
 // Its documented *import* text modes are also accepted for convenience:
 //   - key=value lines: host=... port=... user=... pass=... title=... auth=...
@@ -712,16 +712,16 @@ mod tests {
 
     #[test]
     fn parses_single_session_from_user_sample() {
-        let text = "名称: fofo\n地址: 8.166.133.7\n端口: 22\n用户: root\n密码: fofo0898.\n";
+        let text = "名称: 我的服务器\n地址: 192.168.1.100\n端口: 22\n用户: root\n密码: your-password\n";
         let (sessions, errors) = parse_xterminal_text(text);
         assert!(errors.is_empty(), "unexpected errors: {:?}", errors);
         assert_eq!(sessions.len(), 1);
         let s = &sessions[0];
-        assert_eq!(s.server_name, "fofo");
-        assert_eq!(s.addr, "8.166.133.7");
+        assert_eq!(s.server_name, "我的服务器");
+        assert_eq!(s.addr, "192.168.1.100");
         assert_eq!(s.port, 22);
         assert_eq!(s.username, "root");
-        assert_eq!(s.password.as_deref(), Some("fofo0898."));
+        assert_eq!(s.password.as_deref(), Some("your-password"));
         assert_eq!(s.private_key_path, None);
     }
 
