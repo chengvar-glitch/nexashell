@@ -29,6 +29,11 @@ jobs:
           - platform: windows-latest
             args: --bundles nsis
     runs-on: ${{ matrix.platform }}
+    env:
+      # 是否配置了 Apple Developer 签名凭据（未配置时自动回退为 ad-hoc 签名）
+      # 注意：不能直接把空字符串的 secrets 塞给 tauri —— 空 APPLE_ID/APPLE_PASSWORD/
+      # APPLE_TEAM_ID 会被 tauri 当作"已配置公证凭据"导致公证失败、构建报错
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
     steps:
       - uses: actions/checkout@v5
 
@@ -57,6 +62,32 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      # macOS 签名 + 公证（官方流程，见 https://v2.tauri.app/distribute/sign/macos/）
+      # 仅在配置了 APPLE_* secrets 时执行；未配置则使用 tauri.conf.json 的 ad-hoc 签名
+      - name: Import Apple Developer Certificate
+        if: matrix.platform == 'macos-latest' && env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p build build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p build build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k build build.keychain
+          security find-identity -v -p codesigning build.keychain
+          # 导出给 tauri 读取：签名身份（覆盖 tauri.conf.json 的 ad-hoc）+ 公证凭据
+          echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "APPLE_ID=$APPLE_ID" >> "$GITHUB_ENV"
+          echo "APPLE_PASSWORD=$APPLE_PASSWORD" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
+
       - name: Build and upload to GitHub Release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -72,7 +103,14 @@ jobs:
             - **macOS**：`NexaShell_${{ github.ref_name }}_aarch64.dmg`（Apple Silicon）
             - **Windows**：`NexaShell_${{ github.ref_name }}_x64-setup.exe`
 
-            > 未经 Apple/微软签名，首次打开可能提示"无法验证开发者"，右键选择"打开"即可。
+            ### macOS 打开说明
+
+            - **已签名/公证**（仓库配置了 `APPLE_*` secrets）：可直接双击打开，无任何提示。
+            - **ad-hoc 签名**（未配置 secrets）：首次打开若提示"无法验证开发者"，右键应用 →「打开」→ 再点「打开」，或在 系统设置 → 隐私与安全性 中点「仍要打开」。
+            - 若提示「已损坏，无法打开」，在终端执行一次（移除隔离属性）：
+              ```bash
+              xattr -cr "/Applications/NexaShell.app"
+              ```
           releaseDraft: false # 全自动发布：构建完成后直接公开，无需手动 Publish
           prerelease: false
           args: ${{ matrix.args }}

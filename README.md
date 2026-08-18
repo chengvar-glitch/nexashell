@@ -255,4 +255,12 @@ Backend commands are registered in `src-tauri/src/lib.rs` (`~70` invoke handlers
 
 ---
 
+## 🔐 macOS Release Signing
+
+GitHub Release 的 DMG 默认使用 **ad-hoc 签名**（`signingIdentity: "-"`），下载后若提示「无法验证开发者」，右键「打开」或在 系统设置 → 隐私与安全性 中「仍要打开」即可；若提示「已损坏」，执行 `xattr -cr "/Applications/NexaShell.app"` 一次。
+
+配置 Apple Developer 凭据（`APPLE_CERTIFICATE` / `APPLE_SIGNING_IDENTITY` / `APPLE_ID` 等 secrets）后，CI 自动执行 **Developer ID 签名 + 公证**，全新安装无任何提示。完整步骤见 [docs/macos-signing.md](docs/macos-signing.md)。
+
+---
+
 **NexaShell** is licensed under the [MIT License](LICENSE).
