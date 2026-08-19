@@ -15,6 +15,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { ref, type Ref } from 'vue';
 import { createLogger } from '@/core/utils/logger';
+import { i18n } from '@/core/i18n';
 import type { SftpEntry } from '@/core/types';
 
 const logger = createLogger('SFTP');
@@ -134,7 +135,9 @@ export function useSftp(sessionId: Ref<string>) {
     const target = normalizePath(path);
     const sid = sessionId.value;
     if (!sid) {
-      error.value = 'Not connected';
+      // Global i18n instance (not useI18n) so the composable keeps working
+      // outside a component setup context (e.g. unit tests).
+      error.value = i18n.global.t('sftp.notConnected');
       return false;
     }
     const seq = ++requestSeq;

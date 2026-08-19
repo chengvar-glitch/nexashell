@@ -13,8 +13,8 @@ use std::io::Write;
 // first-time connections cannot race on a read-modify-write of the file.
 // Held for the duration of verify_host_key only (it is called inside
 // spawn_blocking), never across any await or network operation.
-static KNOWN_HOSTS_LOCK: once_cell::sync::Lazy<std::sync::Mutex<()>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
+static KNOWN_HOSTS_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
 
 fn known_hosts_path() -> Result<std::path::PathBuf, String> {
     let data_dir = dirs::data_dir()

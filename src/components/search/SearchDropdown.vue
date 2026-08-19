@@ -86,6 +86,7 @@ import { sessionApi } from '@/features/session';
 import { APP_EVENTS } from '@/core/constants';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils/event-bus';
+import { parseDbTimestamp } from '@/core/utils/time-utils';
 import { openFileManagerWindow } from '@/features/window';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
@@ -173,21 +174,6 @@ const getActiveSshSessionId = (): string | null => {
   const panes = activeTab.panes || [];
   const paneId = tabManagement.activePaneId.value || panes[0]?.id;
   return paneId || null;
-};
-
-// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
-// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
-// failure. The space→'T' + 'Z' normalization keeps the parse valid in WebKit
-// (WKWebView), where the raw space-separated value fails to parse. Mirrors the
-// same helper used by NexaShellHome and AppTabs so recency sorting is
-// consistent everywhere.
-const parseDbTimestamp = (value?: string | null): number => {
-  if (!value) return 0;
-  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
-    ? value
-    : value.replace(' ', 'T') + 'Z';
-  const parsed = new Date(iso);
-  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
 };
 
 const updateDropdownPosition = () => {

@@ -12,6 +12,7 @@ import { ref, readonly, type Ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { createLogger } from '@/core/utils/logger';
+import { i18n } from '@/core/i18n';
 import type { UploadTask, SftpEntry } from '@/core/types';
 
 const logger = createLogger('TRANSFER_QUEUE');
@@ -33,6 +34,10 @@ interface UploadProgressPayload {
  * to release the listeners.
  */
 export function useTransferQueue(sessionId: Ref<string>) {
+  // Global i18n instance (not useI18n) so the composable keeps working
+  // outside a component setup context (e.g. unit tests).
+  const t = (key: string, params?: Record<string, unknown>): string =>
+    params ? i18n.global.t(key, params) : i18n.global.t(key);
   const tasks = ref<UploadTask[]>([]);
 
   let unlistenUpload: UnlistenFn | null = null;
@@ -112,6 +117,16 @@ export function useTransferQueue(sessionId: Ref<string>) {
   const setupListeners = async () => {
     const sid = sessionId.value;
     if (!sid) return;
+    // Idempotent: tear down any previous registration first so a second call
+    // cannot orphan the old listeners.
+    if (unlistenUpload) {
+      unlistenUpload();
+      unlistenUpload = null;
+    }
+    if (unlistenDownload) {
+      unlistenDownload();
+      unlistenDownload = null;
+    }
     unlistenUpload = await listen<UploadProgressPayload>(
       `ssh-upload-progress-${sid}`,
       event => applyProgress(event.payload, 'upload')
@@ -125,14 +140,14 @@ export function useTransferQueue(sessionId: Ref<string>) {
   const startUpload = async (localPath: string, remotePath: string, fileName: string): Promise<string | null> => {
     const sid = sessionId.value;
     if (!sid) return null;
-    const taskId = `transfer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const taskId = `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     addTask({
       id: taskId,
       fileName,
       direction: 'upload',
       status: 'uploading',
       progress: 0,
-      message: 'Preparing upload...',
+      message: t('upload.preparingUpload'),
       remotePath,
     });
     try {
@@ -145,7 +160,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
       return taskId;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      updateTask(taskId, { status: 'error', progress: 0, message: `Failed: ${msg}`, error: msg });
+      updateTask(taskId, { status: 'error', progress: 0, message: t('upload.failed', { msg }), error: msg });
       logger.error('Failed to start upload', err);
       return null;
     }
@@ -157,14 +172,14 @@ export function useTransferQueue(sessionId: Ref<string>) {
   ): Promise<void> => {
     const sid = sessionId.value;
     if (!sid) return;
-    const taskId = `transfer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const taskId = `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
     addTask({
       id: taskId,
       fileName: entry.name,
       direction: 'download',
       status: 'downloading',
       progress: 5,
-      message: 'Preparing download...',
+      message: t('upload.preparingDownload'),
       remotePath: entry.path,
       localPath,
       fileSize: entry.size,
@@ -178,7 +193,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      updateTask(taskId, { status: 'error', message: `Failed: ${msg}`, error: msg });
+      updateTask(taskId, { status: 'error', message: t('upload.failed', { msg }), error: msg });
       logger.error('Failed to start download', err);
     }
   };
@@ -189,17 +204,17 @@ export function useTransferQueue(sessionId: Ref<string>) {
     // Pausing only makes sense for uploads; the backend has no
     // pause_download, so report the constraint instead of a silent no-op.
     if (task.direction !== 'upload') {
-      updateTask(taskId, { message: 'Pause is only supported for uploads' });
+      updateTask(taskId, { message: t('upload.pauseUploadsOnly') });
       logger.warn('pause() called for a non-upload task', { taskId, direction: task.direction });
       return;
     }
-    updateTask(taskId, { status: 'paused', message: 'Pausing...' });
+    updateTask(taskId, { status: 'paused', message: t('upload.pausing') });
     try {
       await invoke('pause_upload', { sessionId: sessionId.value, taskId });
-      updateTask(taskId, { message: 'Paused' });
+      updateTask(taskId, { message: t('upload.paused') });
     } catch (err) {
       logger.error('Failed to pause upload', err);
-      updateTask(taskId, { message: 'Failed to pause' });
+      updateTask(taskId, { message: t('upload.failedToPause') });
     }
   };
 
@@ -209,16 +224,16 @@ export function useTransferQueue(sessionId: Ref<string>) {
     // Resume must reflect the task's actual direction instead of hard-coding
     // 'uploading'; downloads cannot be resumed via resume_upload.
     if (task.direction !== 'upload') {
-      updateTask(taskId, { message: 'Resume is only supported for uploads' });
+      updateTask(taskId, { message: t('upload.resumeUploadsOnly') });
       logger.warn('resume() called for a non-upload task', { taskId, direction: task.direction });
       return;
     }
-    updateTask(taskId, { status: 'uploading', message: 'Resuming...' });
+    updateTask(taskId, { status: 'uploading', message: t('upload.resuming') });
     try {
       await invoke('resume_upload', { sessionId: sessionId.value, taskId });
     } catch (err) {
       logger.error('Failed to resume upload', err);
-      updateTask(taskId, { message: 'Failed to resume' });
+      updateTask(taskId, { message: t('upload.failedToResume') });
     }
   };
 

@@ -13,6 +13,7 @@ use std::time::Duration;
 use tauri::{Emitter, Listener};
 use thiserror::Error;
 use tokio::sync::mpsc;
+use zeroize::Zeroize;
 
 mod hostkey;
 use hostkey::verify_host_key;
@@ -143,6 +144,17 @@ pub(crate) struct SshAuth {
     password: String,
     private_key_path: Option<String>,
     key_passphrase: Option<String>,
+}
+
+impl Drop for SshAuth {
+    fn drop(&mut self) {
+        // Wipe plaintext secrets from the heap when the credentials are
+        // released — mirrors SensitiveData in encryption.rs.
+        self.password.zeroize();
+        if let Some(p) = self.key_passphrase.as_mut() {
+            p.zeroize();
+        }
+    }
 }
 
 /// Per-task control shared between the active upload loop and the pause /

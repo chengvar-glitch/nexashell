@@ -199,7 +199,7 @@ let inputChain: Promise<void> = Promise.resolve();
 const uploadTasks = shallowRef<UploadTask[]>([]);
 
 const addUploadTask = (fileName: string, direction: 'upload' | 'download' = 'upload'): string => {
-  const id = `transfer-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const id = `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
   // Replace the array reference so the dashboard's `props.uploadTasks`
   // reference changes and the task list re-renders (in-place unshift keeps
   // the same reference, so the list never updates).
@@ -884,7 +884,7 @@ const setupDisconnectListener = async (sessionId: string): Promise<void> => {
     logger.warn('SSH session disconnected remotely', { sessionId });
 
     if (terminal) {
-      terminal.write('\r\n\x1b[31m[connection lost]\x1b[0m\r\n');
+      terminal.write(`\r\n\x1b[31m[${t('ssh.connectionLost')}]\x1b[0m\r\n`);
     }
 
     // Surface the drop to the user with a retry path instead of leaving the

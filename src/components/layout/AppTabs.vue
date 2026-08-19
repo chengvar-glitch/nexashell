@@ -23,6 +23,7 @@ import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
+import { parseDbTimestamp } from '@/core/utils/time-utils';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
 import { sessionApi } from '@/features/session';
@@ -230,19 +231,6 @@ const translatedSavedConnections = computed<Array<{
   }
   return items;
 });
-
-// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
-// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
-// failure. The space→'T' + 'Z' normalization keeps the parse valid in WebKit
-// (WKWebView), where the raw space-separated value fails to parse.
-const parseDbTimestamp = (value?: string | null): number => {
-  if (!value) return 0;
-  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
-    ? value
-    : value.replace(' ', 'T') + 'Z';
-  const parsed = new Date(iso);
-  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-};
 
 const sortSavedConnections = (list: SavedSession[]): SavedSession[] => {
   const byRecent = (a: SavedSession, b: SavedSession): number => {

@@ -201,6 +201,12 @@ const refreshTriggeredTasks = new Set<string>();
 watch(
   transferQueue.tasks.value,
   () => {
+    const liveIds = new Set(transferQueue.tasks.value.map(task => task.id));
+    // Prune markers for tasks already removed from the queue (cleared or
+    // expired), keeping the set bounded by the live task list.
+    for (const id of refreshTriggeredTasks) {
+      if (!liveIds.has(id)) refreshTriggeredTasks.delete(id);
+    }
     for (const task of transferQueue.tasks.value) {
       if (
         task.direction === 'upload' &&

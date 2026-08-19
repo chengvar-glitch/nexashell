@@ -156,6 +156,7 @@ interface TabLike {
 interface TabManagementLike {
   tabs: { value: TabLike[] };
   activeTabId: { value: string };
+  activePaneId: { value: string };
 }
 const tabManagement = (inject(TAB_MANAGEMENT_KEY) as TabManagementLike | null) ?? null;
 const sessionStore = useSessionStore();
@@ -182,9 +183,10 @@ function activeSshSessionId(): string | null {
   if (panes.length === 0) return null;
   // The active pane, falling back to the first pane. SSH pane ids equal the
   // runtime session ids (see App.vue connect flow).
-  const pane = panes[panes.length - 1];
-  const session = sessionStore.getSession(pane.id);
-  return session && session.type === 'ssh' ? pane.id : null;
+  const paneId = tabManagement.activePaneId.value || panes[0]?.id;
+  if (!paneId) return null;
+  const session = sessionStore.getSession(paneId);
+  return session && session.type === 'ssh' ? paneId : null;
 }
 
 async function refreshActiveHint() {

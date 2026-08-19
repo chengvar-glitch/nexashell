@@ -10,6 +10,8 @@ export default {
     closeTab: 'Close tab',
     confirmTitle: 'Confirm',
     confirm: 'Confirm',
+    group: 'Group',
+    tag: 'Tag',
   },
   tabs: {
     savedConnections: 'Saved connections',
@@ -260,9 +262,13 @@ export default {
     editPathHint: 'Edit the target path above if needed',
     preparing: 'Preparing...',
     preparingUpload: 'Preparing upload...',
+    preparingDownload: 'Preparing download...',
     startFailed: 'Failed to start',
     prepareFailed: 'Failed to prepare',
     closeDialog: 'Close',
+    failed: 'Failed: {msg}',
+    pauseUploadsOnly: 'Pause is only supported for uploads',
+    resumeUploadsOnly: 'Resume is only supported for uploads',
   },
   download: {
     preparing: 'Preparing download...',
@@ -296,6 +302,7 @@ export default {
     errorNameEmpty: 'Name cannot be empty',
     errorNameDot: 'Name cannot be "." or ".."',
     errorNameSeparator: 'Name cannot contain "/" or "\\"',
+    notConnected: 'Not connected',
   },
   connection: {
     connecting: 'Connecting...',

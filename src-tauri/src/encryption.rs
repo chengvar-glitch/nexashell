@@ -3,11 +3,11 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
 };
 use base64::{Engine as _, engine::general_purpose};
-use once_cell::sync::OnceCell;
 use pbkdf2::pbkdf2_hmac;
 use rand::{RngCore, thread_rng};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use std::sync::OnceLock;
 use zeroize::Zeroize;
 
 const SERVICE_NAME: &str = "NexaShell";
@@ -51,8 +51,11 @@ impl EncryptionManager {
     /// unavailable we fall back to a 0600-permissioned file inside the app data
     /// directory.
     fn get_master_key() -> Result<&'static [u8; KEY_LEN], String> {
-        static MASTER_KEY: OnceCell<[u8; KEY_LEN]> = OnceCell::new();
-        MASTER_KEY.get_or_try_init(|| {
+        // `OnceLock<Result<..>>` keeps the single-init semantics of the old
+        // `get_or_try_init` (init runs exactly once, failures are cached too)
+        // on a stable API for all supported toolchains.
+        static MASTER_KEY: OnceLock<Result<[u8; KEY_LEN], String>> = OnceLock::new();
+        match MASTER_KEY.get_or_init(|| {
             // Try OS keychain first
             match keyring::Entry::new(SERVICE_NAME, ACCOUNT_NAME) {
                 Ok(entry) => match entry.get_password() {
@@ -99,7 +102,10 @@ impl EncryptionManager {
             // Fall back to file storage (the keychain was empty/unavailable,
             // so it is safe to create a fresh key).
             Self::load_or_create_master_key_file()
-        })
+        }) {
+            Ok(key) => Ok(key),
+            Err(e) => Err(e.clone()),
+        }
     }
 
     /// Load an EXISTING file-based master key without ever creating a new one.

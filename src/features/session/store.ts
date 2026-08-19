@@ -271,6 +271,12 @@ export const useSessionStore = defineStore('session', () => {
     await disconnectSession(sessionId);
   };
 
+  /**
+   * Disconnect every given session. Unlike `disconnectSession`, this does not
+   * throw per-session — failures are collected and re-thrown as an aggregate
+   * once all sessions have been attempted, so callers can decide whether to
+   * keep UI state (e.g. a tab) when some connections could not be torn down.
+   */
   const disconnectSessions = async (ids: string[]): Promise<void> => {
     const errors: Error[] = [];
     for (const id of ids) {
@@ -285,6 +291,9 @@ export const useSessionStore = defineStore('session', () => {
     }
     if (errors.length > 0) {
       logger.warn('Some sessions failed to disconnect', { count: errors.length });
+      throw new Error(
+        `Failed to disconnect ${errors.length} session(s): ${errors[0]?.message ?? 'unknown'}`
+      );
     }
   };
 

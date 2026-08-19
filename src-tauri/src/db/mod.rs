@@ -1,15 +1,14 @@
-use once_cell::sync::Lazy;
 use rusqlite::types::ToSql;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use uuid::Uuid;
 
 pub mod import_export;
 
 /// Platform-specific app data directory path for the SQLite database.
-static DB_PATH: Lazy<Result<PathBuf, String>> = Lazy::new(|| {
+static DB_PATH: LazyLock<Result<PathBuf, String>> = LazyLock::new(|| {
     let data_dir = dirs::data_dir()
         .ok_or_else(|| "Failed to determine app data directory".to_string())?
         .join("NexaShell");
@@ -22,7 +21,7 @@ fn db_path() -> Result<&'static PathBuf, String> {
 }
 
 /// Singleton connection shared across all DB operations.
-static DB: Lazy<Mutex<Option<Connection>>> = Lazy::new(|| Mutex::new(None));
+static DB: LazyLock<Mutex<Option<Connection>>> = LazyLock::new(|| Mutex::new(None));
 
 pub(super) fn with_db<F, T>(f: F) -> Result<T, String>
 where

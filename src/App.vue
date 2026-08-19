@@ -33,10 +33,11 @@ interface SSHConnectionFormData {
   port: number | null;
   username: string;
   // Optional: omitted (undefined) in edit mode when the user left it blank so
-  // the backend keeps the stored ciphertext ("unchanged").
-  password?: string;
+  // the backend keeps the stored ciphertext ("unchanged"); `null` means the
+  // user explicitly asked to clear the stored value.
+  password?: string | null;
   private_key_path: string;
-  key_passphrase?: string;
+  key_passphrase?: string | null;
   save_session: boolean;
   groups?: string[];
   tags?: string[];
@@ -457,10 +458,6 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   if (connectionTimerInterval) clearInterval(connectionTimerInterval);
   connectionTimerInterval = setInterval(() => {
     connectionTime.value++;
-    // If it takes more than 30 seconds, it's probably timed out (handled by backend too)
-    if (connectionTime.value >= 30 && connectionStatus.value === 'connecting') {
-      // The backend has its own 30s timeout, but we can reflect it here if needed
-    }
   }, 1000);
 
   connectionProgress.value = 0;

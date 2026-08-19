@@ -3,6 +3,22 @@
  */
 
 /**
+ * Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
+ * UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
+ * failure. The space→'T' + 'Z' normalization keeps the parse valid in WebKit
+ * (WKWebView), where the raw space-separated value fails to parse.
+ */
+export function parseDbTimestamp(value?: string | null): number {
+  if (!value) return 0;
+  const iso =
+    value.includes('T') || value.includes('Z') || value.includes('+')
+      ? value
+      : value.replace(' ', 'T') + 'Z';
+  const parsed = new Date(iso);
+  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+}
+
+/**
  * Signature for an injectable translation function. When provided,
  * `formatRelativeTime` produces localized strings through it instead of the
  * hardcoded English fallbacks.

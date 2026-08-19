@@ -63,7 +63,7 @@
           <div class="add-actions">
             <button
               class="action-btn tiny confirm"
-              title="Confirm"
+              :title="t('common.confirm')"
               @mousedown.prevent
               @click="handleAddGroup"
             >
@@ -71,7 +71,7 @@
             </button>
             <button
               class="action-btn tiny cancel"
-              title="Cancel"
+              :title="t('common.cancel')"
               @mousedown.prevent
               @click="handleGroupInputBlur"
             >
@@ -155,7 +155,7 @@
           <div class="add-actions">
             <button
               class="action-btn tiny confirm"
-              title="Confirm"
+              :title="t('common.confirm')"
               @mousedown.prevent
               @click="handleAddTag"
             >
@@ -163,7 +163,7 @@
             </button>
             <button
               class="action-btn tiny cancel"
-              title="Cancel"
+              :title="t('common.cancel')"
               @mousedown.prevent
               @click="handleTagInputBlur"
             >
@@ -508,7 +508,7 @@ import ImportXTerminalDialog from '@/components/home/ImportXTerminalDialog.vue';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
-import { formatRelativeTime } from '@/core/utils/time-utils';
+import { formatRelativeTime, parseDbTimestamp } from '@/core/utils/time-utils';
 import { createLogger } from '@/core/utils/logger';
 import { sessionApi } from '@/features/session';
 import type { SavedSessionDisplay } from '@/features/session/types';
@@ -610,27 +610,15 @@ const viewTitle = computed(() => {
       return t('home.recent');
     case 'group':
       return (
-        groups.value.find(g => g.id === selectedGroupId.value)?.name || 'Group'
+        groups.value.find(g => g.id === selectedGroupId.value)?.name ||
+        t('common.group')
       );
     case 'tag':
-      return tags.value.find(t => t.id === selectedTagId.value)?.name || 'Tag';
+      return tags.value.find(t => t.id === selectedTagId.value)?.name || t('common.tag');
     default:
       return t('home.allSessions');
   }
 });
-
-// Parse a SQLite CURRENT_TIMESTAMP ("YYYY-MM-DD HH:mm:ss", space-separated
-// UTC) — or any Date/ISO string — into a numeric epoch, returning 0 on
-// failure. Normalizing the space to 'T' + 'Z' keeps the parse valid in
-// WebKit (WKWebView) where an un-normalized space-separated value fails.
-const parseDbTimestamp = (value?: string | null): number => {
-  if (!value) return 0;
-  const iso = value.includes('T') || value.includes('Z') || value.includes('+')
-    ? value
-    : value.replace(' ', 'T') + 'Z';
-  const parsed = new Date(iso);
-  return isNaN(parsed.getTime()) ? 0 : parsed.getTime();
-};
 
 const filteredSessions = computed(() => {
   let result = [...sessions.value];

@@ -10,6 +10,8 @@ export default {
     closeTab: '关闭标签',
     confirmTitle: '确认',
     confirm: '确认',
+    group: '分组',
+    tag: '标签',
   },
   tabs: {
     savedConnections: '已保存的连接',
@@ -259,9 +261,13 @@ export default {
     editPathHint: '如需要可编辑上方目标路径',
     preparing: '正在准备…',
     preparingUpload: '正在准备上传…',
+    preparingDownload: '正在准备下载…',
     startFailed: '启动失败',
     prepareFailed: '准备失败',
     closeDialog: '关闭',
+    failed: '失败：{msg}',
+    pauseUploadsOnly: '仅上传任务支持暂停',
+    resumeUploadsOnly: '仅上传任务支持继续',
   },
   download: {
     preparing: '正在准备下载...',
@@ -295,6 +301,7 @@ export default {
     errorNameEmpty: '名称不能为空',
     errorNameDot: '名称不能为 "." 或 ".."',
     errorNameSeparator: '名称不能包含 "/" 或 "\\"',
+    notConnected: '未连接',
   },
   connection: {
     connecting: '连接中...',

@@ -293,11 +293,11 @@ interface SSHConnectionFormData {
   addr: string;
   port: number | null;
   username: string;
-  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode. */
-  password?: string;
+  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode; `null` means "clear stored credentials". */
+  password?: string | null;
   private_key_path: string;
-  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode. */
-  key_passphrase?: string;
+  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode; `null` means "clear stored credentials". */
+  key_passphrase?: string | null;
   save_session: boolean;
   groups?: string[];
   tags?: string[];
@@ -347,36 +347,39 @@ const formData = reactive<SSHConnectionFormData>({
 
 const validationErrors = reactive<ValidationErrors>({});
 
-// Watch for initialData updates (useful for background credential loading or re-editing)
-watch(
-  () => props.initialData,
-  newData => {
-    if (newData) {
-      if (newData.id !== undefined) formData.id = newData.id;
-      // Update basic fields if they are different
-      if (newData.server_name !== undefined)
-        formData.server_name = newData.server_name;
-      if (newData.addr !== undefined) formData.addr = newData.addr;
-      if (newData.port !== undefined) formData.port = newData.port;
-      if (newData.username !== undefined) formData.username = newData.username;
-      if (newData.private_key_path !== undefined)
-        formData.private_key_path = newData.private_key_path;
-      if (newData.save_session !== undefined)
-        formData.save_session = newData.save_session;
-      if (newData.groups !== undefined) formData.groups = [...newData.groups];
-      if (newData.tags !== undefined) formData.tags = [...newData.tags];
+// Watch for initialData updates (useful for background credential loading or re-editing).
+  // The parent always replaces the whole object (never mutates it in place),
+  // so a shallow reference watch suffices — no deep:true needed.
+  watch(
+    () => props.initialData,
+    newData => {
+      if (newData) {
+        if (newData.id !== undefined) formData.id = newData.id;
+        // Update basic fields if they are different
+        if (newData.server_name !== undefined)
+          formData.server_name = newData.server_name;
+        if (newData.addr !== undefined) formData.addr = newData.addr;
+        if (newData.port !== undefined) formData.port = newData.port;
+        if (newData.username !== undefined)
+          formData.username = newData.username;
+        if (newData.private_key_path !== undefined)
+          formData.private_key_path = newData.private_key_path;
+        if (newData.save_session !== undefined)
+          formData.save_session = newData.save_session;
+        if (newData.groups !== undefined) formData.groups = [...newData.groups];
+        if (newData.tags !== undefined) formData.tags = [...newData.tags];
 
-      // Update sensitive fields if provided
-      if (newData.password) {
-        formData.password = newData.password;
+        // Update sensitive fields if provided
+        if (newData.password) {
+          formData.password = newData.password;
+        }
+        if (newData.key_passphrase) {
+          formData.key_passphrase = newData.key_passphrase;
+        }
       }
-      if (newData.key_passphrase) {
-        formData.key_passphrase = newData.key_passphrase;
-      }
-    }
-  },
-  { deep: true, immediate: true }
-);
+    },
+    { immediate: true }
+  );
 
 const { t } = useI18n({ useScope: 'global' });
 
@@ -520,12 +523,12 @@ const buildSubmitData = (): SSHConnectionFormData => {
   // untouched; only an explicit "clear" sends nulls to clear them.
   if (isEditMode.value) {
     if (clearStoredCredentials.value) {
-      data.password = null as unknown as string;
+      data.password = null;
     } else if (!data.password) {
       delete data.password;
     }
     if (clearStoredCredentials.value) {
-      data.key_passphrase = null as unknown as string;
+      data.key_passphrase = null;
     } else if (!data.key_passphrase) {
       delete data.key_passphrase;
     }

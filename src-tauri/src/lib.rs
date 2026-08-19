@@ -64,7 +64,6 @@ pub fn run() {
                             ns_window
                                 .setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
                             ns_window.setMovableByWindowBackground_(NO);
-                            ns_window.setHasShadow_(NO);
                             ns_window.setHasShadow_(YES);
                         }
                     }

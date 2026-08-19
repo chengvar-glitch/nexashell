@@ -31,10 +31,14 @@ const SplitRenderer = defineComponent({
     const localSizes = ref<number[]>(
       props.node.kind === 'split' ? [...props.node.sizes] : []
     );
+    // Watch the sizes array BY REFERENCE (not a copy): the tree only ever
+    // replaces `node.sizes` with a fresh array (drag commit, split/collapse),
+    // so a plain reference watch fires exactly when a new layout lands instead
+    // of on every reactive re-render.
     watch(
-      () => (props.node.kind === 'split' ? [...props.node.sizes] : null),
+      () => (props.node.kind === 'split' ? props.node.sizes : null),
       sizes => {
-        if (sizes) localSizes.value = sizes;
+        if (sizes) localSizes.value = [...sizes];
       }
     );
 

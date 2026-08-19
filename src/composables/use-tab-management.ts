@@ -208,6 +208,12 @@ export function useTabManagement() {
       await sessionStore.disconnectSession(paneId);
     } catch (error) {
       logger.error('Error disconnecting pane session', { paneId, error });
+      // Keep the pane and its session record in place: removing the pane
+      // while the backend still holds a live connection would orphan it with
+      // no way to close it. The re-entrancy guard is reset so the user can
+      // retry the close.
+      closingPaneIds.delete(paneId);
+      return;
     }
 
     const paneIndex = tab.panes.findIndex(p => p.id === paneId);
@@ -291,15 +297,24 @@ export function useTabManagement() {
         const sessionStore = useSessionStore();
         const paneIds = (tabToClose.panes || []).map(p => p.id);
         logger.debug(`Starting cleanup for tab: ${id}, panes: ${paneIds.join(',')}`);
+        let disconnected = false;
         sessionStore
           .disconnectSessions(paneIds)
+          .then(() => {
+            disconnected = true;
+          })
           .catch(error => {
             logger.error(`Error disconnecting sessions for tab: ${id}`, error);
+            // Keep the tab open: removing it while the backend still holds
+            // live connections would orphan them with no way to close them.
+            // Retrying the close re-runs the disconnect.
           })
           .finally(() => {
-            const tabIndex = tabs.value.findIndex(tab => tab.id === id);
-            if (tabIndex !== -1) {
-              tabs.value.splice(tabIndex, 1);
+            if (disconnected) {
+              const tabIndex = tabs.value.findIndex(tab => tab.id === id);
+              if (tabIndex !== -1) {
+                tabs.value.splice(tabIndex, 1);
+              }
             }
             finish();
           });
