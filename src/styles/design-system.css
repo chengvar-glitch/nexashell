@@ -34,22 +34,27 @@
   --transition-base: 0.25s var(--ease-spring-out);
   --transition-slow: 0.35s var(--ease-emphasized);
 
-  /* macOS light mode backgrounds */
-  --color-bg-primary: #ffffff;
-  --color-bg-secondary: #f7f7f7;
-  --color-bg-tertiary: #ebebeb;
+  /* macOS light two-pane palette — chrome (title bar, tab bar, sidebar) sits
+   * on --color-bg-secondary: #e1dfe1 for a subtle layer contrast, while the
+   * content area uses the softer --color-bg-primary: #f5f5f5. Elevated
+   * surfaces (--color-bg-elevated: #ffffff) stay pure white so cards and
+   * panels visibly pop instead of the whole UI reading as one flat sheet. */
+  --color-bg-primary: #f5f5f5;
+  --color-bg-secondary: #e1dfe1;
+  --color-bg-tertiary: #d8d6d8;
   --color-bg-elevated: #ffffff;
   --color-bg-overlay: rgba(0, 0, 0, 0.3);
   /* Acrylic menu surface (light) */
   --color-bg-menu: rgba(255, 255, 255, 0.78);
 
-  /* macOS style borders - more refined */
-  --color-border-primary: rgba(0, 0, 0, 0.1);
-  --color-border-secondary: rgba(0, 0, 0, 0.06);
-  --color-border-tertiary: rgba(0, 0, 0, 0.04);
+  /* macOS style borders - natural pane division color in light mode */
+  --color-border-primary: #c0bfc0;
+  --color-border-secondary: rgba(0, 0, 0, 0.08);
+  --color-border-tertiary: rgba(0, 0, 0, 0.06);
 
-  /* macOS text colors */
-  --color-text-primary: #1d1d1f;
+  /* macOS text colors - rgba(0,0,0,0.85) instead of pure black to reduce
+   * contrast harshness */
+  --color-text-primary: rgba(0, 0, 0, 0.85);
   --color-text-secondary: #6e6e73;
   --color-text-tertiary: #86868b;
   --color-text-placeholder: #a1a1a6;
@@ -57,7 +62,7 @@
   /* macOS interactive states - more refined and subtle */
   --color-interactive-hover: rgba(0, 0, 0, 0.05);
   --color-interactive-active: rgba(0, 0, 0, 0.1);
-  --color-interactive-selected: rgba(0, 122, 255, 0.1);
+  --color-interactive-selected: rgba(0, 122, 255, 0.2);
 
   --color-primary: #007aff;
   --color-primary-hover: #0051d5;
@@ -114,19 +119,22 @@ body {
  * light palette is defined on `:root` above.
  */
 :root.theme-dark {
-  --color-bg-primary: #1c1c1e;
-  --color-bg-secondary: #2c2c2e;
+  /* macOS dark two-pane palette — chrome (title bar, tab bar, sidebar) uses
+   * --color-bg-secondary: #181818, darker than the content area
+   * (#1e1e1e) for immersion; neither is pure black to reduce eye strain. */
+  --color-bg-primary: #1e1e1e;
+  --color-bg-secondary: #181818;
   --color-bg-tertiary: #3a3a3c;
   --color-bg-elevated: #2c2c2e;
   --color-bg-overlay: rgba(0, 0, 0, 0.6);
   /* Acrylic menu surface (dark) */
   --color-bg-menu: rgba(44, 44, 46, 0.82);
 
-  --color-border-primary: rgba(255, 255, 255, 0.15);
-  --color-border-secondary: rgba(255, 255, 255, 0.1);
+  --color-border-primary: rgba(255, 255, 255, 0.1);
+  --color-border-secondary: rgba(255, 255, 255, 0.08);
   --color-border-tertiary: rgba(255, 255, 255, 0.05);
 
-  --color-text-primary: #f5f5f7;
+  --color-text-primary: rgba(255, 255, 255, 0.85);
   --color-text-secondary: #d1d1d6;
   --color-text-tertiary: #98989d;
   --color-text-placeholder: #6e6e73;

@@ -80,17 +80,15 @@ const handleConnect = (data: Record<string, unknown>) => {
 
 <template>
   <div class="app-content">
-    <Transition name="tab-switch" mode="out-in">
-      <KeepAlive :max="16" :include="openComponentNames">
-        <component
-          :is="currentComponent"
-          :key="activeTabId"
-          :tab="currentActiveTab"
-          @create-tab="handleCreateTab"
-          @connect="handleConnect"
-        />
-      </KeepAlive>
-    </Transition>
+    <KeepAlive :max="16" :include="openComponentNames">
+      <component
+        :is="currentComponent"
+        :key="activeTabId"
+        :tab="currentActiveTab"
+        @create-tab="handleCreateTab"
+        @connect="handleConnect"
+      />
+    </KeepAlive>
   </div>
 </template>
 
@@ -101,21 +99,5 @@ const handleConnect = (data: Record<string, unknown>) => {
   background-color: var(--color-bg-secondary);
   position: relative;
   border: none;
-}
-
-/* Tab switch transition */
-.tab-switch-enter-active {
-  transition: opacity 0.18s var(--ease-snappy), transform 0.18s var(--ease-snappy);
-}
-.tab-switch-leave-active {
-  transition: opacity 0.12s var(--ease-snappy), transform 0.12s var(--ease-snappy);
-}
-.tab-switch-enter-from {
-  opacity: 0;
-  transform: translateY(4px);
-}
-.tab-switch-leave-to {
-  opacity: 0;
-  transform: translateY(-4px) scale(0.98);
 }
 </style>

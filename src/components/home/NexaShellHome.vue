@@ -262,6 +262,42 @@
         </div>
       </header>
 
+      <!-- Batch action bar: appears when sessions are selected -->
+      <div v-if="selectedSessionIds.size > 0" class="batch-bar">
+        <span class="batch-count">
+          {{ t('home.batchSelected', { count: selectedSessionIds.size }) }}
+        </span>
+        <div class="batch-actions">
+          <button class="batch-btn" @click="handleBatchFavorite">
+            <Star
+              :size="14"
+              :fill="allSelectedAreFavorites ? 'currentColor' : 'none'"
+            />
+            {{
+              allSelectedAreFavorites
+                ? t('home.batchUnfavorite')
+                : t('home.batchFavorite')
+            }}
+          </button>
+          <button class="batch-btn" @click="toggleBatchGroupMenu($event)">
+            <Folder :size="14" />
+            {{ t('home.batchAddGroup') }}
+          </button>
+          <button class="batch-btn" @click="toggleBatchTagMenu($event)">
+            <Hash :size="14" />
+            {{ t('home.batchAddTag') }}
+          </button>
+          <button class="batch-btn danger" @click="handleBatchDelete">
+            <Trash2 :size="14" />
+            {{ t('common.delete') }}
+          </button>
+          <button class="batch-btn" @click="clearSelection">
+            <X :size="14" />
+            {{ t('home.clearSelection') }}
+          </button>
+        </div>
+      </div>
+
       <!-- Session Grid/Table Area -->
       <section class="session-manager">
         <!-- Empty/loading states, distinct from each other: loading (initial
@@ -316,7 +352,6 @@
                 :key="session.id"
                 class="session-row"
                 :class="{ selected: isSessionSelected(session.id) }"
-                @click="handleConnect(session)"
                 @dblclick="handleQuickConnect(session)"
                 @contextmenu.prevent="handleSessionContextMenu($event, session)"
               >
@@ -394,43 +429,13 @@
                           : '-'
                       }}
                     </span>
-                    <div class="action-buttons">
-                      <button
-                        class="icon-action-btn connect"
-                        :title="$t('common.connect')"
-                        @click.stop="handleQuickConnect(session)"
-                      >
-                        <Terminal :size="14" />
-                      </button>
-                      <button
-                        class="icon-action-btn copy"
-                        :title="$t('home.copy') || 'Copy'"
-                        @click.stop="handleCopySession(session)"
-                      >
-                        <Copy :size="14" />
-                      </button>
-                      <button
-                        class="icon-action-btn edit"
-                        :title="$t('common.edit') || 'Edit'"
-                        @click.stop="handleEditSession(session)"
-                      >
-                        <Pencil :size="14" />
-                      </button>
-                      <button
-                        class="icon-action-btn delete"
-                        :title="$t('common.delete')"
-                        @click.stop="handleDeleteSession(session)"
-                      >
-                        <Trash2 :size="14" />
-                      </button>
-                      <button
-                        class="icon-action-btn more"
-                        :title="$t('common.more') || 'More'"
-                        @click.stop="handleSessionContextMenu($event, session)"
-                      >
-                        <MoreVertical :size="14" />
-                      </button>
-                    </div>
+                    <button
+                      class="icon-action-btn more"
+                      :title="t('common.more') || 'More'"
+                      @click.stop="handleSessionContextMenu($event, session)"
+                    >
+                      <MoreVertical :size="16" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -448,6 +453,22 @@
       :y="contextMenuY"
       @update:visible="contextMenuVisible = $event"
       @select="handleContextMenuSelect"
+    />
+
+    <!-- Batch group/tag submenus -->
+    <DropdownMenu
+      v-model:visible="batchGroupMenuOpen"
+      :items="batchGroupItems"
+      :x="batchGroupX"
+      :y="batchGroupY"
+      @select="handleBatchGroupSelect"
+    />
+    <DropdownMenu
+      v-model:visible="batchTagMenuOpen"
+      :items="batchTagItems"
+      :x="batchTagX"
+      :y="batchTagY"
+      @select="handleBatchTagSelect"
     />
 
     <!-- Confirm Delete Dialog -->
@@ -723,6 +744,7 @@ const contextMenuItems = ref<
       key: string;
       label: string;
       danger?: boolean;
+      disabled?: boolean;
       icon?: LucideIcon;
     }>;
     active?: boolean;
@@ -735,6 +757,7 @@ const showConfirmDialog = ref(false);
 const confirmDialogTitle = ref('');
 const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
+let pendingDeleteSessionIds: string[] | null = null;
 let pendingDeleteGroupId: string | null = null;
 let pendingDeleteTagId: string | null = null;
 
@@ -788,6 +811,17 @@ const toggleSessionSelection = (sessionId: string) => {
   }
   selectedSessionIds.value = next;
 };
+
+// Session objects behind the current selection, used by batch operations.
+const selectedSessions = computed(() =>
+  sessions.value.filter(s => selectedSessionIds.value.has(s.id))
+);
+
+const allSelectedAreFavorites = computed(
+  () =>
+    selectedSessions.value.length > 0 &&
+    selectedSessions.value.every(s => s.is_favorite)
+);
 
 const isSessionSelected = (sessionId: string) => {
   return selectedSessionIds.value.has(sessionId);
@@ -878,13 +912,6 @@ onUnmounted(() => {
 
 const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
-};
-
-const handleConnect = (session: SavedSessionDisplay) => {
-  // Single click selects/toggles the row; double click actually connects
-  // (see handleQuickConnect). This matches the row's "single click to select,
-  // double click to connect" affordance instead of being a no-op.
-  toggleSessionSelection(session.id);
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
@@ -1088,6 +1115,12 @@ const handleSessionContextMenu = (
 
   contextMenuItems.value = [
     {
+      key: 'connect',
+      label: t('common.connect') || 'Connect',
+      icon: Terminal,
+    },
+    { key: 'divider', label: '', divider: true },
+    {
       key: 'copy',
       label: t('home.copy') || 'Copy',
       icon: Copy,
@@ -1098,21 +1131,39 @@ const handleSessionContextMenu = (
       key: 'join-group',
       label: t('home.groups') || 'Groups',
       icon: Folder,
-      children: groups.value.map(g => ({
-        key: `group:${g.id}`,
-        label: g.name,
-        active: session.group_ids?.includes(g.id),
-      })),
+      children:
+        groups.value.length === 0
+          ? [
+              {
+                key: '__empty__',
+                label: t('connection.noGroupsAvailable'),
+                disabled: true,
+              },
+            ]
+          : groups.value.map(g => ({
+              key: `group:${g.id}`,
+              label: g.name,
+              active: session.group_ids?.includes(g.id),
+            })),
     },
     {
       key: 'join-tag',
       label: t('home.tags') || 'Tags',
       icon: Hash,
-      children: tags.value.map(tag => ({
-        key: `tag:${tag.id}`,
-        label: tag.name,
-        active: session.tag_ids?.includes(tag.id),
-      })),
+      children:
+        tags.value.length === 0
+          ? [
+              {
+                key: '__empty__',
+                label: t('connection.noTagsAvailable'),
+                disabled: true,
+              },
+            ]
+          : tags.value.map(tag => ({
+              key: `tag:${tag.id}`,
+              label: tag.name,
+              active: session.tag_ids?.includes(tag.id),
+            })),
     },
     { key: 'divider', label: '', divider: true },
     {
@@ -1184,6 +1235,9 @@ const handleContextMenuSelect = async (key: string) => {
   }
 
   switch (key) {
+    case 'connect':
+      await handleQuickConnect(selectedSession.value);
+      break;
     case 'edit':
       handleEditSession(selectedSession.value);
       break;
@@ -1201,6 +1255,157 @@ const handleContextMenuSelect = async (key: string) => {
 const handleEditSession = (session: SavedSessionDisplay) => {
   // Emit event to trigger edit session in App.vue
   eventBus.emit(APP_EVENTS.EDIT_SESSION, session);
+};
+
+// --- Batch operations (checkbox selection) ---
+const batchGroupMenuOpen = ref(false);
+const batchGroupX = ref(0);
+const batchGroupY = ref(0);
+const batchTagMenuOpen = ref(false);
+const batchTagX = ref(0);
+const batchTagY = ref(0);
+
+// Position a batch submenu right below the clicked button.
+const positionBatchMenu = (
+  event: MouseEvent,
+  width: number
+): { x: number; y: number } => {
+  const target = event.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  return {
+    x: Math.min(rect.left, window.innerWidth - width),
+    y: rect.bottom + 4,
+  };
+};
+
+const toggleBatchGroupMenu = (event: MouseEvent) => {
+  event.stopPropagation();
+  if (!batchGroupMenuOpen.value) {
+    const { x, y } = positionBatchMenu(event, 200);
+    batchGroupX.value = x;
+    batchGroupY.value = y;
+    batchTagMenuOpen.value = false;
+  }
+  batchGroupMenuOpen.value = !batchGroupMenuOpen.value;
+};
+
+const toggleBatchTagMenu = (event: MouseEvent) => {
+  event.stopPropagation();
+  if (!batchTagMenuOpen.value) {
+    const { x, y } = positionBatchMenu(event, 200);
+    batchTagX.value = x;
+    batchTagY.value = y;
+    batchGroupMenuOpen.value = false;
+  }
+  batchTagMenuOpen.value = !batchTagMenuOpen.value;
+};
+
+// A group/tag is "active" in the batch menu when EVERY selected session has it.
+const batchGroupItems = computed(() =>
+  groups.value.length === 0
+    ? [
+        {
+          key: '__empty__',
+          label: t('connection.noGroupsAvailable'),
+          disabled: true,
+        },
+      ]
+    : groups.value.map(g => ({
+        key: `group:${g.id}`,
+        label: g.name,
+        active:
+          selectedSessions.value.length > 0 &&
+          selectedSessions.value.every(s => s.group_ids?.includes(g.id)),
+      }))
+);
+
+const batchTagItems = computed(() =>
+  tags.value.length === 0
+    ? [
+        {
+          key: '__empty__',
+          label: t('connection.noTagsAvailable'),
+          disabled: true,
+        },
+      ]
+    : tags.value.map(tag => ({
+        key: `tag:${tag.id}`,
+        label: tag.name,
+        active:
+          selectedSessions.value.length > 0 &&
+          selectedSessions.value.every(s => s.tag_ids?.includes(tag.id)),
+      }))
+);
+
+const clearSelection = () => {
+  selectedSessionIds.value = new Set();
+};
+
+const handleBatchGroupSelect = async (key: string) => {
+  batchGroupMenuOpen.value = false;
+  if (key === 'divider' || key === '__empty__') return;
+  const groupId = key.split(':')[1];
+  const ids = [...selectedSessionIds.value];
+  const allHave = selectedSessions.value.every(s =>
+    s.group_ids?.includes(groupId)
+  );
+  try {
+    for (const id of ids) {
+      await invoke(
+        allHave ? 'unlink_session_group' : 'link_session_group',
+        { sessionId: id, groupId }
+      );
+    }
+    await loadSessions();
+  } catch (e) {
+    logger.error('Failed to batch update groups', e);
+  }
+};
+
+const handleBatchTagSelect = async (key: string) => {
+  batchTagMenuOpen.value = false;
+  if (key === 'divider' || key === '__empty__') return;
+  const tagId = key.split(':')[1];
+  const ids = [...selectedSessionIds.value];
+  const allHave = selectedSessions.value.every(s =>
+    s.tag_ids?.includes(tagId)
+  );
+  try {
+    for (const id of ids) {
+      await invoke(allHave ? 'unlink_session_tag' : 'link_session_tag', {
+        sessionId: id,
+        tagId,
+      });
+    }
+    await loadSessions();
+  } catch (e) {
+    logger.error('Failed to batch update tags', e);
+  }
+};
+
+const handleBatchFavorite = async () => {
+  const newStatus = !allSelectedAreFavorites.value;
+  try {
+    for (const s of selectedSessions.value) {
+      await sessionApi.toggleFavorite(s.id, newStatus);
+      s.is_favorite = newStatus;
+    }
+    logger.info('Batch toggled favorite', {
+      count: selectedSessions.value.length,
+      isFavorite: newStatus,
+    });
+  } catch (e) {
+    logger.error('Failed to batch toggle favorite', e);
+  }
+};
+
+const handleBatchDelete = () => {
+  pendingDeleteSessionIds = [...selectedSessionIds.value];
+  confirmDialogTitle.value = t('common.delete');
+  confirmDialogMessage.value = t('home.deleteSessionsConfirm', {
+    count: pendingDeleteSessionIds.length,
+  });
+  showConfirmDialog.value = true;
 };
 
 const handleDeleteSession = (session: SavedSessionDisplay) => {
@@ -1254,7 +1459,23 @@ const onConfirmDelete = async () => {
     return;
   }
 
+  if (pendingDeleteSessionIds) {
+    const ids = pendingDeleteSessionIds;
+    pendingDeleteSessionIds = null;
+    try {
+      for (const id of ids) {
+        await invoke('delete_session', { id });
+      }
+      selectedSessionIds.value = new Set();
+      await loadSessions();
+    } catch (error) {
+      logger.error('Failed to batch delete sessions', error);
+    }
+    return;
+  }
+
   if (!pendingDeleteSession) return;
+
   const session = pendingDeleteSession;
   pendingDeleteSession = null;
 
@@ -1271,6 +1492,7 @@ const onConfirmDelete = async () => {
 const onCancelDelete = () => {
   showConfirmDialog.value = false;
   pendingDeleteSession = null;
+  pendingDeleteSessionIds = null;
   pendingDeleteGroupId = null;
   pendingDeleteTagId = null;
 };
@@ -1658,6 +1880,60 @@ const onCancelDelete = () => {
   border-color: var(--color-border-secondary);
 }
 
+/* Batch action bar (appears when sessions are selected) */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 0 24px 12px 24px;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-secondary);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+
+.batch-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.batch-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.batch-btn:hover {
+  background: var(--color-interactive-hover);
+  color: var(--color-text-primary);
+}
+
+.batch-btn.danger:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
 .action-area {
   display: flex;
   align-items: center;
@@ -1841,7 +2117,7 @@ const onCancelDelete = () => {
 }
 
 .col-last-connect {
-  width: 120px;
+  width: 140px;
   text-align: right;
 }
 
@@ -1967,58 +2243,25 @@ const onCancelDelete = () => {
   color: var(--color-text-tertiary);
   font-weight: 500;
   white-space: nowrap;
-  transition: opacity 0.1s ease;
-}
-
-.session-row:hover .timestamp {
-  opacity: 0;
-}
-
-.action-buttons {
-  position: absolute;
-  right: 0;
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transform: translateX(10px);
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  pointer-events: none;
-}
-
-.session-row:hover .action-buttons {
-  opacity: 1;
-  transform: translateX(0);
-  pointer-events: auto;
 }
 
 .icon-action-btn {
   background: transparent;
   border: none;
-  color: var(--color-text-secondary);
-  width: 32px;
-  height: 32px;
+  color: var(--color-text-tertiary);
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: all var(--transition-fast);
 }
 
 .icon-action-btn:hover {
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
-}
-
-.icon-action-btn.connect:hover,
-.icon-action-btn.copy:hover {
-  color: var(--color-primary);
-  background: var(--color-interactive-hover);
-}
-
-.icon-action-btn.delete:hover {
-  color: #f87171;
-  background: rgba(248, 113, 113, 0.1);
 }
 
 .mini-tag {

@@ -117,7 +117,7 @@ const handleItemClick = (item: MenuItem) => {
 };
 
 const handleMouseEnterItem = (item: MenuItem, event: MouseEvent) => {
-  if (item.children) {
+  if (item.children && item.children.length > 0) {
     activeSubMenu.value = item.key;
 
     // Determine submenu direction
@@ -261,15 +261,19 @@ onUnmounted(() => {
                   item.shortcut
                 }}</span>
                 <ChevronRight
-                  v-if="item.children"
+                  v-if="item.children && item.children.length > 0"
                   class="submenu-chevron"
                   :size="14"
                 />
               </div>
 
-              <!-- Submenu -->
+              <!-- Submenu (only rendered when it has items) -->
               <div
-                v-if="item.children && activeSubMenu === item.key"
+                v-if="
+                  item.children &&
+                  item.children.length > 0 &&
+                  activeSubMenu === item.key
+                "
                 class="submenu panel"
                 :class="{
                   'submenu-left': submenuDirections[item.key] === 'left',

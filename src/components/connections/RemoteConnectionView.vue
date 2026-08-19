@@ -2022,7 +2022,7 @@ const initialize = async (): Promise<void> => {
   border: none;
   border-radius: var(--radius-sm, 4px);
   background: var(--color-accent, #facc15);
-  color: var(--color-bg-primary, #000);
+  color: #ffffff;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -2218,8 +2218,7 @@ const initialize = async (): Promise<void> => {
 
 .upload-confirm-footer .btn-primary {
   background-color: var(--color-accent);
-  color: var(--color-bg-primary);
-  border-color: var(--color-accent);
+  color: #ffffff;
 }
 
 .upload-confirm-footer .btn-primary:hover {

@@ -17,10 +17,11 @@
         "width": 1366,
         "height": 768,
         "center": true,
+        "visible": false,
         "decorations": true,
         "titleBarStyle": "Overlay",
         "transparent": false,
-        "backgroundColor": "#1c1c1e",
+        "backgroundColor": "#1e1e1e",
         "resizable": true,
         "fullscreen": false
       }

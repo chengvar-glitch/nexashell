@@ -328,7 +328,7 @@ const handleClose = () => {
   width: 140px;
   height: 140px;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.98);
+  background: var(--color-bg-elevated);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16);
   transform: scale(0.85);
   animation: success-pop 260ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
