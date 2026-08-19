@@ -56,10 +56,10 @@ pub fn run() {
 
                         // Hide the title-bar text — keeps `titleBarStyle: Overlay`
                         // (traffic-light buttons still float over content) but
-                        // discards the title text chrome. Window is opaque
-                        // (backgroundColor from tauri.conf.json) so the dark UI
-                        // extends cleanly into every pixel — no white edge from
-                        // transparent-window regions.
+                        // discards the title text chrome. The window is
+                        // transparent so the vibrancy material (applied below)
+                        // blurs whatever sits behind the window, and the
+                        // translucent chrome surfaces let it show through.
                         unsafe {
                             ns_window
                                 .setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
@@ -75,6 +75,41 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.set_decorations(false);
                     let _ = window.center();
+                }
+            }
+
+            // Liquid glass chrome: blur the desktop behind the window so the
+            // translucent chrome surfaces (title bar, tab bar, sidebar) get a
+            // native acrylic/vibrancy effect. Each platform call fails cleanly
+            // when unsupported, so the app still runs with opaque fallbacks.
+            #[cfg(target_os = "macos")]
+            {
+                use window_vibrancy::{
+                    apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState,
+                };
+
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = apply_vibrancy(
+                        &window,
+                        NSVisualEffectMaterial::UnderWindowBackground,
+                        Some(NSVisualEffectState::Active),
+                        None,
+                    );
+                }
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                use window_vibrancy::{apply_acrylic, apply_blur, apply_mica};
+
+                if let Some(window) = app.get_webview_window("main") {
+                    // Mica (Windows 11) has the best resize/drag performance;
+                    // fall back to acrylic (Windows 10), then to blur.
+                    if apply_mica(&window, None).is_err()
+                        && apply_acrylic(&window, None).is_err()
+                    {
+                        let _ = apply_blur(&window, Some((30, 30, 30, 150)));
+                    }
                 }
             }
 

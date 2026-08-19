@@ -307,7 +307,9 @@ const handleMaximize = async () => {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: stretch;
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-glass);
+  backdrop-filter: var(--blur-medium);
+  -webkit-backdrop-filter: var(--blur-medium);
   position: relative;
   top: 0;
   z-index: 100;

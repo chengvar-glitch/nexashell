@@ -443,7 +443,9 @@ onBeforeUnmount(() => {
 .app-tabs {
   display: flex;
   align-items: center;
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-glass);
+  backdrop-filter: var(--blur-medium);
+  -webkit-backdrop-filter: var(--blur-medium);
   padding: 0 4px;
   height: 36px;
   overflow: hidden;

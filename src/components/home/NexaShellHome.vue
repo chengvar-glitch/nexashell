@@ -1509,7 +1509,9 @@ const onCancelDelete = () => {
 /* Sidebar Styles */
 .home-sidebar {
   width: 220px;
-  background: var(--color-bg-secondary);
+  background: var(--color-glass);
+  backdrop-filter: var(--blur-medium);
+  -webkit-backdrop-filter: var(--blur-medium);
   border-right: 1px solid var(--color-border-primary);
   display: flex;
   flex-direction: column;

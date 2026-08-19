@@ -20,8 +20,7 @@
         "visible": false,
         "decorations": true,
         "titleBarStyle": "Overlay",
-        "transparent": false,
-        "backgroundColor": "#1e1e1e",
+        "transparent": true,
         "resizable": true,
         "fullscreen": false
       }
