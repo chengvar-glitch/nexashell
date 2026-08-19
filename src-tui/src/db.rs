@@ -346,6 +346,18 @@ pub fn init_db() -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
 
+    // TUI settings persisted as a simple key/value store (language, theme,
+    // scrollback size ...). Lives in the shared DB so the desktop app could
+    // also read it if desired, but is owned by the TUI.
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tui_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sessions_addr ON sessions(addr)",
         [],
@@ -1419,6 +1431,42 @@ pub fn delete_snippet(id: String) -> Result<(), String> {
         Ok(())
     })
 }
+
+// ----------------------------------------------------------------------------
+// TUI settings (key/value)
+// ----------------------------------------------------------------------------
+
+/// Read a TUI setting. Returns `None` when unset.
+pub fn get_setting(key: &str) -> Option<String> {
+    with_db(|conn| {
+        conn.query_row(
+            "SELECT value FROM tui_settings WHERE key = ?1",
+            params![key],
+            |row| row.get(0),
+        )
+        .map(Some)
+        .or_else(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(other.to_string()),
+        })
+    })
+    .ok()
+    .flatten()
+}
+
+/// Write a TUI setting (upsert).
+pub fn set_setting(key: &str, value: &str) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute(
+            "INSERT INTO tui_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
 
 #[cfg(test)]
 mod tests {

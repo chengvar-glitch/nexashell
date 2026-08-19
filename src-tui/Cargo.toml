@@ -1,6 +1,6 @@
 [package]
 name = "nexashell-tui"
-version = "0.1.0"
+version = "0.2.0"
 description = "TUI frontend for NexaShell (SSH client)."
 authors = ["ChengVar <chengver@gmail.com>"]
 edition = "2024"

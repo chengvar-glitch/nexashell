@@ -5,8 +5,6 @@ use std::collections::VecDeque;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use vt100::Parser;
 
-const SCROLLBACK_LEN: usize = 10_000;
-
 /// A rectangular selection over the *visible* grid coordinates. `end_col` is
 /// exclusive (same convention as `Screen::contents_between`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,18 +36,22 @@ pub struct TerminalPane {
     /// Current scrollback view offset: how many lines back from the live
     /// screen (0 = live).
     scroll_offset: usize,
+    /// Maximum number of scrollback lines retained (configurable via settings).
+    scrollback: usize,
 }
 
 impl TerminalPane {
-    pub fn new(cols: u16, rows: u16) -> Self {
+    pub fn new(cols: u16, rows: u16, scrollback: usize) -> Self {
+        let scrollback = scrollback.max(100);
         Self {
-            parser: Parser::new(rows, cols, SCROLLBACK_LEN),
+            parser: Parser::new(rows, cols, scrollback),
             rows,
             cols,
             dirty: false,
             history: VecDeque::new(),
             pending: String::new(),
             scroll_offset: 0,
+            scrollback,
         }
     }
 
@@ -86,7 +88,7 @@ impl TerminalPane {
         let line = line.strip_suffix('\r').unwrap_or(&line).to_string();
         let truncated = truncate_by_width(&line, self.cols as usize);
         self.history.push_back(truncated);
-        while self.history.len() > SCROLLBACK_LEN {
+        while self.history.len() > self.scrollback {
             self.history.pop_front();
         }
     }
@@ -346,7 +348,7 @@ mod tests {
     use super::*;
 
     fn paged_pane() -> TerminalPane {
-        let mut p = TerminalPane::new(40, 5);
+        let mut p = TerminalPane::new(40, 5, 10_000);
         for i in 0..30 {
             p.feed(format!("line {i}\r\n").as_bytes());
         }
@@ -386,7 +388,7 @@ mod tests {
 
     #[test]
     fn history_captures_lines_across_feeds() {
-        let mut p = TerminalPane::new(40, 5);
+        let mut p = TerminalPane::new(40, 5, 10_000);
         p.feed(b"hel");
         p.feed(b"lo world\nsecond line\n");
         p.scroll_top();
@@ -410,7 +412,7 @@ mod tests {
 
     #[test]
     fn partial_line_survives_across_feeds() {
-        let mut p = TerminalPane::new(40, 5);
+        let mut p = TerminalPane::new(40, 5, 10_000);
         p.feed(b"abc\r\n");
         p.feed(b"def");
         p.scroll_top();

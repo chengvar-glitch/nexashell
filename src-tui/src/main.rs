@@ -2,6 +2,7 @@ mod common;
 mod db;
 mod encryption;
 mod hostkey;
+mod i18n;
 mod ssh;
 mod term;
 mod ui;
@@ -11,6 +12,7 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use std::io::stdout;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -32,13 +34,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sink = Arc::new(EventSink::new(tx.clone()));
 
     let mut terminal = ratatui::init();
-    let result = run_tui(&mut terminal, manager, sink, tx, rx);
+
+    // Run the TUI under catch_unwind so the terminal is ALWAYS restored — a
+    // panic must never leave the raw-mode/alternate-screen black shell behind.
+    let run = catch_unwind(AssertUnwindSafe(|| {
+        run_tui(&mut terminal, manager, sink, tx, rx)
+    }));
     ratatui::restore();
 
-    if let Err(e) = &result {
-        eprintln!("error: {}", e);
+    match run {
+        Ok(result) => {
+            if let Err(e) = &result {
+                eprintln!("error: {}", e);
+            }
+            result
+        }
+        Err(payload) => {
+            eprintln!("\nNexaShell TUI crashed; terminal restored.");
+            std::panic::resume_unwind(payload);
+        }
     }
-    result
 }
 
 fn run_tui(

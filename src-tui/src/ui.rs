@@ -1,6 +1,7 @@
 use crate::common::{OutputChunk, SessionId};
 use crate::db;
 use crate::db::{Group, SessionWithRelations, TunnelRuleRow};
+use crate::i18n::{L10n, Lang, help_lines};
 use crate::ssh::{ServerStatus, SftpEntry, SshError, SshEventSink, SshManager};
 use crate::term::{Selection, TerminalPane};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -114,6 +115,36 @@ impl Default for Theme {
     }
 }
 
+/// Available theme presets (settings-page ids, localized names in i18n).
+pub const THEME_IDS: [&str; 3] = ["default", "mono", "ocean"];
+
+impl Theme {
+    /// Build a theme from a preset id; unknown ids fall back to default.
+    pub fn preset(id: &str) -> Theme {
+        match id {
+            "mono" => Theme {
+                accent: Color::White,
+                fg: Color::White,
+                dim: Color::Gray,
+                border: Color::Gray,
+                error: Color::Red,
+                ok: Color::Green,
+                warning: Color::Yellow,
+            },
+            "ocean" => Theme {
+                accent: Color::LightBlue,
+                fg: Color::Gray,
+                dim: Color::DarkGray,
+                border: Color::DarkGray,
+                error: Color::Red,
+                ok: Color::Green,
+                warning: Color::Yellow,
+            },
+            _ => Theme::default(),
+        }
+    }
+}
+
 // ============================================================================
 // Dialogs
 // ============================================================================
@@ -137,6 +168,7 @@ impl PasswordDialog {
 }
 
 pub struct FormField {
+    /// i18n key rendered as the field label (see i18n.rs).
     pub label: &'static str,
     pub value: String,
     pub cursor: usize,
@@ -155,13 +187,13 @@ impl NewSessionForm {
     pub fn new() -> Self {
         Self {
             fields: vec![
-                FormField { label: "name", value: String::new(), cursor: 0, masked: false },
-                FormField { label: "host", value: String::new(), cursor: 0, masked: false },
-                FormField { label: "port", value: "22".to_string(), cursor: 2, masked: false },
-                FormField { label: "username", value: String::new(), cursor: 0, masked: false },
-                FormField { label: "password (blank = none)", value: String::new(), cursor: 0, masked: true },
-                FormField { label: "private key path (blank = password auth)", value: String::new(), cursor: 0, masked: false },
-                FormField { label: "key passphrase (blank = none)", value: String::new(), cursor: 0, masked: true },
+                FormField { label: "field_name", value: String::new(), cursor: 0, masked: false },
+                FormField { label: "field_host", value: String::new(), cursor: 0, masked: false },
+                FormField { label: "field_port", value: "22".to_string(), cursor: 2, masked: false },
+                FormField { label: "field_username", value: String::new(), cursor: 0, masked: false },
+                FormField { label: "field_password_none", value: String::new(), cursor: 0, masked: true },
+                FormField { label: "field_key_path", value: String::new(), cursor: 0, masked: false },
+                FormField { label: "field_key_pass_none", value: String::new(), cursor: 0, masked: true },
             ],
             focus: 0,
             editing: None,
@@ -181,9 +213,9 @@ impl NewSessionForm {
         if let Some(ref kp) = session.private_key_path {
             form.fields[5].value = kp.clone();
         }
-        form.fields[4].label = "password (blank = keep stored)";
-        form.fields[5].label = "private key path (blank = password auth)";
-        form.fields[6].label = "key passphrase (blank = keep stored)";
+        form.fields[4].label = "field_password_keep";
+        form.fields[5].label = "field_key_path";
+        form.fields[6].label = "field_key_pass_keep";
         for f in &mut form.fields {
             f.cursor = f.value.chars().count();
         }
@@ -202,14 +234,109 @@ pub enum Dialog {
 }
 
 impl Dialog {
-    pub fn title(&self) -> &str {
+    pub fn title(&self, l10n: &L10n) -> String {
         match self {
-            Dialog::Password(d) => &d.title,
-            Dialog::NewSession(_) => "Session",
-            Dialog::ConfirmDelete { .. } => "Delete session",
-            Dialog::Help => "Help",
-            Dialog::Quit => "Quit",
-            Dialog::Notice(_) => "Notice",
+            Dialog::Password(d) => d.title.clone(),
+            Dialog::NewSession(_) => l10n.tr("title_new_session").to_string(),
+            Dialog::ConfirmDelete { .. } => l10n.tr("title_confirm_delete").to_string(),
+            Dialog::Help => l10n.tr("title_help").to_string(),
+            Dialog::Quit => l10n.tr("title_quit").to_string(),
+            Dialog::Notice(_) => l10n.tr("title_notice").to_string(),
+        }
+    }
+}
+
+// ============================================================================
+// App configuration (settings)
+// ============================================================================
+
+/// Choices for the terminal scrollback depth, mirroring the values allowed by
+/// `TerminalPane`'s ring buffer (1_000 … 20_000 lines).
+pub const SCROLLBACK_CHOICES: [u32; 4] = [1_000, 5_000, 10_000, 20_000];
+
+pub fn scrollback_choice_index(v: u32) -> usize {
+    SCROLLBACK_CHOICES
+        .iter()
+        .position(|&c| c == v)
+        .unwrap_or(SCROLLBACK_CHOICES.len() - 1)
+}
+
+/// Persisted TUI configuration. Loaded at startup, editable from the settings
+/// page, and written back through `db::get_setting`/`set_setting`.
+#[derive(Clone)]
+pub struct AppConfig {
+    pub lang: Lang,
+    pub theme_id: String,
+    pub scrollback: u32,
+}
+
+impl AppConfig {
+    const KEY_LANG: &'static str = "lang";
+    const KEY_THEME: &'static str = "theme";
+    const KEY_SCROLLBACK: &'static str = "scrollback";
+
+    pub fn load() -> Self {
+        let lang = db::get_setting(Self::KEY_LANG)
+            .map(|s| Lang::from_id(&s))
+            .unwrap_or(Lang::Auto);
+        let theme_id = db::get_setting(Self::KEY_THEME).unwrap_or_else(|| "default".into());
+        let theme_id = if THEME_IDS.contains(&theme_id.as_str()) {
+            theme_id
+        } else {
+            "default".into()
+        };
+        let scrollback = db::get_setting(Self::KEY_SCROLLBACK)
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(10_000);
+        let scrollback = if SCROLLBACK_CHOICES.contains(&scrollback) {
+            scrollback
+        } else {
+            10_000
+        };
+        Self {
+            lang,
+            theme_id,
+            scrollback,
+        }
+    }
+
+    pub fn persist(&self) {
+        let _ = db::set_setting(Self::KEY_LANG, self.lang.id());
+        let _ = db::set_setting(Self::KEY_THEME, &self.theme_id);
+        let _ = db::set_setting(Self::KEY_SCROLLBACK, &self.scrollback.to_string());
+    }
+
+    /// Resolved, live language used across the UI (Auto is resolved once).
+    pub fn l10n(&self) -> L10n {
+        L10n::new(self.lang)
+    }
+}
+
+/// Draft state for the settings page. Fields are index-based so left/right
+/// arrows cycle through the available choices, and nothing is persisted until
+/// the user saves.
+pub struct SettingsForm {
+    pub lang: usize,
+    pub theme: usize,
+    pub scrollback: usize,
+    pub focus: usize,
+    pub dirty: bool,
+}
+
+impl SettingsForm {
+    pub fn new(config: &AppConfig) -> Self {
+        Self {
+            lang: Lang::ALL
+                .iter()
+                .position(|l| *l == config.lang)
+                .unwrap_or(0),
+            theme: THEME_IDS
+                .iter()
+                .position(|t| *t == config.theme_id)
+                .unwrap_or(0),
+            scrollback: scrollback_choice_index(config.scrollback),
+            focus: 0,
+            dirty: false,
         }
     }
 }
@@ -304,10 +431,11 @@ pub struct SftpBrowser {
     pub pending_delete: Option<String>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum Page {
     Home,
     Terminal,
+    Settings,
 }
 
 pub struct App {
@@ -316,6 +444,8 @@ pub struct App {
     tx: mpsc::UnboundedSender<UiEvent>,
     rx: mpsc::UnboundedReceiver<UiEvent>,
     pub theme: Theme,
+    pub config: AppConfig,
+    pub l10n: L10n,
 
     pub sessions: Vec<SessionWithRelations>,
     pub groups: Vec<Group>,
@@ -328,11 +458,19 @@ pub struct App {
     pub active_term: usize,
 
     pub connecting: bool,
+    /// Human-readable "user@host" of the session currently being connected.
+    pub connecting_session: Option<String>,
+    /// When the current connect started, for the spinner + elapsed timer.
+    pub connect_started: Option<Instant>,
+    /// Handle to the in-flight connect task (aborted to cancel).
+    connect_abort: Option<tokio::task::JoinHandle<()>>,
     pub dialog: Option<Dialog>,
     pub command_bar: Option<CommandBar>,
     pub copy_mode: Option<CopySelection>,
     pub tunnel_panel: Option<TunnelPanel>,
     pub sftp: Option<SftpBrowser>,
+    /// Settings page draft (Some while the page is open).
+    pub settings: Option<SettingsForm>,
 
     pub leader: Option<Instant>,
     pub quit: bool,
@@ -348,12 +486,16 @@ impl App {
         tx: mpsc::UnboundedSender<UiEvent>,
         rx: mpsc::UnboundedReceiver<UiEvent>,
     ) -> Self {
+        let config = AppConfig::load();
+        let l10n = config.l10n();
         let mut app = Self {
             manager,
             sink,
             tx,
             rx,
-            theme: Theme::default(),
+            theme: Theme::preset(&config.theme_id),
+            config,
+            l10n,
             sessions: Vec::new(),
             groups: Vec::new(),
             filter: String::new(),
@@ -363,11 +505,15 @@ impl App {
             terminals: Vec::new(),
             active_term: 0,
             connecting: false,
+            connecting_session: None,
+            connect_started: None,
+            connect_abort: None,
             dialog: None,
             command_bar: None,
             copy_mode: None,
             tunnel_panel: None,
             sftp: None,
+            settings: None,
             leader: None,
             quit: false,
             viewport: Rect::new(0, 0, 80, 24),
@@ -421,6 +567,9 @@ impl App {
             }
             UiEvent::ConnectResult { session_id, result } => {
                 self.connecting = false;
+                self.connecting_session = None;
+                self.connect_started = None;
+                self.connect_abort = None;
                 match result {
                     Ok(()) => {
                         let Some(sess) = self
@@ -433,7 +582,7 @@ impl App {
                         };
                         let _ = db::update_session_timestamp(session_id.clone());
                         let (cols, rows) = self.connect_size();
-                        let mut pane = TerminalPane::new(cols, rows);
+                        let mut pane = TerminalPane::new(cols, rows, self.config.scrollback as usize);
                         pane.resize(cols, rows);
                         let user_host = format!("{}@{}", sess.session.username, sess.session.addr);
                         self.terminals.push(TerminalSession {
@@ -450,7 +599,9 @@ impl App {
                         self.last_term_size = None;
                     }
                     Err(e) => {
-                        self.dialog = Some(Dialog::Notice(format!("Connection failed: {}", e)));
+                        self.dialog = Some(Dialog::Notice(
+                            self.l10n.fmt("conn_failed", &[e.as_str()]),
+                        ));
                     }
                 }
             }
@@ -471,7 +622,9 @@ impl App {
                                 panel.selected = 0;
                                 panel.pending_delete = None;
                             }
-                            Err(e) => panel.message = Some(format!("List failed: {}", e)),
+                            Err(e) => {
+                                panel.message = Some(self.l10n.fmt("list_failed", &[e.as_str()]))
+                            }
                         }
                     }
                     SftpUiEventKind::Op { message, result } => {
@@ -480,7 +633,10 @@ impl App {
                         match result {
                             Ok(()) => panel.message = Some(message),
                             Err(e) => {
-                                panel.message = Some(format!("{} failed: {}", message, e))
+                                panel.message = Some(self.l10n.fmt(
+                                    "op_failed",
+                                    &[message.as_str(), e.as_str()],
+                                ))
                             }
                         }
                         // Refresh the listing after successful mutations.
@@ -525,6 +681,7 @@ impl App {
                     );
                 }
             }
+            Page::Settings => {}
         }
     }
 
@@ -577,6 +734,7 @@ impl App {
         match self.page {
             Page::Home => self.home_key(key),
             Page::Terminal => self.terminal_key(key),
+            Page::Settings => self.settings_key(key),
         }
     }
 
@@ -593,6 +751,7 @@ impl App {
             'q' => self.dialog = Some(Dialog::Quit),
             'h' => self.dialog = Some(Dialog::Help),
             'p' => self.open_command_bar(),
+            'o' => self.open_settings(),
             'n' if matches!(self.page, Page::Home) => {
                 self.dialog = Some(Dialog::NewSession(NewSessionForm::new()))
             }
@@ -670,6 +829,11 @@ impl App {
                     self.start_connect(sess);
                 }
             }
+            KeyCode::Esc if self.connecting => {
+                // Cancelling takes priority over clearing the filter so a
+                // stuck-looking connect can always be aborted.
+                self.cancel_connect();
+            }
             KeyCode::Esc if !self.filter.is_empty() => {
                 self.filter.clear();
                 self.filter_cursor = 0;
@@ -712,6 +876,103 @@ impl App {
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------------
+    // Settings page
+    // ------------------------------------------------------------------
+
+    fn open_settings(&mut self) {
+        self.settings = Some(SettingsForm::new(&self.config));
+        self.page = Page::Settings;
+        self.leader = None;
+    }
+
+    fn close_settings(&mut self) {
+        self.settings = None;
+        self.page = Page::Home;
+    }
+
+    /// Persist a settings draft and apply it live (theme + scrollback apply
+    /// immediately; language applies to new strings on next draw).
+    fn apply_settings(&mut self, form: SettingsForm) {
+        self.config.lang = Lang::ALL[form.lang];
+        self.config.theme_id = THEME_IDS[form.theme].to_string();
+        self.config.scrollback = SCROLLBACK_CHOICES[form.scrollback];
+        self.config.persist();
+        self.l10n = self.config.l10n();
+        self.theme = Theme::preset(&self.config.theme_id);
+        // Rebuild the draft to reflect the newly saved state.
+        self.settings = Some(SettingsForm::new(&self.config));
+    }
+
+    /// Live-preview the language/theme from a draft without persisting, so the
+    /// user sees the change as they cycle (scrollback applies on save only).
+    fn preview_settings(&mut self, form: &SettingsForm) {
+        self.l10n = L10n::new(Lang::ALL[form.lang]);
+        self.theme = Theme::preset(THEME_IDS[form.theme]);
+    }
+
+    fn settings_key(&mut self, key: KeyEvent) {
+        let mut form = match self.settings.take() {
+            Some(f) => f,
+            None => return,
+        };
+        let rows = 3usize;
+        match key.code {
+            KeyCode::Esc => {
+                // Discard the draft: revert the live preview back to the saved
+                // config, then leave the page.
+                self.l10n = self.config.l10n();
+                self.theme = Theme::preset(&self.config.theme_id);
+                self.close_settings();
+                return;
+            }
+            KeyCode::Char('s') | KeyCode::Enter => {
+                self.apply_settings(form);
+                return;
+            }
+            KeyCode::Up => {
+                form.focus = (form.focus + rows - 1) % rows;
+                form.dirty = true;
+            }
+            KeyCode::Down => {
+                form.focus = (form.focus + 1) % rows;
+                form.dirty = true;
+            }
+            KeyCode::Left => {
+                let n = match form.focus {
+                    0 => Lang::ALL.len(),
+                    1 => THEME_IDS.len(),
+                    _ => SCROLLBACK_CHOICES.len(),
+                };
+                let idx = match form.focus {
+                    0 => &mut form.lang,
+                    1 => &mut form.theme,
+                    _ => &mut form.scrollback,
+                };
+                *idx = (*idx + n - 1) % n;
+                form.dirty = true;
+                self.preview_settings(&form);
+            }
+            KeyCode::Right => {
+                let n = match form.focus {
+                    0 => Lang::ALL.len(),
+                    1 => THEME_IDS.len(),
+                    _ => SCROLLBACK_CHOICES.len(),
+                };
+                let idx = match form.focus {
+                    0 => &mut form.lang,
+                    1 => &mut form.theme,
+                    _ => &mut form.scrollback,
+                };
+                *idx = (*idx + 1) % n;
+                form.dirty = true;
+                self.preview_settings(&form);
+            }
+            _ => {}
+        }
+        self.settings = Some(form);
     }
 
     // ------------------------------------------------------------------
@@ -1049,7 +1310,7 @@ impl App {
             .or_else(|| self.terminals.first().map(|t| t.session_id.clone()));
         let Some(session_id) = session_id else {
             self.dialog = Some(Dialog::Notice(
-                "No session selected — connect first, then open the tunnel panel".into(),
+                self.l10n.tr("no_session_tunnel").to_string(),
             ));
             return;
         };
@@ -1093,22 +1354,29 @@ impl App {
                     let running = self.manager.tunnel_running(&rule.id);
                     if running {
                         self.manager.stop_tunnel(&rule.id);
-                        panel.message = Some(format!(
-                            "Stopped tunnel {}:{}",
-                            rule.listen_host, rule.listen_port
+                        panel.message = Some(self.l10n.fmt(
+                            "tunnel_stopped",
+                            &[rule.listen_host.as_str(), rule.listen_port.to_string().as_str()],
                         ));
                     } else {
                         match self.manager.start_tunnel_rule(rule) {
                             Ok(()) => {
-                                panel.message = Some(format!(
-                                    "Tunnel {}:{} -> {}:{} started",
-                                    rule.listen_host,
-                                    rule.listen_port,
-                                    rule.target_host,
-                                    rule.target_port
+                                panel.message = Some(self.l10n.fmt(
+                                    "tunnel_started",
+                                    &[
+                                        rule.listen_host.as_str(),
+                                        rule.listen_port.to_string().as_str(),
+                                        rule.target_host.as_str(),
+                                        rule.target_port.to_string().as_str(),
+                                    ],
                                 ));
                             }
-                            Err(e) => panel.message = Some(format!("Start failed: {}", e)),
+                            Err(e) => {
+                                panel.message = Some(self.l10n.fmt(
+                                    "tunnel_start_failed",
+                                    &[&e.to_string()],
+                                ))
+                            }
                         }
                     }
                 }
@@ -1119,7 +1387,7 @@ impl App {
                     Some(p) => p,
                     None => return,
                 };
-                panel.message = Some("rules refreshed".into());
+                panel.message = Some(self.l10n.tr("rules_refreshed").into());
             }
             _ => {}
         }
@@ -1137,7 +1405,7 @@ impl App {
             .map(|t| t.session_id.clone())
         else {
             self.dialog = Some(Dialog::Notice(
-                "Connect to a session first, then open the file browser".into(),
+                self.l10n.tr("no_session_sftp").to_string(),
             ));
             return;
         };
@@ -1256,7 +1524,7 @@ impl App {
                         let remote = sftp_join(&sftp.path, &name);
                         self.sftp = Some(sftp);
                         self.sftp_run_op(
-                            format!("Created directory {remote}"),
+                            self.l10n.fmt("created_dir", &[remote.as_str()]),
                             SftpOp::Mkdir { remote },
                         );
                         return;
@@ -1314,7 +1582,10 @@ impl App {
                     let local = sftp_join_local(&sftp.local_dir, &e_name);
                     self.sftp = Some(sftp);
                     self.sftp_run_op(
-                        format!("Downloaded {} ({})", e_name, format_size(e_size)),
+                        self.l10n.fmt(
+                            "downloaded",
+                            &[e_name.as_str(), format_size(e_size).as_str()],
+                        ),
                         SftpOp::Download { remote, local },
                     );
                     return;
@@ -1353,13 +1624,13 @@ impl App {
                         sftp.pending_delete = None;
                         self.sftp = Some(sftp);
                         self.sftp_run_op(
-                            format!("Deleted {remote}"),
+                            self.l10n.fmt("deleted_path", &[remote.as_str()]),
                             SftpOp::Remove { remote },
                         );
                         return;
                     }
                     sftp.pending_delete = Some(name);
-                    sftp.message = Some("press x again to confirm delete".into());
+                    sftp.message = Some(self.l10n.tr("confirm_delete_x").into());
                 }
             }
             KeyCode::Char('u') => {
@@ -1370,7 +1641,10 @@ impl App {
                     sftp.pending_delete = None;
                     self.sftp = Some(sftp);
                     self.sftp_run_op(
-                        format!("Uploaded {} to {remote}", e_name),
+                        self.l10n.fmt(
+                            "uploaded",
+                            &[e_name.as_str(), remote.as_str()],
+                        ),
                         SftpOp::Upload { local, remote },
                     );
                     return;
@@ -1435,6 +1709,38 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// Render the shared top title bar + global hint for non-terminal pages.
+fn buf_title(frame: &mut Frame, area: Rect, l10n: &L10n, theme: &Theme) {
+    let buf = frame.buffer_mut();
+    buf.set_string(
+        area.x,
+        area.y,
+        " NexaShell TUI ",
+        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+    );
+    let hint = l10n.tr("hint_global");
+    buf.set_string(
+        area.x + area.width.saturating_sub(str_width(hint)),
+        area.y,
+        hint,
+        Style::default().fg(theme.dim),
+    );
+}
+
+/// Format a scrollback line count with thousands separators (display only).
+fn format_scrollback(n: u32) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + 2);
+    for (i, &b) in bytes.iter().enumerate() {
+        if i > 0 && (bytes.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(b as char);
+    }
+    out
+}
+
 /// Format a duration-since-epoch as a short "YYYY-MM-DD HH:MM" local string.
 fn format_time(dt: std::time::SystemTime) -> String {
     let secs = dt
@@ -1462,31 +1768,37 @@ fn format_time(dt: std::time::SystemTime) -> String {
 
 impl App {
     pub fn open_command_bar(&mut self) {
+        let l = &self.l10n;
         let mut items = vec![
             CommandItem {
                 id: "sessions".into(),
-                label: "sessions".into(),
-                desc: "Back to session list".into(),
+                label: l.tr("cmd_sessions").into(),
+                desc: l.tr("cmd_sessions_desc").into(),
             },
             CommandItem {
                 id: "new".into(),
-                label: "new".into(),
-                desc: "Create a new session".into(),
+                label: l.tr("cmd_new").into(),
+                desc: l.tr("cmd_new_desc").into(),
             },
             CommandItem {
                 id: "refresh".into(),
-                label: "refresh".into(),
-                desc: "Reload sessions from database".into(),
+                label: l.tr("cmd_refresh").into(),
+                desc: l.tr("cmd_refresh_desc").into(),
+            },
+            CommandItem {
+                id: "settings".into(),
+                label: l.tr("cmd_settings").into(),
+                desc: l.tr("cmd_settings_desc").into(),
             },
             CommandItem {
                 id: "help".into(),
-                label: "help".into(),
-                desc: "Show keyboard shortcuts".into(),
+                label: l.tr("cmd_help").into(),
+                desc: l.tr("cmd_help_desc").into(),
             },
             CommandItem {
                 id: "quit".into(),
-                label: "quit".into(),
-                desc: "Exit NexaShell TUI".into(),
+                label: l.tr("cmd_quit").into(),
+                desc: l.tr("cmd_quit_desc").into(),
             },
         ];
         if matches!(self.page, Page::Terminal) {
@@ -1494,19 +1806,20 @@ impl App {
                 0,
                 CommandItem {
                     id: "disconnect".into(),
-                    label: "disconnect".into(),
-                    desc: "Disconnect the current SSH session".into(),
+                    label: l.tr("cmd_disconnect").into(),
+                    desc: l.tr("cmd_disconnect_desc").into(),
                 },
             );
             items.insert(
                 1,
                 CommandItem {
                     id: "tunnels".into(),
-                    label: "tunnels".into(),
-                    desc: "Manage port-forwarding rules for this session".into(),
+                    label: l.tr("cmd_tunnels").into(),
+                    desc: l.tr("cmd_tunnels_desc").into(),
                 },
             );
         }
+        let open_suffix = l.tr("cmd_connect_open");
         for s in &self.sessions {
             let sess = &s.session;
             let open = self
@@ -1517,7 +1830,7 @@ impl App {
                 id: format!("connect:{}", sess.id),
                 label: format!(
                     "connect{} · {} ({})",
-                    if open { " [open]" } else { "" },
+                    if open { open_suffix } else { "" },
                     sess.server_name,
                     sess.addr
                 ),
@@ -1529,8 +1842,8 @@ impl App {
         {
             items.push(CommandItem {
                 id: "snippets-header".into(),
-                label: "— snippets —".into(),
-                desc: "insert into active terminal / copy to clipboard".into(),
+                label: l.tr("cmd_snippets_header").into(),
+                desc: l.tr("cmd_snippets_desc").into(),
             });
             for s in snippets {
                 let desc = if s.description.is_empty() {
@@ -1570,6 +1883,7 @@ impl App {
             "sessions" => self.go_home(),
             "new" => self.dialog = Some(Dialog::NewSession(NewSessionForm::new())),
             "refresh" => self.refresh_sessions(),
+            "settings" => self.open_settings(),
             "help" => self.dialog = Some(Dialog::Help),
             "quit" => self.dialog = Some(Dialog::Quit),
             "disconnect" => {
@@ -1594,7 +1908,7 @@ impl App {
         }
         copy_to_clipboard(&snippet.command);
         self.dialog = Some(Dialog::Notice(
-            "No active terminal; snippet copied to clipboard".into(),
+            self.l10n.tr("no_term_snippet_copied").to_string(),
         ));
     }
 
@@ -1646,6 +1960,9 @@ impl App {
     }
 
     pub fn shutdown(&mut self) {
+        if let Some(h) = self.connect_abort.take() {
+            h.abort();
+        }
         self.manager.disconnect_all();
         self.terminals.clear();
     }
@@ -1681,7 +1998,7 @@ impl App {
                 } else {
                     self.dialog = Some(Dialog::Password(PasswordDialog::new(
                         sid,
-                        "Enter password".to_string(),
+                        self.l10n.tr("enter_password").to_string(),
                     )));
                 }
             }
@@ -1690,8 +2007,9 @@ impl App {
                     let _ = kp;
                     self.do_connect(session, None, key_passphrase);
                 } else {
-                    self.dialog =
-                        Some(Dialog::Notice("No private key path set for this session".into()));
+                    self.dialog = Some(Dialog::Notice(
+                        self.l10n.tr("no_key_path").to_string(),
+                    ));
                 }
             }
             _ => self.do_connect(session, password, key_passphrase),
@@ -1709,6 +2027,8 @@ impl App {
         }
         let sess = session.session;
         self.connecting = true;
+        self.connecting_session = Some(format!("{}@{}", sess.username, sess.addr));
+        self.connect_started = Some(Instant::now());
 
         let (cols, rows) = self.connect_size();
         let manager = self.manager.clone();
@@ -1716,7 +2036,7 @@ impl App {
         let tx = self.tx.clone();
         let sid = sess.id.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let result = manager
                 .connect_ssh(
                     sink,
@@ -1737,6 +2057,19 @@ impl App {
                 result,
             });
         });
+        self.connect_abort = Some(handle);
+    }
+
+    /// Abort an in-flight connect and clear the connecting indicator. The
+    /// blocking handshake may still finish in the background (its result is
+    /// dropped), but no channel is ever registered, so nothing leaks.
+    fn cancel_connect(&mut self) {
+        if let Some(h) = self.connect_abort.take() {
+            h.abort();
+        }
+        self.connecting = false;
+        self.connecting_session = None;
+        self.connect_started = None;
     }
 
     fn save_session_form(&mut self, form: NewSessionForm) {
@@ -1752,7 +2085,7 @@ impl App {
 
         if name.is_empty() || host.is_empty() || username.is_empty() {
             self.dialog = Some(Dialog::Notice(
-                "name, host and username are required".into(),
+                self.l10n.tr("fields_required").to_string(),
             ));
             return;
         }
@@ -1787,7 +2120,8 @@ impl App {
                 self.refresh_sessions();
             }
             Err(e) => {
-                self.dialog = Some(Dialog::Notice(format!("Failed to save session: {}", e)));
+                self.dialog =
+                    Some(Dialog::Notice(self.l10n.fmt("save_failed", &[e.as_str()])));
             }
         }
     }
@@ -1882,9 +2216,10 @@ impl App {
         match self.page {
             Page::Home => self.draw_home(frame),
             Page::Terminal => self.draw_terminal(frame),
+            Page::Settings => self.draw_settings(frame),
         }
         if let Some(cb) = &self.command_bar {
-            Self::draw_command_bar(frame, cb, &self.theme);
+            Self::draw_command_bar(frame, cb, &self.theme, &self.l10n);
         }
         if let Some(p) = &self.tunnel_panel {
             self.draw_tunnel_panel(frame, p);
@@ -1893,7 +2228,7 @@ impl App {
             self.draw_sftp_browser(frame, b);
         }
         if let Some(d) = &self.dialog {
-            Self::draw_dialog(frame, d, &self.theme);
+            Self::draw_dialog(frame, d, &self.theme, &self.l10n);
         }
     }
 
@@ -1903,11 +2238,19 @@ impl App {
 
         // Header
         {
-            let mut header = format!(
-                " SFTP — session {} · {}  (local: {}) ",
-                panel.session_id,
-                if panel.path.is_empty() { "(home)" } else { &panel.path },
-                panel.local_dir
+            let home_label = self.l10n.tr("sftp_home");
+            let path_label: &str = if panel.path.is_empty() {
+                home_label
+            } else {
+                panel.path.as_str()
+            };
+            let mut header = self.l10n.fmt(
+                "sftp_header",
+                &[
+                    panel.session_id.as_str(),
+                    path_label,
+                    panel.local_dir.as_str(),
+                ],
             );
             if panel.busy {
                 header.push('…');
@@ -1919,9 +2262,9 @@ impl App {
                 &header,
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             );
-            let hint = " enter: cd/download · left: up · n:mkdir·x:del·u:upload·h:home·r:refresh · esc: close ";
+            let hint = self.l10n.tr("hint_sftp");
             buf.set_string(
-                area.x + area.width.saturating_sub(hint.len() as u16),
+                area.x + area.width.saturating_sub(str_width(hint)),
                 area.y,
                 hint,
                 Style::default().fg(theme.accent),
@@ -1967,7 +2310,7 @@ impl App {
         let msg = if let Some(m) = &panel.message {
             m.clone()
         } else if panel.entries.is_empty() && !panel.busy {
-            "(empty directory)".to_string()
+            self.l10n.tr("empty_directory").to_string()
         } else {
             String::new()
         };
@@ -1976,7 +2319,7 @@ impl App {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border))
-                .title(" files "),
+                .title(self.l10n.tr("sftp_title")),
         );
         let mut state = ListState::default();
         state.select(Some(panel.selected.min(panel.entries.len().saturating_sub(1))));
@@ -1995,7 +2338,7 @@ impl App {
         // mkdir input line
         if let Some(input) = &panel.mkdir_input {
             let input_y = area.y + area.height.saturating_sub(1);
-            let label = format!(" mkdir> {}▏", input);
+            let label = self.l10n.fmt("mkdir_label", &[input.as_str()]);
             let buf = frame.buffer_mut();
             buf.set_string(
                 area.x,
@@ -2015,7 +2358,7 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accent))
             .title(Span::styled(
-                format!(" tunnel rules — session {} ", panel.session_id),
+                self.l10n.fmt("tunnel_rules_title", &[panel.session_id.as_str()]),
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
@@ -2024,7 +2367,7 @@ impl App {
         if panel.rules.is_empty() {
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    "No tunnel rules for this session yet. Add rules in the desktop app.",
+                    self.l10n.tr("tunnel_no_rules"),
                     Style::default().fg(theme.dim),
                 )))
                 .style(Style::default().fg(theme.fg)),
@@ -2033,7 +2376,7 @@ impl App {
             let hint_y = inner.y + inner.height.saturating_sub(2);
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    " esc: close ",
+                    self.l10n.tr("esc_close"),
                     Style::default().fg(theme.dim),
                 ))),
                 Rect::new(inner.x, hint_y, inner.width, 1),
@@ -2057,7 +2400,11 @@ impl App {
             } else {
                 format!("{}:{}", rule.target_host, rule.target_port)
             };
-            let auto = if rule.enabled { "auto" } else { "manual" };
+            let auto = if rule.enabled {
+                self.l10n.tr("rule_auto")
+            } else {
+                self.l10n.tr("rule_manual")
+            };
             let line = format!(
                 " {} {} [{}] {}:{} → {}  ({} conns, {})",
                 arrow,
@@ -2081,7 +2428,10 @@ impl App {
         }
 
         let hint_y = inner.y + inner.height.saturating_sub(2);
-        let mut hint = " enter: start/stop   r: refresh   esc: close ".to_string();
+        let mut hint = format!(
+            " enter: {}   r: refresh   esc: close ",
+            self.l10n.tr("hint_start_stop")
+        );
         if let Some(msg) = &panel.message {
             hint = format!("{}  |  {}", msg, hint);
         }
@@ -2091,6 +2441,83 @@ impl App {
                 Style::default().fg(theme.dim),
             ))),
             Rect::new(inner.x, hint_y, inner.width, 1),
+        );
+    }
+
+    fn draw_settings(&mut self, frame: &mut Frame) {
+        let theme = &self.theme;
+        let l10n = self.l10n;
+        let Some(form) = self.settings.as_ref() else {
+            return;
+        };
+        let area = frame.area();
+
+        buf_title(frame, area, &l10n, theme);
+        let list_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(3));
+
+        let labels = [
+            l10n.tr("settings_lang"),
+            l10n.tr("settings_theme"),
+            l10n.tr("settings_scrollback"),
+        ];
+        let values = [
+            Lang::ALL[form.lang].label(&l10n).to_string(),
+            l10n.tr(match THEME_IDS[form.theme] {
+                "mono" => "theme_mono",
+                "ocean" => "theme_ocean",
+                _ => "theme_default",
+            }).to_string(),
+            format_scrollback(SCROLLBACK_CHOICES[form.scrollback]),
+        ];
+
+        let items: Vec<ListItem> = (0..labels.len())
+            .map(|i| {
+                let focused = i == form.focus;
+                let text = format!(
+                    " {}  {:<26} {}",
+                    if focused { "▶" } else { " " },
+                    labels[i],
+                    values[i]
+                );
+                let mut style = Style::default()
+                    .fg(if focused { theme.accent } else { theme.fg });
+                if focused {
+                    style = style.add_modifier(Modifier::BOLD);
+                }
+                ListItem::new(Line::from(Span::styled(text, style)))
+            })
+            .collect();
+
+        let mut state = ListState::default();
+        state.select(Some(form.focus));
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border))
+                    .title(Span::styled(
+                        l10n.tr("settings_title"),
+                        Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
+                    )),
+            )
+            .highlight_style(Style::default().fg(theme.accent).add_modifier(Modifier::BOLD));
+        frame.render_stateful_widget(list, list_area, &mut state);
+
+        // Hint / status bar
+        let status_y = area.y + area.height.saturating_sub(1);
+        let buf = frame.buffer_mut();
+        let status = if form.dirty {
+            l10n.tr("settings_unsaved")
+        } else {
+            l10n.tr("settings_saved")
+        };
+        buf.set_string(area.x, status_y, format!(" {} ", status), Style::default().fg(theme.dim));
+        let hint = l10n.tr("settings_hint");
+        buf.set_string(
+            area.x + area.width.saturating_sub(str_width(hint)),
+            status_y,
+            hint,
+            Style::default().fg(theme.dim),
         );
     }
 
@@ -2106,9 +2533,9 @@ impl App {
             " NexaShell TUI ",
             Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
         );
-        let hint = " ctrl+p commands  ctrl+x leader ";
+        let hint = self.l10n.tr("hint_global");
         buf.set_string(
-            area.x + area.width.saturating_sub(hint.len() as u16),
+            area.x + area.width.saturating_sub(str_width(hint)),
             area.y,
             hint,
             Style::default().fg(theme.dim),
@@ -2124,9 +2551,9 @@ impl App {
         let filtered = self.filtered_sessions();
         if filtered.is_empty() {
             let msg = if self.sessions.is_empty() {
-                "No sessions yet. Press ctrl+p and run `new`, or add sessions in the desktop app."
+                self.l10n.tr("msg_no_sessions")
             } else {
-                "No sessions match the filter."
+                self.l10n.tr("msg_no_match")
             };
             buf.set_string(
                 area.x + 2,
@@ -2135,6 +2562,8 @@ impl App {
                 Style::default().fg(theme.dim),
             );
         } else {
+            let connecting_target = self.connecting_session.clone();
+            let started = self.connect_started;
             let items: Vec<ListItem> = filtered
                 .iter()
                 .enumerate()
@@ -2148,9 +2577,18 @@ impl App {
                         .map(|t| format!(" [{}]", t))
                         .collect::<Vec<_>>()
                         .join("");
+                    let is_connecting = connecting_target.as_deref()
+                        == Some(format!("{}@{}", sess.username, sess.addr).as_str());
+                    let marker = if is_connecting {
+                        spinner_frame(started)
+                    } else if i == self.selected {
+                        "▶"
+                    } else {
+                        " "
+                    };
                     let text = format!(
                         " {}  {}{}  {}@{}{}{}{}",
-                        if i == self.selected { "▶" } else { " " },
+                        marker,
                         if self.terminals.iter().any(|t| t.session_id == sess.id) {
                             "● "
                         } else {
@@ -2163,7 +2601,12 @@ impl App {
                         tags,
                         ""
                     );
-                    ListItem::new(Line::from(Span::raw(text)))
+                    let style = if is_connecting {
+                        Style::default().fg(theme.warning).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.fg)
+                    };
+                    ListItem::new(Line::from(Span::styled(text, style)))
                 })
                 .collect();
 
@@ -2175,7 +2618,7 @@ impl App {
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border))
                         .title(Span::styled(
-                            format!(" Sessions ({}) ", filtered.len()),
+                            self.l10n.fmt("sessions_title", &[&filtered.len().to_string()]),
                             Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
                         )),
                 )
@@ -2202,7 +2645,7 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border))
             .title(Span::styled(
-                " filter / commands ",
+                self.l10n.tr("composer_title"),
                 Style::default().fg(theme.dim),
             ));
         let inner = block.inner(area);
@@ -2228,15 +2671,46 @@ impl App {
     fn draw_home_status(&self, frame: &mut Frame, area: Rect) {
         let theme = &self.theme;
         let buf = frame.buffer_mut();
+
+        // While connecting, surface an obvious progress indicator (spinner +
+        // target + elapsed seconds) so the app never looks hung, plus a hint
+        // that Esc cancels.
+        if self.connecting
+            && let Some(target) = &self.connecting_session
+        {
+            let elapsed = self
+                .connect_started
+                .map(|s| s.elapsed().as_secs())
+                .unwrap_or(0);
+            let base = self
+                .l10n
+                .fmt("connecting_to", &[target.as_str(), &format!("{}s", elapsed)]);
+            let text = format!(" {} {} ", spinner_frame(self.connect_started), base);
+            buf.set_string(
+                area.x,
+                area.y,
+                &text,
+                Style::default().fg(theme.warning),
+            );
+            let hint = self.l10n.tr("connect_cancel");
+            buf.set_string(
+                area.x + area.width.saturating_sub(str_width(hint)),
+                area.y,
+                hint,
+                Style::default().fg(theme.dim),
+            );
+            return;
+        }
+
         let favs = self
             .sessions
             .iter()
             .filter(|s| s.session.is_favorite)
             .count();
-        let text = format!(
-            " {} sessions · {} favorites ",
-            self.sessions.len(),
-            favs
+        let total = self.sessions.len();
+        let text = self.l10n.fmt(
+            "status_sessions_favs",
+            &[&total.to_string(), &favs.to_string()],
         );
         buf.set_string(
             area.x,
@@ -2244,9 +2718,9 @@ impl App {
             &text,
             Style::default().fg(theme.dim).bg(Color::Black),
         );
-        let hint = " enter: connect  esc: clear  ↑/↓: select ";
+        let hint = self.l10n.tr("hint_home_status");
         buf.set_string(
-            area.x + area.width.saturating_sub(hint.len() as u16),
+            area.x + area.width.saturating_sub(str_width(hint)),
             area.y,
             hint,
             Style::default().fg(theme.dim),
@@ -2266,6 +2740,7 @@ impl App {
 
         // Tab strip
         {
+            let l = self.l10n;
             let buf = frame.buffer_mut();
             let mut x = tabs_area.x;
             for (i, t) in self.terminals.iter().enumerate() {
@@ -2276,7 +2751,7 @@ impl App {
                     if t.connected {
                         t.server_name.clone()
                     } else {
-                        format!("{}(down)", t.server_name)
+                        l.fmt("tab_down", &[t.server_name.as_str()])
                     }
                 );
                 let style = if active {
@@ -2299,17 +2774,17 @@ impl App {
                 buf.set_string(
                     x,
                     tabs_area.y,
-                    " (connecting…)",
+                    l.tr("term_connecting"),
                     Style::default().fg(theme.warning),
                 );
             }
             let hint = if self.copy_mode.is_some() {
-                " copy: arrows move · enter/copy  esc: exit "
+                l.tr("hint_copy")
             } else {
-                " ctrl+tab switch · ctrl+p commands · ctrl+x c copy · ctrl+x d disconnect "
+                l.tr("hint_terminal")
             };
             buf.set_string(
-                tabs_area.x + tabs_area.width.saturating_sub(hint.len() as u16),
+                tabs_area.x + tabs_area.width.saturating_sub(str_width(hint)),
                 tabs_area.y,
                 hint,
                 Style::default().fg(theme.accent),
@@ -2350,6 +2825,7 @@ impl App {
 
     fn draw_term_status(&self, frame: &mut Frame, area: Rect) {
         let theme = &self.theme;
+        let l = self.l10n;
         let buf = frame.buffer_mut();
 
         let t = self.terminals.get(self.active_term);
@@ -2361,35 +2837,41 @@ impl App {
                 theme.error,
                 t.disconnect_reason
                     .clone()
-                    .unwrap_or_else(|| "disconnected".into()),
+                    .unwrap_or_else(|| l.tr("disconnected").into()),
             ),
-            (_, _, true) => ("●", theme.warning, "connecting".into()),
+            (_, _, true) => ("●", theme.warning, l.tr("connecting").into()),
             (Some(t), Some(s), _) => (
                 "●",
                 theme.ok,
-                format!(
-                    "{} — cpu {:.0}%  mem {:.0}%  lat {}ms  load {:.2}",
-                    t.user_host,
-                    s.cpu_usage,
-                    s.mem_usage,
-                    s.latency,
-                    s.load_avg[0]
+                l.fmt(
+                    "status_metrics",
+                    &[
+                        t.user_host.as_str(),
+                        &format!("{:.0}", s.cpu_usage),
+                        &format!("{:.0}", s.mem_usage),
+                        &s.latency.to_string(),
+                        &format!("{:.2}", s.load_avg[0]),
+                    ],
                 ),
             ),
-            (Some(t), None, _) => ("●", theme.ok, format!("{} — connected", t.user_host)),
-            _ => ("○", theme.dim, "no active session".into()),
+            (Some(t), None, _) => (
+                "●",
+                theme.ok,
+                l.fmt("connected", &[t.user_host.as_str()]),
+            ),
+            _ => ("○", theme.dim, l.tr("no_active_session").into()),
         };
 
         let mut text = format!(" {} {} ", dot, label);
         if scrolled
             && let Some(t) = self.terminals.get(self.active_term)
         {
-            text.insert_str(0, &format!("⤒ {} lines back · ", t.pane.scroll_offset()));
+            text.insert_str(0, &l.fmt("scrollback_lines_back", &[&t.pane.scroll_offset().to_string()]));
         }
         buf.set_string(area.x, area.y, &text, Style::default().fg(dot_color));
-        let hint = " ctrl+x q quit · esc: shell · ctrl+tab: switch ";
+        let hint = l.tr("hint_term_status");
         buf.set_string(
-            area.x + area.width.saturating_sub(hint.len() as u16),
+            area.x + area.width.saturating_sub(str_width(hint)),
             area.y,
             hint,
             Style::default().fg(theme.dim),
@@ -2416,7 +2898,7 @@ impl App {
         h[1]
     }
 
-    fn draw_command_bar(frame: &mut Frame, cb: &CommandBar, theme: &Theme) {
+    fn draw_command_bar(frame: &mut Frame, cb: &CommandBar, theme: &Theme, l10n: &L10n) {
         let area = Self::popup_area(frame.area(), 60, 60);
         frame.render_widget(Clear, area);
 
@@ -2424,7 +2906,7 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accent))
             .title(Span::styled(
-                " command palette ",
+                l10n.tr("palette_title"),
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
@@ -2480,7 +2962,7 @@ impl App {
         );
     }
 
-    fn draw_dialog(frame: &mut Frame, dlg: &Dialog, theme: &Theme) {
+    fn draw_dialog(frame: &mut Frame, dlg: &Dialog, theme: &Theme, l10n: &L10n) {
         let area = match dlg {
             Dialog::NewSession(_) => Self::popup_area(frame.area(), 65, 70),
             _ => Self::popup_area(frame.area(), 55, 40),
@@ -2491,7 +2973,7 @@ impl App {
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accent))
             .title(Span::styled(
-                format!(" {} ", dlg.title()),
+                format!(" {} ", dlg.title(l10n)),
                 Style::default().fg(theme.accent).add_modifier(Modifier::BOLD),
             ));
         let inner = block.inner(area);
@@ -2516,7 +2998,7 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
-                            " enter: submit   ",
+                            l10n.tr("enter_cancel"),
                             Style::default().fg(theme.dim),
                         ),
                         Span::styled("esc: cancel", Style::default().fg(theme.dim)),
@@ -2539,7 +3021,12 @@ impl App {
                         Style::default().fg(theme.dim)
                     };
                     let buf = frame.buffer_mut();
-                    buf.set_string(inner.x, y, format!(" {}", field.label), label_style);
+                    buf.set_string(
+                        inner.x,
+                        y,
+                        format!(" {}", l10n.tr(field.label)),
+                        label_style,
+                    );
                     let value: String = if field.masked {
                         field.value.chars().map(|_| '•').collect()
                     } else {
@@ -2568,10 +3055,13 @@ impl App {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
                         Span::styled(
-                            " tab/↑↓: navigate   ",
+                            l10n.tr("hint_form_nav"),
                             Style::default().fg(theme.dim),
                         ),
-                        Span::styled("enter: next / save", Style::default().fg(theme.dim)),
+                        Span::styled(
+                            l10n.tr("hint_form_next"),
+                            Style::default().fg(theme.dim),
+                        ),
                     ])),
                     Rect::new(inner.x, hint_y, inner.width, 1),
                 );
@@ -2579,9 +3069,9 @@ impl App {
             Dialog::ConfirmDelete { name, .. } => {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::raw(format!("Delete session \"{}\"?  ", name)),
+                        Span::raw(l10n.fmt("confirm_delete_prompt", &[name.as_str()])),
                         Span::styled(
-                            "enter: delete   esc: cancel",
+                            l10n.tr("hint_delete"),
                             Style::default().fg(theme.dim),
                         ),
                     ]))
@@ -2590,32 +3080,18 @@ impl App {
                 );
             }
             Dialog::Help => {
-                let lines = [
-                    "Home page",
-                    "  ↑/↓         select session",
-                    "  enter       connect",
-                    "  type        filter sessions",
-                    "  esc         clear filter",
-                    "  ctrl+p      command palette",
-                    "Terminal page",
-                    "  any key     sent to remote shell",
-                    "  pgup/pgdn   scrollback    ctrl+tab  switch",
-                    "Leader key (ctrl+x, then)",
-                    "  q quit   h help   l sessions   r refresh",
-                    "  n new    e edit    f favorite   d delete/disconnect",
-                    "  c copy   t tab++   1-9 jump    p palette",
-                ];
-                for (i, l) in lines.iter().enumerate() {
+                let lines = help_lines(l10n);
+                for (i, (header, l)) in lines.iter().enumerate() {
                     let y = inner.y + i as u16;
                     if y >= inner.y + inner.height {
                         break;
                     }
-                    let style = if l.starts_with("  ") {
-                        Style::default().fg(theme.fg)
-                    } else {
+                    let style = if *header {
                         Style::default()
                             .fg(theme.accent)
                             .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme.fg)
                     };
                     frame.buffer_mut().set_string(inner.x, y, l, style);
                 }
@@ -2623,7 +3099,7 @@ impl App {
             Dialog::Quit => {
                 frame.render_widget(
                     Paragraph::new(Line::from(vec![
-                        Span::raw("Quit NexaShell TUI?  "),
+                        Span::raw(l10n.tr("quit_prompt")),
                         Span::styled(
                             "enter: quit   esc: cancel",
                             Style::default().fg(theme.dim),
@@ -2640,7 +3116,7 @@ impl App {
                 frame.render_widget(p, Rect::new(inner.x, inner.y, inner.width, inner.height - 2));
                 frame.render_widget(
                     Paragraph::new(Line::from(Span::styled(
-                        " esc: dismiss ",
+                        l10n.tr("esc_dismiss"),
                         Style::default().fg(theme.dim),
                     ))),
                     Rect::new(inner.x, inner.y + inner.height - 2, inner.width, 1),
@@ -2663,6 +3139,23 @@ fn char_boundary(s: &str, char_idx: usize) -> usize {
 
 fn char_width(c: char) -> usize {
     unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Display width of a string in terminal cells (CJK glyphs count as 2). Use
+/// this instead of `.len()` (byte length) when positioning text, so Chinese
+/// labels/hints stay correctly right-aligned.
+fn str_width(s: &str) -> u16 {
+    unicode_width::UnicodeWidthStr::width(s) as u16
+}
+
+/// A spinning frame for the "connecting…" indicator, advancing with wall-clock
+/// time so the user can see progress even when handshake takes a while.
+fn spinner_frame(start: Option<Instant>) -> &'static str {
+    const FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+    match start {
+        Some(s) => FRAMES[(s.elapsed().as_millis() as usize / 110) % FRAMES.len()],
+        None => FRAMES[0],
+    }
 }
 
 fn insert_char(s: &mut String, cursor: &mut usize, c: char) {
@@ -2865,5 +3358,285 @@ pub fn key_to_escape(key: KeyEvent) -> Option<String> {
         }
         KeyCode::Null => None,
         _ => None,
+    }
+}
+
+// ============================================================================
+// Render tests (headless via ratatui TestBackend)
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    /// Draw one frame onto a fresh TestBackend; any panic in App::draw surfaces
+    /// here (the cursor/terminal abstraction is bypassed, so black-screen bugs
+    /// caused by a panicking draw are caught).
+    fn render_frame(app: &mut App, width: u16, height: u16) -> Vec<String> {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|f| {
+                app.draw(f);
+            })
+            .expect("draw");
+        let view = terminal.backend().buffer();
+        (0..height)
+            .map(|y| {
+                (0..width)
+                    .map(|x| view[(x, y)].symbol().to_string())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn settings_page_renders_and_switches_language_without_panic() {
+        let mut app = make_app();
+
+        app.open_settings();
+        render_frame(&mut app, 120, 40);
+
+        // Switch the language field to Simplified Chinese and save.
+        let mut form = app.settings.take().unwrap();
+        form.lang = 2; // index of Lang::Zh
+        app.apply_settings(form);
+        assert!(app.l10n.is_zh(), "language should now be Chinese");
+
+        // Render the settings page repeatedly in the new language: a broken
+        // translation/draw would panic or blank here.
+        let frame = render_frame(&mut app, 120, 40);
+        render_frame(&mut app, 120, 40);
+
+        // Back to home and render again.
+        app.close_settings();
+        assert_eq!(app.page, Page::Home);
+        let home = render_frame(&mut app, 120, 40);
+
+        // Sanity: the settings page should be rendering Chinese (TestBackend
+        // inserts a space into each wide-glyph cell, so "语言" appears as
+        // "语 言" — check for any CJK ideograph instead of an exact substring).
+        let text = frame.concat();
+        assert!(
+            text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
+            "settings page should render Chinese labels, got: {text:?}"
+        );
+        // Home page should render the top bar (never blank).
+        assert!(
+            home.iter().any(|line| !line.trim().is_empty()),
+            "home page rendered blank after language switch: {home:?}"
+        );
+    }
+
+    /// Build an App with throwaway channels (reads default config; DB may be
+    /// uninitialized, in which case settings default to Auto/default theme).
+    fn make_app() -> App {
+        let manager = Arc::new(SshManager::default());
+        let (tx, rx) = mpsc::unbounded_channel::<UiEvent>();
+        let sink = Arc::new(EventSink::new(tx.clone()));
+        App::new(manager, sink, tx, rx)
+    }
+
+    #[test]
+    fn terminal_page_renders_in_chinese() {
+        let mut app = make_app();
+        app.config.lang = Lang::Zh;
+        app.l10n = app.config.l10n();
+        let pane = TerminalPane::new(100, 30, 10_000);
+        app.terminals.push(TerminalSession {
+            session_id: "s1".into(),
+            server_name: "box".into(),
+            user_host: "u@box".into(),
+            pane,
+            connected: true,
+            disconnect_reason: None,
+            status: None,
+        });
+        app.active_term = 0;
+        app.page = Page::Terminal;
+        let frame = render_frame(&mut app, 120, 40);
+        assert!(
+            frame.iter().any(|line| !line.trim().is_empty()),
+            "terminal page rendered blank in Chinese: {frame:?}"
+        );
+    }
+
+    #[test]
+    fn language_switch_via_keys_can_save_and_render() {
+        let mut app = make_app();
+        let key = |code: KeyCode, ctrl: bool| KeyEvent::new(
+            code,
+            if ctrl { KeyModifiers::CONTROL } else { KeyModifiers::NONE },
+        );
+
+        // ctrl+x then 'o' opens the settings page.
+        app.handle_key(key(KeyCode::Char('x'), true));
+        app.handle_key(key(KeyCode::Char('o'), false));
+        assert_eq!(app.page, Page::Settings);
+        render_frame(&mut app, 120, 40);
+
+        // Language field already focused; press Right twice to reach Zh, then save.
+        app.handle_key(key(KeyCode::Right, false));
+        assert_eq!(
+            app.settings.as_ref().unwrap().lang,
+            1,
+            "first Right should move lang Auto->En (focus={})",
+            app.settings.as_ref().unwrap().focus
+        );
+        app.handle_key(key(KeyCode::Right, false));
+        assert_eq!(app.settings.as_ref().unwrap().lang, 2, "second Right should reach Zh");
+        app.handle_key(key(KeyCode::Enter, false));
+        assert!(app.l10n.is_zh(), "expected Chinese after cycling + save");
+
+        let frame = render_frame(&mut app, 120, 40);
+        assert!(
+            frame.iter().any(|line| !line.trim().is_empty()),
+            "settings page blank after key-driven language switch: {frame:?}"
+        );
+    }
+
+    /// Render every page across many terminal sizes in both languages; a stale
+    /// width/positioning bug that black-screens on a real terminal (e.g. a draw
+    /// panic) would surface here. This mirrors the member `cfg(test)` harness.
+    #[test]
+    fn no_draw_panic_across_sizes_and_languages() {
+        for lang in [Lang::En, Lang::Zh] {
+            for (w, h) in [
+                (40, 10),
+                (60, 15),
+                (80, 24),
+                (100, 30),
+                (120, 40),
+                (140, 50),
+                (200, 60),
+            ] {
+                let mut app = make_app();
+                app.config.lang = lang;
+                app.l10n = app.config.l10n();
+                // Populate a session so home renders its list, not the empty text.
+                app.sessions.push(SessionWithRelations {
+                    session: crate::db::Session {
+                        id: "s1".into(),
+                        addr: "10.0.0.1".into(),
+                        port: 22,
+                        server_name: "prod box".into(),
+                        username: "root".into(),
+                        auth_type: "password".into(),
+                        private_key_path: None,
+                        is_favorite: true,
+                        last_connected_at: None,
+                        created_at: String::new(),
+                        updated_at: String::new(),
+                    },
+                    group_ids: vec![],
+                    groups: vec![],
+                    tag_ids: vec![],
+                    tags: vec!["db".into()],
+                });
+                // Home
+                app.page = Page::Home;
+                render_frame(&mut app, w, h);
+                // Settings
+                app.open_settings();
+                render_frame(&mut app, w, h);
+                app.close_settings();
+                // Terminal
+                let pane = TerminalPane::new(w, h, 10_000);
+                app.terminals.push(TerminalSession {
+                    session_id: "s1".into(),
+                    server_name: "prod box".into(),
+                    user_host: "root@10.0.0.1".into(),
+                    pane,
+                    connected: true,
+                    disconnect_reason: None,
+                    status: None,
+                });
+                app.active_term = 0;
+                app.page = Page::Terminal;
+                render_frame(&mut app, w, h);
+            }
+        }
+    }
+
+    #[test]
+    fn language_change_previews_live_and_esc_reverts() {
+        let mut app = make_app();
+        // Deterministic start: force English (index 1 of Lang::ALL) so the test
+        // never depends on the ambient LANG environment.
+        app.config.lang = Lang::En;
+        app.l10n = app.config.l10n();
+        assert!(!app.l10n.is_zh(), "starts non-Chinese");
+
+        app.open_settings();
+        // Form starts with En selected; one Right cycles to Zh and previews it
+        // immediately (no save needed).
+        assert_eq!(app.settings.as_ref().unwrap().lang, 1, "starts at En");
+        app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(app.settings.as_ref().unwrap().lang, 2, "Right reaches Zh");
+        assert!(app.l10n.is_zh(), "cycling to Zh should preview Chinese");
+
+        // Esc reverts the preview back to the saved (English) config.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.page, Page::Home, "esc leaves the settings page");
+        assert!(!app.l10n.is_zh(), "esc should revert the language preview");
+        assert_eq!(app.config.lang, Lang::En, "saved config unchanged by preview");
+    }
+
+    #[test]
+    fn connecting_shows_indicator_and_cancel_clears_it() {
+        let mut app = make_app();
+        app.sessions.push(SessionWithRelations {
+            session: crate::db::Session {
+                id: "s1".into(),
+                addr: "10.0.0.1".into(),
+                port: 22,
+                server_name: "prod".into(),
+                username: "root".into(),
+                auth_type: "password".into(),
+                private_key_path: None,
+                is_favorite: false,
+                last_connected_at: None,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            group_ids: vec![],
+            groups: vec![],
+            tag_ids: vec![],
+            tags: vec![],
+        });
+
+        // Simulate an in-flight connect (do_connect itself would spawn a real
+        // network task, which is out of scope for this headless render test).
+        app.connecting = true;
+        app.connecting_session = Some("root@10.0.0.1".into());
+        app.connect_started = Some(Instant::now());
+        app.page = Page::Home;
+
+        // Render home: the connecting status bar must be non-blank.
+        let frame = render_frame(&mut app, 120, 40);
+        assert!(
+            frame.iter().any(|line| !line.trim().is_empty()),
+            "home rendered blank while connecting: {frame:?}"
+        );
+
+        // Esc on home cancels.
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.connecting, "esc should cancel the connect");
+        assert!(app.connecting_session.is_none());
+        assert!(app.connect_started.is_none());
+    }
+
+    #[test]
+    fn spinner_frame_is_bounded_and_stable() {
+        let none = spinner_frame(None);
+        assert_eq!(none, "⠋");
+        // Frames cycle but never panic and always return one of the 8 glyphs.
+        let start = Instant::now();
+        for _ in 0..1000 {
+            let f = spinner_frame(Some(start));
+            assert_eq!(f.chars().count(), 1, "spinner frame is a single glyph");
+        }
     }
 }
