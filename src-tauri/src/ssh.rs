@@ -424,6 +424,22 @@ impl SshManager {
             .with_interval(Duration::from_secs(5));
         let _ = sock.set_tcp_keepalive(&keepalive);
 
+        // Disable Nagle's algorithm. With Nagle ON (the OS default), a
+        // keystroke written while any data is still unacknowledged is held in
+        // the kernel until the peer's ACK arrives — and the peer's delayed-ACK
+        // timer (up to ~40ms) then delays that ACK when it has no data to send
+        // back, so every keystroke typed right after a burst of command output
+        // "sticks" for tens of milliseconds. That is exactly the sticky-typing
+        // symptom reported against the terminal. OpenSSH / PuTTY set
+        // TCP_NODELAY for the same reason, which is why `ssh` from pwsh to the
+        // same server feels instant. Best-effort: failure only degrades latency.
+        if let Err(e) = tcp.set_nodelay(true) {
+            log::warn!(
+                "Failed to set TCP_NODELAY (interactive typing may lag): {}",
+                e
+            );
+        }
+
         Ok(tcp)
     }
 
@@ -480,15 +496,19 @@ impl SshManager {
             .map_err(|e| SshError::ChannelError(format!("Failed to start shell: {}", e)))?;
 
         // Keep the main session in BLOCKING mode, but bound each blocking call
-        // to 20ms via libssh2's own timeout. Blocking mode is the officially
+        // to 5ms via libssh2's own timeout. Blocking mode is the officially
         // recommended usage for ssh2-rs and avoids libssh2 1.11.1's known
         // non-blocking bug (send_existing fails to set OUTBOUND on EAGAIN,
         // which corrupts the transport and causes spurious "transport read"
-        // disconnects while typing). The 20ms ceiling keeps idle-wakeup
+        // disconnects while typing). The 5ms ceiling keeps idle-wakeup
         // granularity — and therefore input-drain + echo-flush latency — at
-        // ~20ms instead of 100ms. An idle loop waking every 20ms costs
+        // ~5ms instead of 20ms: when the loop is parked in the blocking read,
+        // a keystroke queued in the input channel is not picked up until the
+        // read returns, so each keystroke after an idle gap waits up to the
+        // timeout. 20ms of that wait per keystroke is what makes typing feel
+        // sticky; 5ms is imperceptible. An idle loop waking every 5ms costs
         // negligible CPU because the blocking read parks in the OS poll.
-        main_sess.set_timeout(20);
+        main_sess.set_timeout(5);
 
         // Helper session (blocking, for SFTP/monitoring/probing)
         let helper_tcp = Self::open_tcp_connection(addr, host_for_err, port)?;
@@ -595,7 +615,7 @@ impl SshManager {
             let mut urgent_flush = false;
             let initial_buffering_start = std::time::Instant::now();
             let mut in_initial_buffering = true;
-            // Blocking reads are bounded to 20ms by the session timeout, so an
+            // Blocking reads are bounded to 5ms by the session timeout, so an
             // idle loop naturally paces itself (no busy-poll backoff needed).
 
             loop {
@@ -604,7 +624,7 @@ impl SshManager {
                 }
 
                 // Process user input FIRST for low-latency IME response.
-                // The main session is blocking with a 20ms timeout, so a full
+                // The main session is blocking with a 5ms timeout, so a full
                 // channel/TCP buffer surfaces as WouldBlock/TimedOut — retry
                 // with backoff instead of dropping the remainder of the input.
                 while let Ok(input) = input_receiver.try_recv() {
