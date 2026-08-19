@@ -1,6 +1,6 @@
 [package]
 name = "NexaShell"
-version = "2.0.0"
+version = "2.0.1"
 description = "This is a modern SSH client."
 authors = ["ChengVar <chengver@gmail.com>"]
 edition = "2024"
@@ -24,7 +24,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ssh2 = "0.9"
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 socket2 = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 thiserror = "1"
