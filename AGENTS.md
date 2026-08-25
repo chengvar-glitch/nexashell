@@ -60,6 +60,13 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 
 ## Workflow — Agent-Managed Development
 
+### 0. 对话风格 (Dialog Style)
+- 与用户对话时使用 `/caveman` 技能（caveman 模式），默认 `full` 等级。
+- 回复极简，去掉填充/客套/废话，保留全部技术实质。
+- 代码、commit 类型（feat/fix/…）、API 名称、错误字符串原样保留，不翻译、不缩写。
+- 用与用户相同的语言回复；压缩风格而非压缩语言。
+- 涉及安全警告、不可逆操作确认、多步骤顺序、或将引入歧义时，自动退出 caveman 恢复完整表达。
+
 ### 1. 全权托管 (Full Agent Delegation)
 - Agent 拥有项目全部决策权，用户只提需求、审查结果。
 - Agent 直接修改代码、运行命令、提交推送，无需逐事请示。

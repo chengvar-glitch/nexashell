@@ -35,13 +35,14 @@
   --transition-slow: 0.35s var(--ease-emphasized);
 
   /* macOS light two-pane palette — chrome (title bar, tab bar, sidebar) sits
-   * on --color-bg-secondary: #e1dfe1 for a subtle layer contrast, while the
-   * content area uses the softer --color-bg-primary: #f5f5f5. Elevated
-   * surfaces (--color-bg-elevated: #ffffff) stay pure white so cards and
-   * panels visibly pop instead of the whole UI reading as one flat sheet. */
+   * on a lighter --color-bg-secondary: #ededef than the content area
+   * --color-bg-primary: #f5f5f5 so chrome reads bright instead of dark while
+   * keeping a subtle layer contrast. Elevated surfaces
+   * (--color-bg-elevated: #ffffff) stay pure white so cards and panels visibly
+   * pop instead of the whole UI reading as one flat sheet. */
   --color-bg-primary: #f5f5f5;
-  --color-bg-secondary: #e1dfe1;
-  --color-bg-tertiary: #d8d6d8;
+  --color-bg-secondary: #ededef;
+  --color-bg-tertiary: #e3e3e6;
   --color-bg-elevated: #ffffff;
   --color-bg-overlay: rgba(0, 0, 0, 0.3);
 
