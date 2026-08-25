@@ -1,6 +1,6 @@
 [package]
 name = "NexaShell"
-version = "2.0.2"
+version = "2.0.3"
 description = "This is a modern SSH client."
 authors = ["ChengVar <chengver@gmail.com>"]
 edition = "2024"
@@ -24,7 +24,7 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-ssh2 = { version = "0.9", features = ["vendored-openssl"] }
+ssh2 = "0.9"
 socket2 = "0.5"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 thiserror = "1"
@@ -57,6 +57,10 @@ features = ["derive"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25"
+# macOS: statically link a vendored OpenSSL so the app has no Homebrew
+# openssl runtime dependency. Windows keeps the plain `ssh2 = "0.9"` above
+# (vendored builds need a full Perl toolchain that Windows MSYS lacks).
+ssh2 = { version = "0.9", features = ["vendored-openssl"] }
 
 [profile.release]
 opt-level = 3
