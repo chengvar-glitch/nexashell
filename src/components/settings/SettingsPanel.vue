@@ -696,7 +696,6 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(2px);
   border-radius: inherit;
   overflow: hidden;
 }
@@ -709,24 +708,21 @@ onUnmounted(() => {
 
 /*
  * Native-polish: neutralize the global `.panel:hover` / `.panel:active`
- * behaviors that shake the panel. Animated backdrop-filter + a full-panel
- * scale on :active cause visible jitter on every click inside the settings
- * modal on macOS WebKit. The settings panel should sit still; only the modal
- * open/close fade+scale below in .settings-fade-* animates it.
+ * behaviors that shake the panel. The `:active` full-panel scale causes
+ * visible jitter on every click inside the settings modal on macOS WebKit.
+ * The settings panel should sit still; only the modal open/close fade+scale
+ * below in .settings-fade-* animates it.
  */
 .settings-panel.panel:hover {
   box-shadow:
     0 0 0 0.5px var(--color-border-secondary),
     var(--shadow-xl);
-  backdrop-filter: none;
 }
 .settings-panel.panel:focus-within,
 .settings-panel.panel:active {
   transform: translateZ(0); /* no scale on click — prevents the shake */
-  backdrop-filter: none;
 }
 .settings-panel.panel {
-  backdrop-filter: var(--blur-medium);
   transition: box-shadow var(--transition-fast);
 }
 

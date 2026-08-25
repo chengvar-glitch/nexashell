@@ -915,9 +915,6 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(
-    2px
-  ); /* Subtle blur to distinguish modal from background */
   border-radius: inherit;
   overflow: hidden;
 }

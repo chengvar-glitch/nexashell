@@ -4,9 +4,7 @@
   right: 0;
   bottom: 0;
   width: 280px;
-  background-color: rgba(20, 20, 20, 0.25); /* Much more transparent */
-  backdrop-filter: blur(12px) saturate(180%); /* Reduce blur to see text through */
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  background-color: #18181a; /* Solid surface — no glass */
   border-left: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.4);
   z-index: 100;
@@ -189,8 +187,6 @@
   width: 10px;
   height: 60px;
   background-color: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-right: none;
   border-radius: 8px 0 0 8px;

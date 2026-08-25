@@ -44,10 +44,6 @@
   --color-bg-tertiary: #d8d6d8;
   --color-bg-elevated: #ffffff;
   --color-bg-overlay: rgba(0, 0, 0, 0.3);
-  /* Liquid glass surfaces (chrome tier + floating panels) — translucent over
-   * the native window vibrancy/acrylic so the desktop blurs through */
-  --color-glass: rgba(255, 255, 255, 0.7);
-  --color-bg-menu: rgba(255, 255, 255, 0.7);
 
   /* macOS style borders - natural pane division color in light mode */
   --color-border-primary: #c0bfc0;
@@ -80,10 +76,11 @@
     ui-monospace, Monaco, Menlo, Consolas, 'Cascadia Code', 'Ubuntu Mono',
     monospace;
 
-  /* macOS glass effect */
-  --blur-light: blur(30px) saturate(180%);
-  --blur-medium: blur(50px) saturate(180%);
-  --blur-heavy: blur(80px) saturate(180%);
+  /* Frosted-glass effect — intentionally disabled: surfaces are solid, no
+   * backdrop blur. Keep the tokens so nothing breaks at the call sites. */
+  --blur-light: none;
+  --blur-medium: none;
+  --blur-heavy: none;
 }
 
 /* Base styles and system font stack */
@@ -129,9 +126,6 @@ body {
   --color-bg-tertiary: #3a3a3c;
   --color-bg-elevated: #2c2c2e;
   --color-bg-overlay: rgba(0, 0, 0, 0.6);
-  /* Liquid glass surfaces (chrome tier + floating panels) */
-  --color-glass: rgba(30, 30, 30, 0.7);
-  --color-bg-menu: rgba(30, 30, 30, 0.7);
 
   --color-border-primary: rgba(255, 255, 255, 0.1);
   --color-border-secondary: rgba(255, 255, 255, 0.08);

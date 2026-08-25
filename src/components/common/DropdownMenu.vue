@@ -318,20 +318,19 @@ onUnmounted(() => {
 
 <style scoped>
 /* macOS-native context-menu styling. Overrides the web-ish `.panel`
-   (large radius / heavy glass / springy transition) with an NSMenu-like look:
-   compact, subtle acrylic, tight rows, system highlight on hover, no bounce. */
+   (large radius / heavy shadow / springy transition) with an NSMenu-like
+   look: compact, solid surface, tight rows, system highlight on hover, no
+   bounce. */
 .dropdown-menu {
   position: absolute;
   min-width: 200px;
   /* Override `.panel` defaults to get a native-feeling menu surface. */
-  background-color: var(--color-bg-menu);
+  background-color: var(--color-bg-elevated);
   border: 0.5px solid var(--color-border-primary);
   border-radius: 8px;
   box-shadow:
     0 0 0 0.5px var(--color-border-secondary),
     0 6px 20px rgba(0, 0, 0, var(--shadow-alpha));
-  backdrop-filter: var(--blur-medium);
-  -webkit-backdrop-filter: var(--blur-medium);
   overflow: visible !important;
   transition:
     opacity 0.12s ease,
@@ -424,14 +423,12 @@ onUnmounted(() => {
   min-width: 180px;
   z-index: 9999;
   margin-left: 4px;
-  background-color: var(--color-bg-menu);
+  background-color: var(--color-bg-elevated);
   border: 0.5px solid var(--color-border-primary);
   border-radius: 8px;
   box-shadow:
     0 0 0 0.5px var(--color-border-secondary),
     0 6px 20px rgba(0, 0, 0, var(--shadow-alpha));
-  backdrop-filter: var(--blur-medium);
-  -webkit-backdrop-filter: var(--blur-medium);
 }
 
 .submenu-left {

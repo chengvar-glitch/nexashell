@@ -67,8 +67,7 @@
     0 0 0 0.5px var(--color-border-secondary),
     var(--shadow-xl);
   border-radius: var(--radius-2xl);
-  backdrop-filter: var(--blur-medium);
-  transition: transform var(--transition-fast), box-shadow var(--transition-fast), backdrop-filter var(--transition-fast);
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
   overflow: hidden;
   clip-path: none !important;
   background-clip: padding-box;
@@ -80,7 +79,6 @@
   box-shadow:
     0 0 0 0.5px var(--color-border-primary),
     var(--shadow-2xl);
-  backdrop-filter: var(--blur-heavy);
 }
 
 .panel:active {
@@ -203,19 +201,6 @@
 
 .border-all {
   border: 0.5px solid var(--color-border-secondary);
-}
-
-/* Glass effect */
-.glass-light {
-  backdrop-filter: var(--blur-light);
-}
-
-.glass-medium {
-  backdrop-filter: var(--blur-medium);
-}
-
-.glass-heavy {
-  backdrop-filter: var(--blur-heavy);
 }
 
 /* Interactive element states - macOS style */
@@ -474,7 +459,6 @@ a:focus-visible,
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(4px) saturate(150%);
   background-color: var(--color-bg-overlay);
   border-radius: inherit;
   overflow: hidden;
@@ -499,11 +483,9 @@ a:focus-visible,
 @keyframes modal-overlay-fade {
   from {
     opacity: 0;
-    backdrop-filter: blur(0) saturate(100%);
   }
   to {
     opacity: 1;
-    backdrop-filter: blur(4px) saturate(150%);
   }
 }
 
@@ -529,7 +511,6 @@ a:focus-visible,
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  backdrop-filter: blur(4px) saturate(150%);
   background-color: var(--color-bg-overlay);
   border-radius: inherit;
   overflow: hidden;

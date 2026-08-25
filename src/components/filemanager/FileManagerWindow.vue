@@ -990,7 +990,6 @@ const taskStatusClass = (task: UploadTask): string => {
   align-items: center;
   justify-content: center;
   background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-  backdrop-filter: blur(2px);
   pointer-events: auto;
 }
 .fm-drop-card {
