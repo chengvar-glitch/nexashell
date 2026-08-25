@@ -121,9 +121,13 @@ export class ShortcutManager {
       target.tagName === 'TEXTAREA' ||
       target.contentEditable === 'true';
 
-    // When the event targets a terminal, never intercept: let xterm handle
-    // keys (including Ctrl+D/EOF, Ctrl+Q, Cmd+...) natively.
-    if (this.isInTerminal(event)) {
+    // When the event targets a terminal, let xterm keep control of terminal
+    // input. On macOS the shell never sees app-level Cmd+<key> combos, and
+    // those are the app's shortcuts (Cmd+, settings, Cmd+T new tab, Cmd+W
+    // close, Cmd+D split, Cmd+P search), so let metaKey events through.
+    // Block everything else (Ctrl+D/EOF, Ctrl+Q, plain keys) so the terminal
+    // owns them instead of a global shortcut swallowing them.
+    if (this.isInTerminal(event) && !event.metaKey) {
       return;
     }
 
