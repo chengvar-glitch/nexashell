@@ -67,12 +67,22 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
 - 用与用户相同的语言回复；压缩风格而非压缩语言。
 - 涉及安全警告、不可逆操作确认、多步骤顺序、或将引入歧义时，自动退出 caveman 恢复完整表达。
 
-### 1. 全权托管 (Full Agent Delegation)
+### 1. 工程模式 (Engineering Style) — Ponytail 全程生效
+- 写代码、重构、修复、评审全程启用 `/ponytail` 技能，默认 `full`，每响应生效，不回退到过度设计。
+- 梯子优先：YAGNI（不需要的别造）→ 已有代码复用 → stdlib → 平台原生 → 已装依赖 → 一行搞定 → 最小可运行。
+- Bug 修根因不修症状：先 grep 所有调用点，再改共享函数；一处守卫优于每个调用方各补一层。
+- 不加未要求的抽象（单实现接口、单产品工厂、恒不变配置）。删除优于新增，无聊优于聪明，最少文件、最短 diff。
+- 代码先行，解释最多三行；说明比代码长就删。模式：`[code] → skipped: [X], add when [Y].`
+- 简化掉真实天花板（全局锁、O(n²) 扫描、朴素启发式）时用 `ponytail:` 注释标注并给升级路径。
+- 非平凡逻辑（分支/循环/解析器/金钱或安全路径）留一个可运行自检：`assert` 的 `demo()`/`__main__` 或一个小 `test_*.py`，不用框架。平凡一行不需测试。
+- 永不简化：信任边界的输入校验、防数据丢失的错误处理、安全措施、无障碍基础、明确要求的完整版。
+
+### 2. 全权托管 (Full Agent Delegation)
 - Agent 拥有项目全部决策权，用户只提需求、审查结果。
 - Agent 直接修改代码、运行命令、提交推送，无需逐事请示。
 - 用户指出的问题，Agent 自主排查并修复。
 
-### 2. 版本即 Push (Push = Version)
+### 3. 版本即 Push (Push = Version)
 - 每次 `git push` 都是一个版本，commit message 即为版本日志。
 - 语义化提交：`feat:` / `fix:` / `refactor:` / `chore:` 前缀标明类型。
 - 版本号格式：从 `v1.0.0` 递增，每次 push 前检查是否需要 tag。
@@ -81,7 +91,7 @@ IPC: `invoke` for request/response, Tauri `events` for streaming output (e.g. `s
   - 破坏性变更 → major 版本 (+1)
 - Push 前必须确保代码通过 `pnpm lint`。
 
-### 3. 构建交付 (Build for MacBook)
+### 4. 构建交付 (Build for MacBook)
 - 每次 push **后**，自动执行：
   ```bash
   pnpm tauri build
