@@ -48,6 +48,10 @@ pub struct Session {
     pub auth_type: String,
     pub private_key_path: Option<String>,
     pub is_favorite: bool,
+    // `#[serde(default)]` keeps pre-pin export files importable.
+    #[serde(default)]
+    pub is_pinned: bool,
+    pub pinned_at: Option<String>,
     pub last_connected_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -284,6 +288,13 @@ pub fn init_db() -> Result<String, String> {
         "is_favorite",
         "INTEGER NOT NULL DEFAULT 0",
     )?;
+    add_column_if_not_exists(
+        &conn,
+        "sessions",
+        "is_pinned",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_not_exists(&conn, "sessions", "pinned_at", "TEXT")?;
     add_column_if_not_exists(&conn, "sessions", "encrypted_credentials", "TEXT")?;
     // Backfill last_connected_at ONLY when we just introduced the column
     // (first migration to a schema that has it). Re-running this backfill on
@@ -531,10 +542,12 @@ pub(super) fn row_to_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sessio
         last_connected_at: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        is_pinned: row.get::<_, i64>(11)? != 0,
+        pinned_at: row.get(12)?,
     })
 }
 
-pub(super) const SESSION_COLUMNS: &str = "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at";
+pub(super) const SESSION_COLUMNS: &str = "id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, last_connected_at, created_at, updated_at, is_pinned, pinned_at";
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
@@ -782,6 +795,18 @@ pub fn toggle_favorite(id: String, is_favorite: bool) -> Result<(), String> {
         conn.execute(
             "UPDATE sessions SET is_favorite = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
             params![if is_favorite { 1 } else { 0 }, id],
+        )
+        .map_err(|e| e.to_string())
+    })?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn toggle_pin(id: String, is_pinned: bool) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE sessions SET is_pinned = ?1, pinned_at = CASE WHEN ?1 = 1 THEN CURRENT_TIMESTAMP ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+            params![if is_pinned { 1 } else { 0 }, id],
         )
         .map_err(|e| e.to_string())
     })?;

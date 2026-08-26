@@ -22,6 +22,8 @@ export default {
     views: 'Views',
     allSessions: 'All Sessions',
     favorites: 'Favorites',
+    pin: 'Pin to top',
+    unpin: 'Unpin',
     recent: 'Recent',
     groups: 'Groups',
     tags: 'Tags',

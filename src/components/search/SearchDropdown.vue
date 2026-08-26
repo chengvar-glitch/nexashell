@@ -87,7 +87,7 @@ import { APP_EVENTS } from '@/core/constants';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
 import type { TabManagement } from '@/features/tabs';
 import { eventBus } from '@/core/utils/event-bus';
-import { sortByUpdatedAtDesc } from '@/core/utils/time-utils';
+import { sortSessions } from '@/core/utils/time-utils';
 import { openFileManagerWindow } from '@/features/window';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
@@ -264,7 +264,7 @@ const filteredItems = computed(() => {
   const results: SearchResultItem[] = [];
 
   // 1. Process Sessions (Recent or Filtered)
-  const sessions = sortByUpdatedAtDesc(savedSessions.value)
+  const sessions = sortSessions(savedSessions.value)
     .filter(
       s =>
         !query ||

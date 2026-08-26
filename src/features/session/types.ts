@@ -12,6 +12,8 @@ export interface SavedSession {
   auth_type: AuthType;
   private_key_path?: string | null;
   is_favorite: boolean;
+  is_pinned: boolean;
+  pinned_at?: string | null;
   last_connected_at?: string | null;
   created_at: string;
   updated_at: string;

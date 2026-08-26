@@ -179,6 +179,16 @@ class SessionAPI {
     }
   }
 
+  async togglePin(id: string, isPinned: boolean): Promise<void> {
+    try {
+      await invoke('toggle_pin', { id, isPinned });
+      logger.info('Session pin status toggled', { id, isPinned });
+    } catch (error) {
+      logger.error('Failed to toggle session pin status', error);
+      throw error;
+    }
+  }
+
   async listSessions(): Promise<SavedSession[]> {
     try {
       const sessions = await invoke<SavedSession[]>('list_sessions');

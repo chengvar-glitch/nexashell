@@ -22,6 +22,8 @@ export default {
     views: '视图',
     allSessions: '全部会话',
     favorites: '收藏',
+    pin: '置顶',
+    unpin: '取消置顶',
     recent: '最近使用',
     groups: '分组',
     tags: '标签',

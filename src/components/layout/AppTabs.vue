@@ -22,7 +22,7 @@ import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
-import { sortByUpdatedAtDesc } from '@/core/utils/time-utils';
+import { sortSessions } from '@/core/utils/time-utils';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
 import { sessionApi } from '@/features/session';
@@ -228,7 +228,7 @@ const translatedSavedConnections = computed<Array<{
 });
 
 const sortSavedConnections = (list: SavedSession[]): SavedSession[] => {
-  return sortByUpdatedAtDesc(list);
+  return sortSessions(list);
 };
 
 const toggleSavedConnections = async (event: MouseEvent) => {

@@ -19,15 +19,24 @@ export function parseDbTimestamp(value?: string | null): number {
 }
 
 /**
- * Sort saved sessions by `updated_at` descending (most recently updated
- * first). `updated_at` is a SQLite timestamp; missing values sort last.
+ * Sort saved sessions: pinned first (most recently pinned on top), then by
+ * `updated_at` descending (most recently updated first). `pinned_at` /
+ * `updated_at` are SQLite timestamps; missing values sort last.
  */
-export function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(
-  sessions: T[]
-): T[] {
-  return [...sessions].sort(
-    (a, b) => parseDbTimestamp(b.updated_at) - parseDbTimestamp(a.updated_at)
-  );
+export function sortSessions<
+  T extends {
+    updated_at?: string | null;
+    is_pinned?: boolean;
+    pinned_at?: string | null;
+  },
+>(sessions: T[]): T[] {
+  return [...sessions].sort((a, b) => {
+    const pinDiff =
+      (b.is_pinned ? parseDbTimestamp(b.pinned_at) : 0) -
+      (a.is_pinned ? parseDbTimestamp(a.pinned_at) : 0);
+    if (pinDiff !== 0) return pinDiff;
+    return parseDbTimestamp(b.updated_at) - parseDbTimestamp(a.updated_at);
+  });
 }
 
 /**

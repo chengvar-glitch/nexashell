@@ -169,6 +169,7 @@ pub fn run() {
             db::edit_session,
             db::delete_session,
             db::toggle_favorite,
+            db::toggle_pin,
             db::import_export::export_sessions,
             db::import_export::import_sessions,
             db::import_export::import_xterminal_sessions,

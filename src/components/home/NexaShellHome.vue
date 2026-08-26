@@ -339,6 +339,7 @@
                   />
                 </th>
                 <th class="col-favorite"></th>
+                <th class="col-pin"></th>
                 <th class="col-name">{{ $t('home.serverName') }}</th>
                 <th class="col-host">{{ $t('home.host') }}</th>
                 <th class="col-groups-list">{{ $t('home.groups') }}</th>
@@ -375,6 +376,23 @@
                     <Star
                       :size="14"
                       :fill="session.is_favorite ? 'currentColor' : 'none'"
+                    />
+                  </button>
+                </td>
+                <td class="col-pin">
+                  <button
+                    class="pin-btn-small"
+                    :class="{ active: session.is_pinned }"
+                    :title="
+                      session.is_pinned
+                        ? t('home.unpin')
+                        : t('home.pin')
+                    "
+                    @click.stop="togglePin(session)"
+                  >
+                    <component
+                      :is="session.is_pinned ? Pin : PinOff"
+                      :size="14"
                     />
                   </button>
                 </td>
@@ -521,6 +539,8 @@ import {
   GripVertical,
   MoreVertical,
   Import,
+  Pin,
+  PinOff,
   type LucideIcon,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
@@ -529,7 +549,7 @@ import ImportXTerminalDialog from '@/components/home/ImportXTerminalDialog.vue';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
-import { formatRelativeTime, parseDbTimestamp } from '@/core/utils/time-utils';
+import { formatRelativeTime, parseDbTimestamp, sortSessions } from '@/core/utils/time-utils';
 import { createLogger } from '@/core/utils/logger';
 import { useToastMessage } from '@/composables';
 import { sessionApi } from '@/features/session';
@@ -663,6 +683,12 @@ const filteredSessions = computed(() => {
     }
   }
 
+  // Pinned sessions first (most recently pinned on top), then by recency.
+  // The "recent" view keeps its own last-connected ordering.
+  if (activeView.value !== 'recent') {
+    result = sortSessions(result);
+  }
+
   return result;
 });
 
@@ -718,6 +744,23 @@ const toggleFavorite = async (session: SavedSessionDisplay) => {
     });
   } catch (error) {
     logger.error('Failed to toggle favorite', error);
+  }
+};
+
+const togglePin = async (session: SavedSessionDisplay) => {
+  try {
+    const newStatus = !session.is_pinned;
+    await sessionApi.togglePin(session.id, newStatus);
+    session.is_pinned = newStatus;
+    // Mirror the backend timestamp locally so the pinned-first sort orders a
+    // freshly pinned row correctly until the next full reload.
+    session.pinned_at = newStatus ? new Date().toISOString() : null;
+    logger.info('Toggled pin', {
+      session: session.server_name,
+      isPinned: newStatus,
+    });
+  } catch (error) {
+    logger.error('Failed to toggle pin', error);
   }
 };
 
@@ -2032,7 +2075,8 @@ const onCancelDelete = () => {
 
 .session-table thead th.col-drag,
 .session-table thead th.col-checkbox,
-.session-table thead th.col-favorite {
+.session-table thead th.col-favorite,
+.session-table thead th.col-pin {
   padding: 12px 0;
 }
 
@@ -2088,6 +2132,12 @@ const onCancelDelete = () => {
 }
 
 .col-favorite {
+  width: 32px;
+  text-align: center;
+  padding: 0 4px !important;
+}
+
+.col-pin {
   width: 32px;
   text-align: center;
   padding: 0 4px !important;
@@ -2161,6 +2211,28 @@ const onCancelDelete = () => {
 
 .favorite-btn-small.active {
   color: #facc15;
+}
+
+.pin-btn-small {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-tertiary);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  border-radius: 50%;
+}
+
+.pin-btn-small:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+
+.pin-btn-small.active {
+  color: var(--color-primary);
 }
 
 .name-text {
