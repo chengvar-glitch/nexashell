@@ -485,8 +485,8 @@
 
     <!-- Transient toast (copy feedback) -->
     <Transition name="toast">
-      <div v-if="copiedSessionId" class="home-toast" role="status">
-        {{ $t('home.copied') }}
+      <div v-if="copiedMessage" class="home-toast" role="status">
+        {{ copiedMessage }}
       </div>
     </Transition>
 
@@ -531,6 +531,7 @@ import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
 import { formatRelativeTime, parseDbTimestamp } from '@/core/utils/time-utils';
 import { createLogger } from '@/core/utils/logger';
+import { useToastMessage } from '@/composables';
 import { sessionApi } from '@/features/session';
 import type { SavedSessionDisplay } from '@/features/session/types';
 
@@ -585,29 +586,20 @@ const favoriteCount = computed(
 );
 
 // Group and Tag counts for sidebar
-const groupCounts = computed(() => {
+const countByNames = (
+  extract: (s: SavedSessionDisplay) => string[] | undefined
+) => {
   const counts: Record<string, number> = {};
   sessions.value.forEach(s => {
-    if (s.groups && s.groups.length > 0) {
-      s.groups.forEach(gName => {
-        counts[gName] = (counts[gName] || 0) + 1;
-      });
-    }
+    (extract(s) || []).forEach(name => {
+      counts[name] = (counts[name] || 0) + 1;
+    });
   });
   return counts;
-});
+};
 
-const tagCounts = computed(() => {
-  const counts: Record<string, number> = {};
-  sessions.value.forEach(s => {
-    if (s.tags && s.tags.length > 0) {
-      s.tags.forEach(tName => {
-        counts[tName] = (counts[tName] || 0) + 1;
-      });
-    }
-  });
-  return counts;
-});
+const groupCounts = computed(() => countByNames(s => s.groups));
+const tagCounts = computed(() => countByNames(s => s.tags));
 
 // Input states for adding new groups/tags
 const showAddGroupInput = ref(false);
@@ -762,8 +754,11 @@ let pendingDeleteGroupId: string | null = null;
 let pendingDeleteTagId: string | null = null;
 
 // Copy feedback state
-const copiedSessionId = ref<string | null>(null);
-let copyFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
+const {
+  message: copiedMessage,
+  show: showCopyFeedback,
+  clear: clearCopyFeedback,
+} = useToastMessage(2000);
 
 // XTerminal import dialog state
 const showImportDialog = ref(false);
@@ -778,29 +773,27 @@ const handleSessionSaved = async () => {
   }
 };
 
-const handleGroupsUpdated = async () => {
+// Refresh a metadata list (groups/tags) from the backend, then reload sessions
+// since they render those names/colors.
+const refreshMetadata = async (kind: 'group' | 'tag') => {
   if (!isMounted.value) return;
   try {
-    const fetchedGroups = await invoke<Group[]>('list_groups');
-    groups.value = fetchedGroups || [];
-    // Reload sessions when groups change
+    const fetched = await invoke<Group[] | Tag[]>(
+      kind === 'group' ? 'list_groups' : 'list_tags'
+    );
+    if (kind === 'group') {
+      groups.value = fetched as Group[];
+    } else {
+      tags.value = fetched as Tag[];
+    }
     await loadSessions();
   } catch (error) {
-    logger.error('Failed to refresh groups', error);
+    logger.error(`Failed to refresh ${kind}s`, error);
   }
 };
 
-const handleTagsUpdated = async () => {
-  if (!isMounted.value) return;
-  try {
-    const fetchedTags = await invoke<Tag[]>('list_tags');
-    tags.value = fetchedTags || [];
-    // Reload sessions when tags change
-    await loadSessions();
-  } catch (error) {
-    logger.error('Failed to refresh tags', error);
-  }
-};
+const handleGroupsUpdated = () => refreshMetadata('group');
+const handleTagsUpdated = () => refreshMetadata('tag');
 
 const toggleSessionSelection = (sessionId: string) => {
   const next = new Set(selectedSessionIds.value);
@@ -904,10 +897,7 @@ onUnmounted(() => {
   eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
   eventBus.off(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
   eventBus.off(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
-  if (copyFeedbackTimer) {
-    clearTimeout(copyFeedbackTimer);
-    copyFeedbackTimer = null;
-  }
+  clearCopyFeedback();
 });
 
 const handleNewConnection = () => {
@@ -953,12 +943,7 @@ const handleCopySession = async (session: SavedSessionDisplay) => {
     });
 
     // Show transient feedback
-    copiedSessionId.value = session.id;
-    if (copyFeedbackTimer) clearTimeout(copyFeedbackTimer);
-    copyFeedbackTimer = setTimeout(() => {
-      copiedSessionId.value = null;
-      copyFeedbackTimer = null;
-    }, 2000);
+    showCopyFeedback(t('home.copied'));
   } catch (error) {
     logger.error('Failed to copy session info', error);
   }

@@ -158,7 +158,6 @@ interface Props {
   createItemText?: string;
   emptyText?: string;
   allowCreate?: boolean;
-  itemType?: string;
   /**
    * Optional async function to create a new item.
    * If provided, the component will wait for it and use the returned item.
@@ -175,7 +174,6 @@ const props = withDefaults(defineProps<Props>(), {
   createItemText: 'Create',
   emptyText: 'No items available',
   allowCreate: true,
-  itemType: 'item',
   onCreateItem: undefined,
 });
 

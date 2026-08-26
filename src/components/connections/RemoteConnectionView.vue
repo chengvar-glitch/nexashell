@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, shallowRef, nextTick, watch, onActivated, onDeactivated, computed } from 'vue';
+import { onMounted, onUnmounted, ref, shallowRef, nextTick, watch, onActivated, onDeactivated, computed, toRef } from 'vue';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
@@ -27,6 +27,7 @@ import {
   useRemotePath,
   normalizeRemotePath,
 } from '@/composables/use-remote-path';
+import { useTransferQueue } from '@/composables/use-transfer-queue';
 
 const logger = createLogger('REMOTE_CONNECTION_VIEW');
 const { t } = useI18n();
@@ -38,7 +39,7 @@ const showDashboard = ref(false);
 const activeDashboardTab = ref<'system' | 'uploads' | null>('system');
 const showTunnelPanel = ref(false);
 
-import type { ServerStatus, UploadTask } from '@/core/types';
+import type { ServerStatus } from '@/core/types';
 
 const statusHistory = shallowRef<ServerStatus[]>([]);
 const MAX_HISTORY = 60;
@@ -149,6 +150,11 @@ const props = withDefaults(defineProps<Props>(), {
   keyPassphrase: null,
 });
 
+// Transfer queue bound to this session's upload/download progress events.
+const transferQueue = useTransferQueue(toRef(props, 'sessionId'));
+// Top-level alias so the template can auto-unwrap the tasks ref.
+const uploadTasks = transferQueue.tasks;
+
 const terminalRef = ref<HTMLElement>();
 const isDragging = ref(false);
 
@@ -193,61 +199,6 @@ let connectedSessionId: string | null = null;
 // when a previous Tauri emit is still in flight. Fire-and-forget — we never
 // await each keystroke in the onData handler.
 let inputChain: Promise<void> = Promise.resolve();
-
-// Upload task tracking
-
-const uploadTasks = shallowRef<UploadTask[]>([]);
-
-const addUploadTask = (fileName: string, direction: 'upload' | 'download' = 'upload'): string => {
-  const id = `transfer-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-  // Replace the array reference so the dashboard's `props.uploadTasks`
-  // reference changes and the task list re-renders (in-place unshift keeps
-  // the same reference, so the list never updates).
-  uploadTasks.value = [
-    {
-      id,
-      fileName,
-      direction,
-      status: 'pending',
-      progress: 0,
-      message: t('upload.preparing'),
-      timestamp: Date.now(),
-    },
-    ...uploadTasks.value,
-  ];
-  return id;
-};
-
-const updateUploadTask = (id: string, updates: Partial<UploadTask>) => {
-  let changed = false;
-  const next = uploadTasks.value.map(task => {
-    if (task.id === id) {
-      changed = true;
-      return { ...task, ...updates };
-    }
-    return task;
-  });
-  if (changed) {
-    uploadTasks.value = next;
-  }
-};
-
-// Remove a task from the list entirely (used when an upload is cancelled and
-// its remote file is deleted, so the now-meaningless entry does not linger).
-const removeUploadTask = (id: string) => {
-  uploadTasks.value = uploadTasks.value.filter(task => task.id !== id);
-};
-
-const clearUploadTasks = () => {
-  // Only clear completed and error tasks, keep in-flight tasks
-  uploadTasks.value = uploadTasks.value.filter(
-    task =>
-      task.status === 'uploading' ||
-      task.status === 'downloading' ||
-      task.status === 'pending' ||
-      task.status === 'paused'
-  );
-};
 
 // ---------------------------------------------------------------------------
 // Pre-upload confirmation dialog
@@ -338,22 +289,8 @@ const resolveUploadTarget = (
 let unlistenDrag: UnlistenFn | null = null;
 let unlistenDragEnter: UnlistenFn | null = null;
 let unlistenDragLeave: UnlistenFn | null = null;
-let unlistenUpload: UnlistenFn | null = null;
-let unlistenDownload: UnlistenFn | null = null;
 let pendingResizeTimer: ReturnType<typeof setTimeout> | null = null;
 let handleTerminalContextMenu: ((e: MouseEvent) => void) | null = null;
-
-interface UploadProgressPayload {
-  taskId: string;
-  sessionId: string;
-  progress: number;
-  uploadedBytes: number;
-  totalBytes: number;
-  status: 'uploading' | 'paused' | 'downloading' | 'success' | 'error' | 'cancelled';
-  message: string;
-  speed: number;
-  error?: string;
-}
 
 /**
  * Handle file drop - Show a confirmation dialog with the resolved target
@@ -427,155 +364,23 @@ const recomputeConfirmTargets = () => {
  * Fire-and-forget pattern: start upload in background and return immediately
  */
 const processFileUpload = async (path: string, targetDirOverride?: string) => {
-  const taskId = addUploadTask(path.split('/').pop() || path);
+  const { fileName, remotePath } = resolveUploadTarget(path, targetDirOverride);
 
-  // Prepare upload parameters in this async function
-  // But do NOT await the actual upload - let it run in background
+  logger.info('Path resolution', {
+    originalPath: currentRemotePath.value,
+    resolvedPath: remotePath,
+    detectionMethod: lastPathDetectionSource.value,
+    fileName,
+  });
 
-  try {
-    const { fileName, remotePath } = resolveUploadTarget(path, targetDirOverride);
-
-    updateUploadTask(taskId, {
-      status: 'uploading',
-      progress: 10,
-      message: t('upload.preparingUpload'),
-      remotePath,
-    });
-
-    logger.info('Path resolution', {
-      originalPath: currentRemotePath.value,
-      resolvedPath: remotePath,
-      detectionMethod: lastPathDetectionSource.value,
-      fileName,
-    });
-
-    // Start upload in background
-    // Backend will handle the streaming and emit progress events
-    invoke('upload_file_sftp', {
-      sessionId: props.sessionId,
-      taskId,
-      localPath: path,
-      remotePath,
-    }).catch(err => {
-      const errorMessage =
-        err instanceof Error
-          ? err.message
-          : typeof err === 'string'
-            ? err
-            : JSON.stringify(err);
-
-      updateUploadTask(taskId, {
-        status: 'error',
-        progress: 0,
-        message: `${t('upload.startFailed')}: ${errorMessage}`,
-        error: errorMessage,
-      });
-
-      logger.error('Failed to start upload', err);
-    });
-
-    // Return immediately without waiting for upload to complete
-    logger.info('Upload queued in background', { taskId, fileName });
-  } catch (err: unknown) {
-    const errorMessage =
-      err instanceof Error
-        ? err.message
-        : typeof err === 'string'
-          ? err
-          : JSON.stringify(err);
-
-    updateUploadTask(taskId, {
-      status: 'error',
-      progress: 0,
-      message: `${t('upload.prepareFailed')}: ${errorMessage}`,
-      error: errorMessage,
-    });
-
-    logger.error('Failed to prepare upload', err);
-  }
+  // Fire-and-forget: startUpload seeds the task row and queues the invoke;
+  // the backend streams the file and emits progress events from here on.
+  void transferQueue.startUpload(path, remotePath, fileName);
 };
 
 // ---------------------------------------------------------------------------
-// Upload control: pause / resume / cancel
+// Upload control: pause / resume / cancel (delegated to the shared queue)
 // ---------------------------------------------------------------------------
-
-/** Pause a running upload at its next chunk boundary. */
-const pauseUploadTask = async (taskId: string) => {
-  // Optimistically reflect the paused state immediately.
-  updateUploadTask(taskId, {
-    status: 'paused',
-    message: t('upload.pausing'),
-  });
-  try {
-    await invoke('pause_upload', {
-      sessionId: props.sessionId,
-      taskId,
-    });
-    updateUploadTask(taskId, {
-      message: t('upload.paused'),
-    });
-  } catch (err) {
-    logger.error('Failed to pause upload', err);
-    updateUploadTask(taskId, {
-      status:
-        uploadTasks.value.find(t => t.id === taskId)?.status ?? 'uploading',
-      message: t('upload.failedToPause'),
-    });
-  }
-};
-
-/** Resume a previously paused upload. */
-const resumeUploadTask = async (taskId: string) => {
-  updateUploadTask(taskId, {
-    status: 'uploading',
-    message: t('upload.resuming'),
-  });
-  try {
-    await invoke('resume_upload', {
-      sessionId: props.sessionId,
-      taskId,
-    });
-  } catch (err) {
-    logger.error('Failed to resume upload', err);
-    updateUploadTask(taskId, {
-      status: 'paused',
-      message: t('upload.failedToResume'),
-    });
-  }
-};
-
-/** Cancel a running or paused upload/download task. */
-const cancelUploadTask = async (taskId: string) => {
-  // Look the task up FIRST so we still have its name/direction to restore if
-  // the backend cancellation fails — removing it first then re-finding always
-  // returns undefined and loses those details.
-  const previous = uploadTasks.value.find(t => t.id === taskId);
-  const isDownload = previous?.direction === 'download';
-  // Optimistically remove the task so the list is clean instantly. If the
-  // backend cancellation fails, surface an error entry so the user knows.
-  removeUploadTask(taskId);
-  try {
-    await invoke(isDownload ? 'cancel_download' : 'cancel_upload', {
-      sessionId: props.sessionId,
-      taskId,
-    });
-  } catch (err) {
-    logger.error('Failed to cancel transfer', err);
-    // Re-insert a terminal error entry (the cancelled-pending remote file may
-    // be left behind if the backend cancellation truly failed).
-    uploadTasks.value = [
-      ...uploadTasks.value,
-      previous ? { ...previous, status: 'error' as const, message: t('upload.failedToCancel') } : {
-        id: taskId,
-        fileName: t('upload.failedToCancel'),
-        status: 'error' as const,
-        progress: 0,
-        message: t('upload.failedToCancel'),
-        timestamp: Date.now(),
-      },
-    ];
-  }
-};
 
 // Search state
 const showSearch = ref(false);
@@ -752,14 +557,16 @@ const connectSession = async (cols: number, rows: number): Promise<void> => {
     // amount so we return as soon as content is ready (and never block on a
     // magic timer). `writeBufferedOutput` dedupes against live events; the
     // backend drains the cache on read, so this is safe to run on every mount.
-    const maxAttempts = 14;
+    // Escalating backoff keeps a ~2.4s coverage window (the backend buffers
+    // for 8s) with only 4 IPC round-trips instead of the old 14 × 200ms loop.
+    const maxAttempts = 4;
     const runGeneration = generation;
     let attempts = 0;
     while (attempts < maxAttempts) {
       if (runGeneration !== generation) break;
       if (await writeBufferedOutput()) break;
       attempts += 1;
-      await new Promise(resolve => setTimeout(resolve, 200));
+      await new Promise(resolve => setTimeout(resolve, 200 + attempts * 300));
     }
   }
 };
@@ -1192,8 +999,7 @@ const cleanupResources = async (): Promise<void> => {
   if (unlistenDrag) await unlistenDrag();
   if (unlistenDragEnter) await unlistenDragEnter();
   if (unlistenDragLeave) await unlistenDragLeave();
-  if (unlistenUpload) await unlistenUpload();
-  if (unlistenDownload) await unlistenDownload();
+  await transferQueue.dispose();
 };
 
 /**
@@ -1219,63 +1025,8 @@ const initialize = async (): Promise<void> => {
   logger.info('Terminal component mounted', { sessionId: props.sessionId });
   await setupStatusListener();
 
-  // Listen for session-specific upload progress
-  unlistenUpload = await listen<UploadProgressPayload>(
-    `ssh-upload-progress-${props.sessionId}`,
-    event => {
-      const payload = event.payload;
-      // Only update if it belongs to this session
-      if (payload.sessionId === props.sessionId) {
-        updateUploadTask(payload.taskId, {
-          status: payload.status,
-          progress: Math.floor(payload.progress),
-          message: payload.message,
-          uploadedBytes: payload.uploadedBytes,
-          fileSize: payload.totalBytes,
-          speed: payload.speed,
-          error: payload.error || undefined,
-          eta:
-            payload.speed > 0
-              ? (payload.totalBytes - payload.uploadedBytes) / payload.speed
-              : undefined,
-        });
-      }
-    }
-  );
-
-  // Listen for session-specific download progress
-  unlistenDownload = await listen<UploadProgressPayload>(
-    `ssh-download-progress-${props.sessionId}`,
-    event => {
-      const payload = event.payload;
-      if (payload.sessionId === props.sessionId) {
-        // Map the backend "downloading" status to the transfer queue, and
-        // retain the original direction on the queued task so the cancel
-        // routing and the queue rendering stay correct.
-        const nextStatus =
-          payload.status === 'success' ||
-          payload.status === 'error' ||
-          payload.status === 'cancelled' ||
-          payload.status === 'downloading'
-            ? payload.status
-            : 'downloading';
-        updateUploadTask(payload.taskId, {
-          direction: 'download',
-          status: nextStatus as UploadTask['status'],
-          progress: Math.floor(payload.progress),
-          message: payload.message,
-          uploadedBytes: payload.uploadedBytes,
-          fileSize: payload.totalBytes,
-          speed: payload.speed,
-          error: payload.error || undefined,
-          eta:
-            payload.speed > 0
-              ? (payload.totalBytes - payload.uploadedBytes) / payload.speed
-              : undefined,
-        });
-      }
-    }
-  );
+  // Listen for this session's upload/download progress events.
+  await transferQueue.setupListeners();
 
   // Listen for Tauri's native drag-drop event to get absolute paths
   unlistenDrag = await listen<{ paths: string[] }>(
@@ -1599,17 +1350,18 @@ const initialize = async (): Promise<void> => {
 <template>
   <div class="remote-connection-view">
     <ServerDashboard
+      v-if="showDashboard"
       :show="showDashboard"
       :active-tab="activeDashboardTab"
       :session-id="props.sessionId"
       :history="statusHistory"
       :upload-tasks="uploadTasks"
-      @clear-tasks="clearUploadTasks"
+      @clear-tasks="transferQueue.clearCompleted"
       @toggle="showDashboard = !showDashboard"
       @update:active-tab="activeDashboardTab = $event"
-      @pause-task="pauseUploadTask"
-      @resume-task="resumeUploadTask"
-      @cancel-task="cancelUploadTask"
+      @pause-task="transferQueue.pause"
+      @resume-task="transferQueue.resume"
+      @cancel-task="transferQueue.cancel"
     />
     <div ref="terminalRef" class="terminal-container" />
 

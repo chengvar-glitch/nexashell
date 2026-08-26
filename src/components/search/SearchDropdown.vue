@@ -85,8 +85,9 @@ import {
 import { sessionApi } from '@/features/session';
 import { APP_EVENTS } from '@/core/constants';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
+import type { TabManagement } from '@/features/tabs';
 import { eventBus } from '@/core/utils/event-bus';
-import { parseDbTimestamp } from '@/core/utils/time-utils';
+import { sortByUpdatedAtDesc } from '@/core/utils/time-utils';
 import { openFileManagerWindow } from '@/features/window';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import type { SavedSession } from '@/features/session/types';
@@ -150,31 +151,10 @@ const fetchSavedSessions = async () => {
   }
 };
 
-interface SearchTabLike {
-  id: string;
-  type: string;
-  panes?: Array<{ id: string; type?: string }>;
-}
-const tabManagement = inject(TAB_MANAGEMENT_KEY) as
-  | {
-      tabs: { value: SearchTabLike[] };
-      activeTabId: { value: string };
-      activePaneId: { value: string };
-    }
-  | null;
+const tabManagement = inject(TAB_MANAGEMENT_KEY) as TabManagement | null;
 
-// Resolve the active SSH pane's runtime session id, if any — the File Manager
-// search action needs a concrete SSH session id to open its window.
-const getActiveSshSessionId = (): string | null => {
-  if (!tabManagement) return null;
-  const activeTab = tabManagement.tabs.value.find(
-    t => t.id === tabManagement.activeTabId.value
-  );
-  if (!activeTab || activeTab.type !== 'ssh') return null;
-  const panes = activeTab.panes || [];
-  const paneId = tabManagement.activePaneId.value || panes[0]?.id;
-  return paneId || null;
-};
+// Resolve the active SSH pane's runtime session id via the tab manager — the
+// File Manager search action needs a concrete SSH session id to open its window.
 
 const updateDropdownPosition = () => {
   if (!props.anchorElement) return;
@@ -273,7 +253,7 @@ const searchItems = computed<SearchResultItem[]>(() => [
     icon: Folder,
     category: 'files',
     action: () => {
-      const sid = getActiveSshSessionId();
+      const sid = tabManagement?.getActiveSshPaneId() ?? null;
       if (sid) void openFileManagerWindow(sid);
     },
   },
@@ -284,13 +264,7 @@ const filteredItems = computed(() => {
   const results: SearchResultItem[] = [];
 
   // 1. Process Sessions (Recent or Filtered)
-  const sessions = [...savedSessions.value]
-    .sort((a, b) => {
-      return (
-        parseDbTimestamp(b.updated_at) -
-        parseDbTimestamp(a.updated_at)
-      );
-    })
+  const sessions = sortByUpdatedAtDesc(savedSessions.value)
     .filter(
       s =>
         !query ||
@@ -441,8 +415,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
   }
 };
 
-const handleKeyUp = () => {};
-
 const scrollToActiveItem = () => {
   nextTick(() => {
     if (dropdownRef.value && activeIndex.value >= 0) {
@@ -503,7 +475,6 @@ onUnmounted(() => {
 
 defineExpose({
   handleKeyDown,
-  handleKeyUp,
   updatePosition: updateDropdownPosition,
 });
 </script>

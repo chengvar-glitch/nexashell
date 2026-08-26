@@ -39,21 +39,3 @@ export async function safeInvoke<T>(
     throw appError;
   }
 }
-
-/**
- * Error logging
- */
-export function logError(error: Error | AppError, context?: string): void {
-  const errorInfo = {
-    name: error.name,
-    message: error.message,
-    context,
-    timestamp: new Date().toISOString(),
-  };
-
-  if (error instanceof AppError) {
-    console.error('AppError:', errorInfo, error.originalError);
-  } else {
-    console.error('Error:', errorInfo);
-  }
-}

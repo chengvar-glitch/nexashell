@@ -8,7 +8,6 @@ import {
   computed,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { v4 as uuidv4 } from 'uuid';
 import TabItem from '@/components/common/TabItem.vue';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ShortcutHint from '@/components/common/ShortcutHint.vue';
@@ -24,7 +23,7 @@ import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
-import { parseDbTimestamp } from '@/core/utils/time-utils';
+import { sortByUpdatedAtDesc } from '@/core/utils/time-utils';
 import { formatShortcut } from '@/core/utils/platform/platform-detection';
 import { createLogger } from '@/core/utils/logger';
 import { sessionApi } from '@/features/session';
@@ -118,17 +117,24 @@ const toggleDropdown = (event: MouseEvent) => {
   isDropdownOpen.value = !isDropdownOpen.value;
 };
 
+const createLocalTab = async () => {
+  const currentCounter = tabCounter++;
+  const newTab = {
+    id: crypto.randomUUID(),
+    label: `${t('settings.newLocalTab')} ${currentCounter}`,
+    type: 'terminal' as const,
+    closable: true,
+    panes: [{ id: crypto.randomUUID(), type: 'terminal' as const }],
+  };
+  tabManagement.addTab(newTab);
+
+  await nextTick();
+  scrollToActiveTab();
+};
+
 const handleMenuSelect = async (key: string) => {
   if (key === 'local') {
-    const currentCounter = tabCounter++;
-    const newTab = {
-      id: uuidv4(),
-      label: `${t('settings.newLocalTab')} ${currentCounter}`,
-      type: 'terminal' as const,
-      closable: true,
-      panes: [{ id: uuidv4(), type: 'terminal' as const }],
-    };
-    tabManagement.addTab(newTab);
+    await createLocalTab();
   } else if (key === 'ssh') {
     // Open SSH form modal instead of creating a tab
     if (openSSHForm) {
@@ -158,18 +164,7 @@ const handleCloseTabShortcut = () => {
 };
 
 const handleNewLocalTab = async () => {
-  const currentCounter = tabCounter++;
-  const newTab = {
-    id: uuidv4(),
-    label: `${t('settings.newLocalTab')} ${currentCounter}`,
-    type: 'terminal' as const,
-    closable: true,
-    panes: [{ id: uuidv4(), type: 'terminal' as const }],
-  };
-  tabManagement.addTab(newTab);
-
-  await nextTick();
-  scrollToActiveTab();
+  await createLocalTab();
 };
 
 const handleNewSSHTab = async () => {
@@ -238,12 +233,7 @@ const translatedSavedConnections = computed<Array<{
 });
 
 const sortSavedConnections = (list: SavedSession[]): SavedSession[] => {
-  const byRecent = (a: SavedSession, b: SavedSession): number => {
-    return (
-      parseDbTimestamp(b.updated_at) - parseDbTimestamp(a.updated_at)
-    );
-  };
-  return [...list].sort(byRecent);
+  return sortByUpdatedAtDesc(list);
 };
 
 const toggleSavedConnections = async (event: MouseEvent) => {

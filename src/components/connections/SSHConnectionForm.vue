@@ -268,6 +268,7 @@ import type { MetadataItem } from '@/core/types/common';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
 import { createLogger } from '@/core/utils/logger';
+import type { SSHConnectionFormData } from '@/features/session/types';
 
 const logger = createLogger('SSHConnectionForm');
 
@@ -285,24 +286,6 @@ interface Props {
   connectionTime?: number;
   connectionErrorTitle?: string;
   connectionErrorMessage?: string;
-}
-
-interface SSHConnectionFormData {
-  id?: string;
-  server_name: string;
-  addr: string;
-  port: number | null;
-  username: string;
-  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode; `null` means "clear stored credentials". */
-  password?: string | null;
-  private_key_path: string;
-  /** Optional so buildSubmitData can delete it (meaning "unchanged") in edit mode; `null` means "clear stored credentials". */
-  key_passphrase?: string | null;
-  save_session: boolean;
-  groups?: string[];
-  tags?: string[];
-  /** True when the user explicitly asked to clear any stored credentials. */
-  clearCredentials?: boolean;
 }
 
 interface ValidationErrors {

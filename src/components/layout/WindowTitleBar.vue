@@ -96,16 +96,6 @@ const onSearchBoxInput = () => {
   }
 };
 
-/**
- * Forwards KeyUp events to the SearchDropdown component.
- */
-const onSearchBoxKeyUp = () => {
-  if (!showSearchDropdown.value || !searchDropdownRef.value) {
-    return;
-  }
-  searchDropdownRef.value.handleKeyUp();
-};
-
 onMounted(async () => {
   try {
     // Detect platform for layout adjustments
@@ -222,7 +212,6 @@ const handleMaximize = async () => {
         @focus="onSearchBoxFocus"
         @blur="onSearchBoxBlur"
         @keydown="onSearchBoxKeyDown"
-        @keyup="onSearchBoxKeyUp"
         @input="onSearchBoxInput"
       />
     </div>

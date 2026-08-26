@@ -43,7 +43,7 @@ interface Props {
   activeTab: 'system' | 'uploads' | null;
   sessionId: string;
   history?: ServerStatus[];
-  uploadTasks?: UploadTask[];
+  uploadTasks?: readonly UploadTask[];
 }
 
 const props = defineProps<Props>();

@@ -6,7 +6,7 @@
 export * from './platform/platform-detection';
 
 // Error handling
-export { AppError, safeInvoke, logError } from './error-handler';
+export { AppError, safeInvoke } from './error-handler';
 
 // Event bus
 export { eventBus } from './event-bus';

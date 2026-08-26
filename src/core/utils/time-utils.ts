@@ -19,79 +19,58 @@ export function parseDbTimestamp(value?: string | null): number {
 }
 
 /**
- * Signature for an injectable translation function. When provided,
- * `formatRelativeTime` produces localized strings through it instead of the
- * hardcoded English fallbacks.
+ * Sort saved sessions by `updated_at` descending (most recently updated
+ * first). `updated_at` is a SQLite timestamp; missing values sort last.
  */
-export type RelativeTimeTranslator = (
-  key: string,
-  params?: Record<string, unknown>
-) => string;
+export function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(
+  sessions: T[]
+): T[] {
+  return [...sessions].sort(
+    (a, b) => parseDbTimestamp(b.updated_at) - parseDbTimestamp(a.updated_at)
+  );
+}
 
 /**
- * Format a Date or timestamp into a relative time string (e.g., "5 minutes ago")
- * @param date Date object, timestamp number, or ISO string
- * @param locale Locale string (default: 'en'), used only for the absolute-date fallback
- * @param translate Optional i18n callback; when provided the relative strings are
- *   localized via its keys, otherwise hardcoded English is used (backward-compatible).
- * @returns Formatted relative time string
+ * Format a Date or timestamp into a locale-aware relative time string
+ * (e.g. "5 minutes ago"), via the platform's Intl.RelativeTimeFormat.
+ * Falls back to an absolute date once the diff exceeds ~4 weeks.
+ *
+ * @param date Date object, timestamp number, or SQLite/ISO string
+ * @param locale BCP-47 locale tag (default: 'en')
  */
 export function formatRelativeTime(
   date: Date | number | string,
-  locale: string = 'en',
-  translate?: RelativeTimeTranslator
+  locale: string = 'en'
 ): string {
   if (!date) return '';
+  const time =
+    typeof date === 'string'
+      ? parseDbTimestamp(date)
+      : date instanceof Date
+        ? date.getTime()
+        : date;
+  if (!time) return '';
 
-  const d =
-    typeof date === 'string' || typeof date === 'number'
-      ? new Date(date)
-      : date;
-  const now = new Date();
+  const diffSeconds = Math.floor((Date.now() - time) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
 
-  // Convert UTC to local if needed (SQLite uses CURRENT_TIMESTAMP which is UTC)
-  // CURRENT_TIMESTAMP in SQLite return format: "YYYY-MM-DD HH:mm:ss"
-  let utcDate = d;
-  if (typeof date === 'string' && !date.includes('Z') && !date.includes('+')) {
-    // Replace space with 'T' and add 'Z' to make it a valid ISO 8601 string in UTC
-    const isoString = date.replace(' ', 'T') + 'Z';
-    const parsed = new Date(isoString);
-    if (!isNaN(parsed.getTime())) {
-      utcDate = parsed;
-    }
-  }
+  // Future dates (clock skew) read as "now".
+  if (diffSeconds < 0) return rtf.format(0, 'second');
+  if (diffSeconds < 60) return rtf.format(-diffSeconds, 'second');
 
-  const localized = (key: string, count: number) =>
-    translate ? translate(key, { count }) : '';
-  const countOf = (key: string, count: number, fallback: string) => {
-    const localizedStr = localized(key, count);
-    return localizedStr || fallback;
-  };
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  if (diffMinutes < 60) return rtf.format(-diffMinutes, 'minute');
 
-  const diffInSeconds = Math.floor((now.getTime() - utcDate.getTime()) / 1000);
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return rtf.format(-diffHours, 'hour');
 
-  if (diffInSeconds < 0) return countOf('time.justNow', 0, 'Just now'); // Future dates (clock skew)
-  if (diffInSeconds < 60)
-    return countOf('time.secondsAgo', diffInSeconds, `${diffInSeconds}s ago`);
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return rtf.format(-diffDays, 'day');
 
-  const diffInMinutes = Math.floor(diffInSeconds / 60);
-  if (diffInMinutes < 60)
-    return countOf('time.minutesAgo', diffInMinutes, `${diffInMinutes}m ago`);
+  const diffWeeks = Math.floor(diffDays / 7);
+  if (diffWeeks < 4) return rtf.format(-diffWeeks, 'week');
 
-  const diffInHours = Math.floor(diffInMinutes / 60);
-  if (diffInHours < 24)
-    return countOf('time.hoursAgo', diffInHours, `${diffInHours}h ago`);
-
-  const diffInDays = Math.floor(diffInHours / 24);
-  if (diffInDays < 7)
-    return countOf('time.daysAgo', diffInDays, `${diffInDays}d ago`);
-
-  const diffInWeeks = Math.floor(diffInDays / 7);
-  if (diffInWeeks < 4)
-    return countOf('time.weeksAgo', diffInWeeks, `${diffInWeeks}w ago`);
-
-  // Fallback to absolute date
-  return utcDate.toLocaleDateString(locale, {
+  return new Date(time).toLocaleDateString(locale, {
     year: 'numeric',
     month: 'short',
     day: 'numeric',

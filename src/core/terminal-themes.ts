@@ -32,7 +32,7 @@ export interface TerminalTheme {
 }
 
 /** The "dark" and "light" preset used by the `system` option. */
-export const TERMINAL_PRESETS: Record<Exclude<TerminalThemeKey, 'system'>, TerminalTheme> = {
+const TERMINAL_PRESETS: Record<Exclude<TerminalThemeKey, 'system'>, TerminalTheme> = {
   oneark: {
     background: '#282c34',
     foreground: '#abb2bf',

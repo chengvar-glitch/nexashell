@@ -11,7 +11,3 @@ export interface TerminalSettings {
   /** Terminal color theme key. */
   theme: TerminalThemeKey;
 }
-
-export interface SettingsState {
-  terminal: TerminalSettings;
-}

@@ -197,9 +197,12 @@ const cancelOverwrite = () => {
 
 // Refresh the remote list when a queued upload actually completes, rather than
 // at spawn time (which previously showed stale entries while transfers ran).
+// Watch only the id:status projection — the deep-watched raw array fired on
+// every per-chunk progress update and rescanned all tasks each time.
 const refreshTriggeredTasks = new Set<string>();
 watch(
-  transferQueue.tasks.value,
+  () =>
+    transferQueue.tasks.value.map(task => `${task.id}:${task.status}`).join('|'),
   () => {
     const liveIds = new Set(transferQueue.tasks.value.map(task => task.id));
     // Prune markers for tasks already removed from the queue (cleared or
@@ -218,8 +221,7 @@ watch(
         showTransfers.value = true;
       }
     }
-  },
-  { deep: true }
+  }
 );
 
 /** Pick one or more local files and upload them into the current remote dir. */

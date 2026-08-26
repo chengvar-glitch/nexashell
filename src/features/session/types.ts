@@ -38,3 +38,25 @@ export interface ImportResult {
   skipped: number;
   failed: string[];
 }
+
+/**
+ * Payload emitted by the SSH connection form (create/edit/save-only flows).
+ */
+export interface SSHConnectionFormData {
+  id?: string; // session ID, set when editing existing session
+  server_name: string;
+  addr: string;
+  port: number | null;
+  username: string;
+  // Optional: omitted (undefined) in edit mode when the user left it blank so
+  // the backend keeps the stored ciphertext ("unchanged"); `null` means the
+  // user explicitly asked to clear the stored value.
+  password?: string | null;
+  private_key_path: string;
+  key_passphrase?: string | null;
+  save_session: boolean;
+  groups?: string[];
+  tags?: string[];
+  /** True when the user explicitly asked to clear any stored credentials. */
+  clearCredentials?: boolean;
+}

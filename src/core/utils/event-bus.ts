@@ -5,7 +5,7 @@
  * Fixed: Proper listener tracking to prevent memory leaks
  */
 
-import { APP_EVENTS, type AppEventType } from '@/core/constants';
+import type { AppEventType } from '@/core/constants';
 
 type EventHandler = (...args: unknown[]) => void | Promise<void>;
 type WrappedHandler = (e: Event) => void;
@@ -102,35 +102,6 @@ class EventBus {
     }
   }
 
-  /**
-   * Remove all listeners for an event
-   */
-  offAll(event: AppEventType): void {
-    const eventListeners = this.listeners.get(event);
-    if (!eventListeners) return;
-
-    eventListeners.forEach(wrappedHandler => {
-      window.removeEventListener(event, wrappedHandler);
-    });
-
-    this.listeners.delete(event);
-  }
-
-  /**
-   * Get count of listeners for debugging
-   */
-  getListenerCount(event?: AppEventType): number {
-    if (event) {
-      return this.listeners.get(event)?.size ?? 0;
-    }
-    return Array.from(this.listeners.values()).reduce(
-      (total, map) => total + map.size,
-      0
-    );
-  }
 }
 
 export const eventBus = new EventBus();
-
-// Convenient method exports
-export { APP_EVENTS };

@@ -4,6 +4,22 @@ import type { ImportResult, SavedSession } from './types';
 
 const logger = createLogger('SESSION_API');
 
+/** Payload for `save_session_with_credentials`. */
+export interface SaveSessionWithCredentialsPayload {
+  id: string | null;
+  addr: string;
+  port: number;
+  serverName: string;
+  username: string;
+  authType: string;
+  privateKeyPath: string | null;
+  password: string | null;
+  keyPassphrase: string | null;
+  clearCredentials: boolean;
+  groupIds: string[] | null;
+  tagIds: string[] | null;
+}
+
 class SessionAPI {
   async connectSSH(
     sessionId: string,
@@ -172,6 +188,53 @@ class SessionAPI {
       // backend instead of silently treating the failure as an empty list.
       logger.error('Failed to list sessions', error);
       throw error;
+    }
+  }
+
+  /**
+   * Resolve the stored credentials for a session. Resolves with
+   * `[id, password, key_passphrase]`; either secret is null when not stored.
+   */
+  async getSessionCredentials(
+    sessionId: string
+  ): Promise<[string, string | null, string | null]> {
+    try {
+      return await invoke<[string, string | null, string | null]>(
+        'get_session_credentials',
+        { sessionId }
+      );
+    } catch (error) {
+      logger.error('Failed to fetch session credentials', { sessionId, error });
+      throw error;
+    }
+  }
+
+  /**
+   * Save a session together with its (possibly encrypted) credentials.
+   * Resolves with the persisted session id.
+   */
+  async saveSessionWithCredentials(
+    payload: SaveSessionWithCredentialsPayload
+  ): Promise<string> {
+    try {
+      const id = await invoke<string>(
+        'save_session_with_credentials',
+        payload as unknown as Record<string, unknown>
+      );
+      logger.info('SSH session persisted', { id, name: payload.serverName });
+      return id;
+    } catch (error) {
+      logger.error('Failed to persist session', error);
+      throw error;
+    }
+  }
+
+  /** Best-effort recency bump; failures are logged, never thrown. */
+  async touchSession(id: string): Promise<void> {
+    try {
+      await invoke('update_session_timestamp', { id });
+    } catch (error) {
+      logger.error('Failed to update session timestamp', { id, error });
     }
   }
 

@@ -20,16 +20,6 @@ import type { SftpEntry } from '@/core/types';
 
 const logger = createLogger('SFTP');
 
-export interface SftpState {
-  currentPath: Ref<string>;
-  entries: Ref<SftpEntry[]>;
-  loading: Ref<boolean>;
-  error: Ref<string>;
-}
-
-/** Remote platform category (`windows` | `macos` | `linux` | `unknown`). */
-export type RemotePlatform = 'windows' | 'macos' | 'linux' | 'unknown';
-
 /** True when the path looks like a native Windows absolute path (`C:\` / `C:/`). */
 function isWindowsNativeAbsolute(path: string): boolean {
   return /^[A-Za-z]:[\\/]/.test(path);
@@ -120,11 +110,9 @@ export function useSftp(sessionId: Ref<string>) {
   const entries = ref<SftpEntry[]>([]);
   const loading = ref<boolean>(false);
   const error = ref<string>('');
-  const platform = ref<RemotePlatform>('unknown');
   // Monotonic request id so a slow in-flight listing cannot clobber state
   // (or clear `loading`) after a newer navigation has started.
   let requestSeq = 0;
-  let platformProbeStarted = false;
   // Single in-flight list watchdog, tracked at composable scope so dispose()
   // can clear it — a dismissed instance must not keep writing reactive state.
   let watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -178,13 +166,6 @@ export function useSftp(sessionId: Ref<string>) {
       error.value = e instanceof Error ? e.message : String(e);
       return false;
     }
-  };
-
-  const navigate = async (path: string): Promise<boolean> => {
-    // History is intentionally not tracked here — the previous stack array
-    // grew without bound and was never consumed, so navigation is now a plain
-    // go() (browsers/consumers that need history manage it themselves).
-    return go(path);
   };
 
   const goUp = async (): Promise<boolean> => {
@@ -257,32 +238,6 @@ export function useSftp(sessionId: Ref<string>) {
   };
 
   /**
-   * Probe (once) the remote platform so the browser can tailor path handling.
-   * Non-fatal: on failure the platform stays `unknown` and POSIX defaults apply.
-   */
-  const probePlatform = async (): Promise<RemotePlatform> => {
-    if (platformProbeStarted) return platform.value;
-    platformProbeStarted = true;
-    const sid = sessionId.value;
-    if (!sid) return 'unknown';
-    try {
-      const result = await invoke<string>('sftp_probe_platform', {
-        sessionId: sid,
-      });
-      const p = (['windows', 'macos', 'linux', 'unknown'] as const).includes(
-        result as RemotePlatform
-      )
-        ? (result as RemotePlatform)
-        : 'unknown';
-      platform.value = p;
-      return p;
-    } catch (e) {
-      logger.warn('sftp_probe_platform failed', e);
-      return 'unknown';
-    }
-  };
-
-  /**
    * Register a handler for this session's download progress events. Returns an
    * unlisten function; only one handler is registered per instance.
    */
@@ -299,17 +254,13 @@ export function useSftp(sessionId: Ref<string>) {
     entries,
     loading,
     error,
-    platform,
     go,
-    list: go,
     refresh,
-    navigate,
     goUp,
     goHome,
     mkdir,
     remove,
     rename,
-    probePlatform,
     dispose,
   };
 }

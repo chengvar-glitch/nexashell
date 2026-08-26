@@ -8,19 +8,11 @@
  * not yet provided a trusted absolute path.
  */
 
-import { ref, type Ref } from 'vue';
+import { ref } from 'vue';
 import type { Terminal } from '@xterm/xterm';
 import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('REMOTE_PATH');
-
-export interface RemotePathState {
-  currentRemotePath: Ref<string>;
-  remoteHomeDir: Ref<string>;
-  lastKnownAbsolutePath: Ref<string>;
-  lastPathDetectionSource: Ref<string>;
-  hasOscPath: Ref<boolean>;
-}
 
 /**
  * Normalize an absolute path by collapsing `.` and `..` segments.

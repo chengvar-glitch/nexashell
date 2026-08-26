@@ -56,6 +56,8 @@ export interface TabManagement {
   splitActivePane: (direction: SplitDirection) => SplitPaneResult;
   closePane: (tabId: string, paneId: string) => Promise<void>;
   getActiveTab: () => Tab | undefined;
+  /** Id of the active SSH pane (= its runtime session id), or null. */
+  getActiveSshPaneId: () => string | null;
 }
 
 // Export constants for tab types

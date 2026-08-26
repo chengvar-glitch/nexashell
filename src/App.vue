@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
-import { v4 as uuidv4 } from 'uuid';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from 'vue-i18n';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
@@ -15,39 +14,27 @@ import {
   PredefinedShortcuts,
 } from '@/core/utils/shortcut-manager';
 import { themeManager } from '@/core/utils/theme-manager';
-import { useModal, useTabManagement } from '@/composables';
+import { useTabManagement, useToastMessage } from '@/composables';
 import { useSessionStore } from '@/features/session';
+import {
+  sessionApi,
+  type SaveSessionWithCredentialsPayload,
+} from '@/features/session/api';
 import { tunnelApi } from '@/features/tunnel';
-import type { SavedSession, SavedSessionDisplay } from '@/features/session/types';
+import type {
+  SavedSession,
+  SavedSessionDisplay,
+  SSHConnectionFormData,
+} from '@/features/session/types';
 import {
   TAB_MANAGEMENT_KEY,
   OPEN_SSH_FORM_KEY,
-  CLOSE_SSH_FORM_KEY,
-  SHOW_SSH_FORM_KEY,
-  SHOW_SETTINGS_KEY,
 } from '@/core/types';
-interface SSHConnectionFormData {
-  id?: string; // session ID, set when editing existing session
-  server_name: string;
-  addr: string;
-  port: number | null;
-  username: string;
-  // Optional: omitted (undefined) in edit mode when the user left it blank so
-  // the backend keeps the stored ciphertext ("unchanged"); `null` means the
-  // user explicitly asked to clear the stored value.
-  password?: string | null;
-  private_key_path: string;
-  key_passphrase?: string | null;
-  save_session: boolean;
-  groups?: string[];
-  tags?: string[];
-  /** True when the user explicitly asked to clear any stored credentials. */
-  clearCredentials?: boolean;
-}
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
 import { createLogger } from '@/core/utils/logger';
 import { TAB_TYPE } from '@/features/tabs';
+import type { SplitDirection } from '@/features/tabs/types';
 
 import { isWindows } from '@/core/utils/platform/platform-detection';
 
@@ -70,11 +57,13 @@ const showWelcome = ref(localStorage.getItem('hasLaunched') !== 'true');
 const sessionStore = useSessionStore();
 
 // SSH connection form management
-const {
-  isOpen: showSSHForm,
-  openModal: openSSHForm,
-  closeModal: closeSSHForm,
-} = useModal();
+const showSSHForm = ref(false);
+const openSSHForm = () => {
+  showSSHForm.value = true;
+};
+const closeSSHForm = () => {
+  showSSHForm.value = false;
+};
 const isConnecting = ref(false);
 const sshErrorMessage = ref<string | null>(null);
 const sshFormMode = ref<'create' | 'edit'>('create');
@@ -137,9 +126,7 @@ const openSSHFormReset = () => {
   openSSHForm();
 };
 
-provide(SHOW_SSH_FORM_KEY, showSSHForm);
 provide(OPEN_SSH_FORM_KEY, openSSHFormReset);
-provide(CLOSE_SSH_FORM_KEY, closeSSHForm);
 
 // Settings panel management
 const showSettings = ref(false);
@@ -160,18 +147,18 @@ const openCommandPalette = () => {
 const closeCommandPalette = (value: boolean) => {
   showCommandPalette.value = value;
 };
-provide(SHOW_SETTINGS_KEY, showSettings);
 
 // Transient toast for blocked actions (e.g. the per-tab split limit).
-const toastMessage = ref('');
-let toastTimer: ReturnType<typeof setTimeout> | null = null;
-const showToast = (message: string) => {
-  toastMessage.value = message;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
-    toastMessage.value = '';
-    toastTimer = null;
-  }, 2200);
+const {
+  message: toastMessage,
+  show: showToast,
+  clear: clearToast,
+} = useToastMessage();
+
+const handleSplit = (direction: SplitDirection) => {
+  if (tabManagement.splitActivePane(direction) === 'limit') {
+    showToast(t('pane.splitLimit'));
+  }
 };
 
 // Tab management
@@ -215,17 +202,13 @@ onMounted(async () => {
 
   offFns.push(
     eventBus.on(APP_EVENTS.SPLIT_VERTICAL, () => {
-      if (tabManagement.splitActivePane('vertical') === 'limit') {
-        showToast(t('pane.splitLimit'));
-      }
+      handleSplit('vertical');
     })
   );
 
   offFns.push(
     eventBus.on(APP_EVENTS.SPLIT_HORIZONTAL, () => {
-      if (tabManagement.splitActivePane('horizontal') === 'limit') {
-        showToast(t('pane.splitLimit'));
-      }
+      handleSplit('horizontal');
     })
   );
 
@@ -279,10 +262,7 @@ onMounted(async () => {
       // 3. Fetch credentials in background
       try {
         logger.debug('Fetching credentials in background for', payload.id);
-        const credentials = await invoke<[string, string | null, string | null]>(
-          'get_session_credentials',
-          { sessionId: payload.id }
-        );
+        const credentials = await sessionApi.getSessionCredentials(payload.id);
 
         // 4. If form is still open and we're editing the same session, update sensitive fields
         if (showSSHForm.value && editingSessionId.value === payload.id) {
@@ -308,10 +288,9 @@ onMounted(async () => {
         sshFormMode.value = 'create';
         editingSessionId.value = session.id;
 
-        const credentials = await invoke<[string, string | null, string | null]>(
-          'get_session_credentials',
-          { sessionId: session.id }
-        ).catch(() => [session.id, null, null]);
+        const credentials = await sessionApi
+          .getSessionCredentials(session.id)
+          .catch(() => [session.id, null, null] as [string, string | null, string | null]);
 
         const connectData: SSHConnectionFormData = {
           id: session.id,
@@ -327,9 +306,7 @@ onMounted(async () => {
           tags: [],
         };
 
-        await invoke('update_session_timestamp', { id: session.id }).catch(err =>
-          logger.error('Failed to update timestamp', err)
-        );
+        await sessionApi.touchSession(session.id);
         eventBus.emit(APP_EVENTS.SESSION_SAVED);
 
         savedSSHFormData.value = connectData;
@@ -388,10 +365,7 @@ onBeforeUnmount(() => {
     clearInterval(connectionTimerInterval);
     connectionTimerInterval = null;
   }
-  if (toastTimer) {
-    clearTimeout(toastTimer);
-    toastTimer = null;
-  }
+  clearToast();
 
   // Clean up all sessions using Pinia store
   sessionStore.cleanupAllSessions().catch(error => {
@@ -404,37 +378,70 @@ onBeforeUnmount(() => {
 });
 
 // Process any new groups or tags first
+// Resolve `new:` prefixed metadata ids to persisted ones via the backend.
+const createNewMetadataIds = async (
+  ids: string[],
+  kind: 'group' | 'tag'
+): Promise<string[]> => {
+  const result = [...ids];
+  for (let i = 0; i < result.length; i++) {
+    if (result[i].startsWith('new:')) {
+      const name = result[i].substring(4);
+      try {
+        result[i] = await invoke<string>(kind === 'group' ? 'add_group' : 'add_tag', {
+          name,
+        });
+      } catch (error) {
+        logger.error(`Failed to create ${kind}: ${name}`, error);
+      }
+    }
+  }
+  return result;
+};
+
+// Process any new groups or tags first
 const processMetadata = async (data: SSHConnectionFormData) => {
-  const finalGroupIds = [...(data.groups || [])];
-  const finalTagIds = [...(data.tags || [])];
+  const groupIds = await createNewMetadataIds(data.groups || [], 'group');
+  const tagIds = await createNewMetadataIds(data.tags || [], 'tag');
+  return { groupIds, tagIds };
+};
 
-  // Handle new groups
-  for (let i = 0; i < finalGroupIds.length; i++) {
-    if (finalGroupIds[i].startsWith('new:')) {
-      const name = finalGroupIds[i].substring(4);
-      try {
-        const id = await invoke<string>('add_group', { name });
-        finalGroupIds[i] = id;
-      } catch (error) {
-        logger.error(`Failed to create group: ${name}`, error);
-      }
-    }
+/**
+ * Persist (or update) a session row with credentials and emit SESSION_SAVED.
+ * Shared by the connect and save-only flows; the timestamp bump is best-effort.
+ * Resolves with the persisted session id, or null when persistence was skipped.
+ */
+const persistSession = async (data: SSHConnectionFormData): Promise<string | null> => {
+  const authType = data.password ? 'password' : 'key';
+  const { groupIds, tagIds } = await processMetadata(data);
+
+  const savePayload: SaveSessionWithCredentialsPayload = {
+    id: data.id || null,
+    addr: data.addr,
+    port: data.port || 22,
+    serverName: data.server_name,
+    username: data.username,
+    authType,
+    privateKeyPath: data.private_key_path || null,
+    password: data.password || null,
+    keyPassphrase: data.key_passphrase || null,
+    clearCredentials: !!data.clearCredentials,
+    groupIds: groupIds.length > 0 ? groupIds : null,
+    tagIds: tagIds.length > 0 ? tagIds : null,
+  };
+
+  const resultId = await sessionApi.saveSessionWithCredentials(savePayload);
+  const timestampId = data.id || resultId;
+  if (timestampId) {
+    await sessionApi.touchSession(timestampId);
   }
 
-  // Handle new tags
-  for (let i = 0; i < finalTagIds.length; i++) {
-    if (finalTagIds[i].startsWith('new:')) {
-      const name = finalTagIds[i].substring(4);
-      try {
-        const id = await invoke<string>('add_tag', { name });
-        finalTagIds[i] = id;
-      } catch (error) {
-        logger.error(`Failed to create tag: ${name}`, error);
-      }
-    }
-  }
-
-  return { groupIds: finalGroupIds, tagIds: finalTagIds };
+  logger.info('SSH session persistence completed', {
+    sessionId: timestampId,
+    hadId: !!data.id,
+  });
+  eventBus.emit(APP_EVENTS.SESSION_SAVED);
+  return timestampId;
 };
 
 // Handle SSH connection with improved error handling
@@ -468,7 +475,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
   connectionErrorTitle.value = '';
 
   // 1. Generate a unique session ID for the RUNTIME terminal session
-  const sessionId = uuidv4();
+  const sessionId = crypto.randomUUID();
   activeConnectionId = sessionId;
   connectionCancelled = false;
 
@@ -519,55 +526,15 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
     // 1.5. Save or update session in database AFTER successful connection
     if (data.id || (data.save_session && sshFormMode.value === 'create')) {
       try {
-        const authType = data.password ? 'password' : 'key';
-
-        const { groupIds, tagIds } = await processMetadata(data);
-
         logger.info(
           data.id ? 'Updating existing session...' : 'Saving new session...',
           {
             id: data.id || 'new',
             name: data.server_name,
             host: data.addr,
-            authType,
           }
         );
-
-        const savePayload = {
-          id: data.id || null,
-          addr: data.addr,
-          port: data.port || 22,
-          serverName: data.server_name,
-          username: data.username,
-          authType: authType,
-          privateKeyPath: data.private_key_path || null,
-          password: data.password || null,
-          keyPassphrase: data.key_passphrase || null,
-          clearCredentials: !!data.clearCredentials,
-          groupIds: groupIds.length > 0 ? groupIds : null,
-          tagIds: tagIds.length > 0 ? tagIds : null,
-        };
-
-        const resultId = await invoke<string>(
-          'save_session_with_credentials',
-          savePayload
-        );
-
-        // Update timestamp for recency tracking
-        const timestampId = data.id || resultId;
-        if (timestampId) {
-          await invoke('update_session_timestamp', { id: timestampId }).catch(
-            e => logger.error('Failed to update timestamp', e)
-          );
-        }
-
-        logger.info('SSH session persistence completed', {
-          sessionId: timestampId,
-          hadId: !!data.id,
-        });
-
-        // Emit event to notify other components to refresh lists
-        eventBus.emit(APP_EVENTS.SESSION_SAVED);
+        await persistSession(data);
       } catch (saveError) {
         logger.error('Failed to persist session to database', saveError);
         // We don't throw error here to not fail the already established terminal session
@@ -605,7 +572,7 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
         // Use a small delay to allow the modal to disappear visually
         successTimeouts.push(
           setTimeout(() => {
-            const tabId = uuidv4();
+            const tabId = crypto.randomUUID();
             tabManagement.addTab({
               id: tabId,
               label: data.server_name || data.addr,
@@ -704,43 +671,9 @@ const handleSSHSave = async (data: SSHConnectionFormData) => {
   });
 
   try {
-    const authType = data.password ? 'password' : 'key';
-    const { groupIds, tagIds } = await processMetadata(data);
-
-    const savePayload = {
-      id: data.id || null,
-      addr: data.addr,
-      port: data.port || 22,
-      serverName: data.server_name,
-      username: data.username,
-      authType: authType,
-      privateKeyPath: data.private_key_path || null,
-      password: data.password || null,
-      keyPassphrase: data.key_passphrase || null,
-      clearCredentials: !!data.clearCredentials,
-      groupIds: groupIds.length > 0 ? groupIds : null,
-      tagIds: tagIds.length > 0 ? tagIds : null,
-    };
-
-    const resultId = await invoke<string>(
-      'save_session_with_credentials',
-      savePayload
-    );
-
-    const timestampId = data.id || resultId;
-    if (timestampId) {
-      await invoke('update_session_timestamp', { id: timestampId });
-    }
-
+    const timestampId = await persistSession(data);
     logger.info('SSH session saved via Save Only', {
       sessionId: timestampId,
-    });
-
-    // Emit event to notify other components to refresh lists
-    eventBus.emit(APP_EVENTS.SESSION_SAVED, {
-      name: data.server_name,
-      host: data.addr,
-      port: data.port || 22,
     });
 
     // Close form as we're done

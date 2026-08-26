@@ -59,6 +59,20 @@ export interface SftpEntry {
   mtime?: number;
 }
 
+/** Per-session transfer progress broadcast (`ssh-upload-progress-{sid}` /
+ *  `ssh-download-progress-{sid}`) by the backend. */
+export interface UploadProgressPayload {
+  taskId: string;
+  sessionId: string;
+  progress: number;
+  uploadedBytes: number;
+  totalBytes: number;
+  status: 'uploading' | 'downloading' | 'paused' | 'success' | 'error' | 'cancelled';
+  message: string;
+  speed: number;
+  error?: string;
+}
+
 /** Format a byte count into a human-readable string (e.g. "1.2 MB"). */
 export function formatBytes(bytes: number): string {
   if (!bytes) return '0 B';

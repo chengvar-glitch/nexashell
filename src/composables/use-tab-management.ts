@@ -6,7 +6,6 @@
  */
 
 import { ref } from 'vue';
-import { v4 as uuidv4 } from 'uuid';
 import { type Tab, type Pane, type PaneConnect, type SplitNode, type SplitDirection, type SplitPaneResult, DEFAULT_TAB, MAX_PANES_PER_TAB } from '@/features/tabs';
 import { useSessionStore } from '@/features/session';
 import { createLogger } from '@/core/utils/logger';
@@ -131,7 +130,7 @@ export function useTabManagement() {
     }
 
     const sessionStore = useSessionStore();
-    const newPaneId = uuidv4();
+    const newPaneId = crypto.randomUUID();
 
     // Build a connect descriptor for SSH splits. We deliberately do NOT
     // create the session here — the freshly mounted RemoteConnectionView
@@ -329,6 +328,18 @@ export function useTabManagement() {
     return tabs.value.find(tab => tab.id === activeTabId.value);
   };
 
+  /**
+   * Resolve the active SSH pane's id (which equals its runtime session id),
+   * or null when the active tab is not an SSH tab or has no panes.
+   */
+  const getActiveSshPaneId = (): string | null => {
+    const tab = getActiveTab();
+    if (!tab || tab.type !== 'ssh' || !tab.panes || tab.panes.length === 0) {
+      return null;
+    }
+    return activePaneId.value || tab.panes[0].id || null;
+  };
+
   return {
     tabs,
     activeTabId,
@@ -340,5 +351,6 @@ export function useTabManagement() {
     splitActivePane,
     closePane,
     getActiveTab,
+    getActiveSshPaneId,
   };
 }

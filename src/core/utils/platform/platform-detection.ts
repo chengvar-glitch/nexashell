@@ -5,38 +5,10 @@
 import { safeInvoke } from '@/core/utils/error-handler';
 
 /**
- * Detect if it's a macOS system (via Tauri)
- */
-export async function isMacOS(): Promise<boolean> {
-  return await safeInvoke<boolean>('is_macos');
-}
-
-/**
  * Detect if it's a Windows system (via Tauri)
  */
 export async function isWindows(): Promise<boolean> {
   return await safeInvoke<boolean>('is_windows');
-}
-
-/**
- * Detect if it's a Linux system (via Tauri)
- */
-export async function isLinux(): Promise<boolean> {
-  return await safeInvoke<boolean>('is_linux');
-}
-
-/**
- * Get platform name
- */
-export async function getPlatform(): Promise<string> {
-  return await safeInvoke<string>('get_platform');
-}
-
-/**
- * Get system architecture
- */
-export async function getArch(): Promise<string> {
-  return await safeInvoke<string>('get_arch');
 }
 
 /**
@@ -85,13 +57,6 @@ export function isWindowsBrowser(): boolean {
   return (
     typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
   );
-}
-
-/**
- * Get platform-specific command key label (Cmd or Ctrl)
- */
-export function getModifierKey(): string {
-  return isMacOSBrowser() ? 'Cmd' : 'Ctrl';
 }
 
 /**

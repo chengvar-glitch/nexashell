@@ -3,7 +3,7 @@
  * Provides type-safe provide/inject mechanism
  */
 
-import type { InjectionKey, Ref } from 'vue';
+import type { InjectionKey } from 'vue';
 import type { TabManagement } from '@/features/tabs';
 import type { SplitNode } from '@/features/tabs';
 
@@ -16,14 +16,6 @@ export const PANE_SIZES_COMMIT_KEY: InjectionKey<
   (node: SplitNode, sizes: number[]) => void
 > = Symbol('paneSizesCommit');
 
-// SSH form control injection keys
+// SSH form control injection key
 export const OPEN_SSH_FORM_KEY: InjectionKey<() => void> =
   Symbol('openSSHForm');
-export const CLOSE_SSH_FORM_KEY: InjectionKey<() => void> =
-  Symbol('closeSSHForm');
-export const SHOW_SSH_FORM_KEY: InjectionKey<Ref<boolean>> =
-  Symbol('showSSHForm');
-
-// Settings panel control injection key
-export const SHOW_SETTINGS_KEY: InjectionKey<Ref<boolean>> =
-  Symbol('showSettings');

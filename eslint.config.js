@@ -40,6 +40,7 @@ const browserGlobals = {
   requestAnimationFrame: 'readonly',
   cancelAnimationFrame: 'readonly',
   performance: 'readonly',
+  crypto: 'readonly',
   FrameRequestCallback: 'readonly',
 };
 

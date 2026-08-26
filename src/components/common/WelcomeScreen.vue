@@ -8,14 +8,9 @@ const emit = defineEmits(['complete']);
 const locale = currentLocaleRef();
 const availableLocales = AVAILABLE_LOCALES;
 
-const showContent = ref(true);
 const showOptions = ref(false);
 const selectedLanguage = ref<string>(locale.value as string);
 const selectedTheme = ref(themeManager.getTheme());
-
-const logoSrc = computed(() => {
-  return '/welcome-image.png';
-});
 
 // Based on theme, we'll apply different styles via CSS
 const themeClass = computed(() => {
@@ -74,12 +69,12 @@ const handleSave = () => {
 
 <template>
   <Transition name="fade" appear>
-    <div v-if="showContent" class="welcome-screen" :class="themeClass">
+    <div class="welcome-screen" :class="themeClass">
       <div class="welcome-container" :class="{ 'show-options': showOptions }">
         <!-- Logo Section -->
         <div class="logo-section">
           <div class="logo-icon">
-            <img :src="logoSrc" alt="NexaShell Logo" class="logo-img" />
+            <img src="/welcome-image.png" alt="NexaShell Logo" class="logo-img" />
           </div>
           <h1 class="app-name">NexaShell</h1>
         </div>

@@ -32,14 +32,3 @@ export interface TunnelStatus {
   accepted: number;
   error?: string | null;
 }
-
-/**
- * UI-only draft for the "add rule" form.
- */
-export interface NewTunnelRule {
-  direction: TunnelDirection;
-  listenHost: string;
-  listenPort: number;
-  targetHost?: string;
-  targetPort?: number;
-}

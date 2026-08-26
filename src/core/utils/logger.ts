@@ -53,7 +53,7 @@ const SENSITIVE_KEYS = [
  * Arrays and plain objects are traversed; other values are returned as-is.
  * Cycles are avoided via a seen-set so a self-referencing object cannot hang.
  */
-export function redactSensitive(value: unknown, seen = new Set<object>()): unknown {
+function redactSensitive(value: unknown, seen = new Set<object>()): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (seen.has(value)) return '[REDACTED]';
   seen.add(value);
@@ -253,29 +253,6 @@ class ModuleLogger {
    */
   clearHistory(): void {
     this.history = [];
-  }
-
-  /**
-   * Export logs as JSON
-   */
-  exportAsJSON(): string {
-    return JSON.stringify(this.history, null, 2);
-  }
-
-  /**
-   * Export logs as CSV
-   */
-  exportAsCSV(): string {
-    const headers = ['Timestamp', 'Level', 'Module', 'Message', 'Data'];
-    const rows = this.history.map(entry => [
-      entry.timestamp,
-      entry.level,
-      entry.module,
-      entry.message,
-      JSON.stringify(entry.data ?? ''),
-    ]);
-
-    return toCSV(headers, rows);
   }
 }
 

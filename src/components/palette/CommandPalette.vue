@@ -116,10 +116,12 @@ import { computed, inject, nextTick, ref, watch, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Pencil, Search, Terminal, Trash2 } from 'lucide-vue-next';
 import { TAB_MANAGEMENT_KEY } from '@/core/types';
+import type { TabManagement } from '@/features/tabs';
 import { sessionApi, useSessionStore } from '@/features/session';
 import { snippetApi } from '@/features/snippet';
 import type { Snippet, SnippetDraft } from '@/features/snippet';
 import { createLogger } from '@/core/utils/logger';
+import { useToastMessage } from '@/composables';
 
 const logger = createLogger('COMMAND_PALETTE');
 
@@ -137,28 +139,13 @@ const draft = ref<SnippetDraft>({ name: '', command: '', description: '' });
 const activeSessionHint = ref('');
 // Transient inline feedback for actions that can't proceed (e.g. running a
 // snippet while there is no active SSH session target).
-const feedback = ref('');
-let feedbackTimer: ReturnType<typeof setTimeout> | null = null;
-const showFeedback = (message: string) => {
-  feedback.value = message;
-  if (feedbackTimer) clearTimeout(feedbackTimer);
-  feedbackTimer = setTimeout(() => {
-    feedback.value = '';
-    feedbackTimer = null;
-  }, 2500);
-};
+const {
+  message: feedback,
+  show: showFeedback,
+  clear: clearFeedback,
+} = useToastMessage(2500);
 
-interface TabLike {
-  id: string;
-  type: string;
-  panes?: Array<{ id: string; type?: string }>;
-}
-interface TabManagementLike {
-  tabs: { value: TabLike[] };
-  activeTabId: { value: string };
-  activePaneId: { value: string };
-}
-const tabManagement = (inject(TAB_MANAGEMENT_KEY) as TabManagementLike | null) ?? null;
+const tabManagement = inject(TAB_MANAGEMENT_KEY) as TabManagement | null;
 const sessionStore = useSessionStore();
 
 const filteredSnippets = computed<Snippet[]>(() => {
@@ -174,17 +161,10 @@ const filteredSnippets = computed<Snippet[]>(() => {
 
 /** Resolve the id of the currently-focused SSH session, if any. */
 function activeSshSessionId(): string | null {
-  if (!tabManagement) return null;
-  const tab = tabManagement.tabs.value.find(
-    it => it.id === tabManagement.activeTabId.value
-  );
-  if (!tab || tab.type !== 'ssh') return null;
-  const panes = tab.panes || [];
-  if (panes.length === 0) return null;
-  // The active pane, falling back to the first pane. SSH pane ids equal the
-  // runtime session ids (see App.vue connect flow).
-  const paneId = tabManagement.activePaneId.value || panes[0]?.id;
+  const paneId = tabManagement?.getActiveSshPaneId() ?? null;
   if (!paneId) return null;
+  // SSH pane ids equal the runtime session ids (see App.vue connect flow);
+  // verify the session is live before treating it as a valid target.
   const session = sessionStore.getSession(paneId);
   return session && session.type === 'ssh' ? paneId : null;
 }
@@ -336,7 +316,7 @@ const onPaletteFocus = () => {
 };
 
 onUnmounted(() => {
-  if (feedbackTimer) clearTimeout(feedbackTimer);
+  clearFeedback();
 });
 </script>
 

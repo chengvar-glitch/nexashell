@@ -58,7 +58,6 @@ describe('useSftp return surface', () => {
     // These are called directly by SftpBrowser.vue; a rename here would throw
     // "sftp.go is not a function" at runtime, so assert the full surface.
     expect(typeof sftp.go).toBe('function');
-    expect(typeof sftp.navigate).toBe('function');
     expect(typeof sftp.goUp).toBe('function');
     expect(typeof sftp.goHome).toBe('function');
     expect(typeof sftp.refresh).toBe('function');
@@ -66,7 +65,6 @@ describe('useSftp return surface', () => {
     expect(typeof sftp.remove).toBe('function');
     expect(typeof sftp.rename).toBe('function');
     expect(typeof sftp.dispose).toBe('function');
-    expect(typeof sftp.probePlatform).toBe('function');
   });
 
   it('exposes reactive browsing state', () => {
@@ -75,6 +73,5 @@ describe('useSftp return surface', () => {
     expect(typeof sftp.entries).toBe('object');
     expect(typeof sftp.loading).toBe('object');
     expect(typeof sftp.error).toBe('object');
-    expect(typeof sftp.platform).toBe('object');
   });
 });

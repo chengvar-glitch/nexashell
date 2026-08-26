@@ -64,7 +64,7 @@ export default {
   import: {
     title: 'Import XTerminal Sessions',
     subtitle:
-      'Accepts XTerminal export/import text: "名称/地址/端口/用户/密码" label blocks, host=... key=value lines, and host|user|pass|title pipe format.',
+      'Accepts XTerminal export/import text: name/address/port/user/password label blocks, host=... key=value lines, and host|user|pass|title pipe format.',
     placeholder:
       'Paste XTerminal exported content here, e.g.:\nhost=192.168.1.100\nport=22\nuser=root\npass=your-password\ntitle=My Server',
     confirm: 'Import',

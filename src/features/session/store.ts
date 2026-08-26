@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
-import { sessionApi } from '@/features/session';
+import { ref } from 'vue';
+import { sessionApi } from './api';
 import { tunnelApi } from '@/features/tunnel';
 import { createLogger } from '@/core/utils/logger';
 
@@ -45,17 +45,8 @@ export const useSessionStore = defineStore('session', () => {
   const sessions = ref<Record<string, SessionState>>({});
   const tabToSessionMap = ref<Record<string, string>>({});
 
-  const allSessions = computed(() => {
-    return Object.values(sessions.value);
-  });
-
   const getSession = (sessionId: string): SessionState | undefined => {
     return sessions.value[sessionId];
-  };
-
-  const getSessionByTabId = (tabId: string): SessionState | undefined => {
-    const sessionId = tabToSessionMap.value[tabId];
-    return sessionId ? sessions.value[sessionId] : undefined;
   };
 
   const hasSession = (sessionId: string): boolean => {
@@ -65,21 +56,6 @@ export const useSessionStore = defineStore('session', () => {
   const hasSessionForTab = (tabId: string): boolean => {
     return tabId in tabToSessionMap.value;
   };
-
-  const sessionStats = computed(() => {
-    const allSess = allSessions.value;
-    return {
-      total: allSess.length,
-      connected: allSess.filter(s => s.status === 'connected').length,
-      connecting: allSess.filter(s => s.status === 'connecting').length,
-      error: allSess.filter(s => s.status === 'error').length,
-      disconnected: allSess.filter(s => s.status === 'disconnected').length,
-    };
-  });
-
-  const activeSessionCount = computed(() => {
-    return sessionStats.value.connected;
-  });
 
   const createSSHSession = async (
     sessionId: string,
@@ -262,21 +238,6 @@ export const useSessionStore = defineStore('session', () => {
     });
   };
 
-  const disconnectByTabId = async (tabId: string): Promise<void> => {
-    const sessionId = tabToSessionMap.value[tabId];
-    if (!sessionId) {
-      logger.warn('No session found for tab', { tabId });
-      return;
-    }
-    await disconnectSession(sessionId);
-  };
-
-  /**
-   * Disconnect every given session. Unlike `disconnectSession`, this does not
-   * throw per-session — failures are collected and re-thrown as an aggregate
-   * once all sessions have been attempted, so callers can decide whether to
-   * keep UI state (e.g. a tab) when some connections could not be torn down.
-   */
   const disconnectSessions = async (ids: string[]): Promise<void> => {
     const errors: Error[] = [];
     for (const id of ids) {
@@ -301,14 +262,6 @@ export const useSessionStore = defineStore('session', () => {
     const session = sessions.value[sessionId];
     if (session) {
       session.status = status;
-    }
-  };
-
-  const setSessionError = (sessionId: string, errorMessage: string) => {
-    const session = sessions.value[sessionId];
-    if (session) {
-      session.status = 'error';
-      session.errorMessage = errorMessage;
     }
   };
 
@@ -345,22 +298,15 @@ export const useSessionStore = defineStore('session', () => {
   return {
     sessions,
     tabToSessionMap,
-    allSessions,
-    sessionStats,
-    activeSessionCount,
     getSession,
-    getSessionByTabId,
     hasSession,
-    hasSessionForTab,
     createSSHSession,
     createLocalSession,
     disconnectSession,
-    disconnectByTabId,
     disconnectSessions,
     getCachedCredentials,
     cacheCredentials,
     updateSessionStatus,
-    setSessionError,
     cleanupAllSessions,
     reset,
   };

@@ -123,7 +123,7 @@ const enterPath = async (entry: SftpEntry) => {
   // navigating into them; report a navigation error when it fails.
   if (!entry.isDir && !entry.isSymlink) return;
   actionError.value = '';
-  const ok = await sftp.navigate(entry.path);
+  const ok = await sftp.go(entry.path);
   if (ok) {
     selectedPath.value = null;
     actionError.value = '';

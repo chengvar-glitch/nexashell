@@ -1,13 +1,13 @@
 import {
   quitApp,
 } from '@/features/window';
-import { createNewLocalTab } from '@/features/tabs';
 import { eventBus } from './event-bus';
 import { APP_EVENTS } from '@/core/constants';
 
 const focusSearch = () => eventBus.emit(APP_EVENTS.FOCUS_SEARCH);
 const splitVertical = () => eventBus.emit(APP_EVENTS.SPLIT_VERTICAL);
 const splitHorizontal = () => eventBus.emit(APP_EVENTS.SPLIT_HORIZONTAL);
+const createNewLocalTab = () => eventBus.emit(APP_EVENTS.NEW_LOCAL_TAB);
 
 export interface ShortcutConfig {
   key: string;
@@ -38,15 +38,6 @@ export class ShortcutManager {
     if (!this.listenerBound) {
       this.bindListener();
     }
-  }
-
-  /**
-   * Unregister a keyboard shortcut
-   * @param config Shortcut configuration
-   */
-  unregister(config: Omit<ShortcutConfig, 'handler'>) {
-    const key = this.generateKey(config);
-    this.shortcuts.delete(key);
   }
 
   /**
@@ -167,36 +158,6 @@ export class ShortcutManager {
       shortcut.handler();
     }
   }
-
-  /**
-   * Get all registered shortcuts
-   */
-  getAllShortcuts(): ShortcutConfig[] {
-    return Array.from(this.shortcuts.values());
-  }
-
-  /**
-   * Format shortcut display text
-   */
-  static formatShortcut(config: Partial<ShortcutConfig>): string {
-    const keys: string[] = [];
-
-    if (config.ctrlKey) keys.push('Ctrl');
-    if (config.metaKey)
-      keys.push(navigator.userAgent.includes('Mac') ? 'Cmd' : 'Ctrl');
-    if (config.shiftKey) keys.push('Shift');
-    if (config.altKey) keys.push('Alt');
-
-    if (config.key) {
-      let key = config.key;
-      if (key === ',') key = ',';
-      if (key === ' ') key = 'Space';
-      if (key === 'Escape') key = 'Esc';
-      keys.push(key.toUpperCase());
-    }
-
-    return keys.join('+');
-  }
 }
 
 export const shortcutManager = new ShortcutManager();
@@ -224,7 +185,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Open settings',
     handler: () => {
-      window.dispatchEvent(new CustomEvent(APP_EVENTS.OPEN_SETTINGS));
+      eventBus.emit(APP_EVENTS.OPEN_SETTINGS);
     },
   },
   NEW_LOCAL_TAB: {
@@ -246,7 +207,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'New SSH connection tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent(APP_EVENTS.OPEN_SSH_FORM));
+      eventBus.emit(APP_EVENTS.OPEN_SSH_FORM);
     },
   },
   FOCUS_SEARCH: {
@@ -268,7 +229,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Close dialog',
     handler: () => {
-      window.dispatchEvent(new CustomEvent(APP_EVENTS.CLOSE_DIALOG));
+      eventBus.emit(APP_EVENTS.CLOSE_DIALOG);
     },
   },
   CLOSE_CURRENT_TAB: {
@@ -279,7 +240,7 @@ export const PredefinedShortcuts = {
     altKey: false,
     description: 'Close current tab',
     handler: () => {
-      window.dispatchEvent(new CustomEvent(APP_EVENTS.CLOSE_TAB));
+      eventBus.emit(APP_EVENTS.CLOSE_TAB);
     },
   },
   SPLIT_VERTICAL: {

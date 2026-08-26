@@ -8,26 +8,14 @@
  * initiating action in this window; entries are matched by `taskId`.
  */
 
-import { ref, readonly, type Ref } from 'vue';
+import { ref, type Ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { createLogger } from '@/core/utils/logger';
 import { i18n } from '@/core/i18n';
-import type { UploadTask, SftpEntry } from '@/core/types';
+import type { UploadTask, SftpEntry, UploadProgressPayload } from '@/core/types';
 
 const logger = createLogger('TRANSFER_QUEUE');
-
-interface UploadProgressPayload {
-  taskId: string;
-  sessionId: string;
-  progress: number;
-  uploadedBytes: number;
-  totalBytes: number;
-  status: 'uploading' | 'downloading' | 'paused' | 'success' | 'error' | 'cancelled';
-  message: string;
-  speed: number;
-  error?: string;
-}
 
 /**
  * Create a new transfer queue bound to a session. Call `dispose()` on unmount
@@ -69,7 +57,18 @@ export function useTransferQueue(sessionId: Ref<string>) {
   };
 
   const applyProgress = (payload: UploadProgressPayload, direction: UploadTask['direction']) => {
-    const status = payload.status as UploadTask['status'];
+    // Downloads: the backend broadcasts its own statuses, but non-terminal
+    // ones must render as 'downloading' on the queue row regardless of what
+    // the backend labels them.
+    const status = (payload.status === 'success' || payload.status === 'error' || payload.status === 'cancelled'
+      ? payload.status
+      : direction === 'download'
+        ? 'downloading'
+        : payload.status) as UploadTask['status'];
+    const eta =
+      payload.speed > 0
+        ? (payload.totalBytes - payload.uploadedBytes) / payload.speed
+        : undefined;
     // A final event for a task this window cancelled: we already removed it
     // optimistically, so do NOT rebuild it. Drop the marker so later unrelated
     // events are unaffected.
@@ -98,6 +97,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
         fileSize: payload.totalBytes,
         uploadedBytes: payload.uploadedBytes,
         speed: payload.speed,
+        eta,
         error: payload.error || undefined,
       });
       return;
@@ -110,6 +110,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
       uploadedBytes: payload.uploadedBytes,
       fileSize: payload.totalBytes || existing.fileSize,
       speed: payload.speed,
+      eta,
       error: payload.error || undefined,
     });
   };
@@ -247,6 +248,22 @@ export function useTransferQueue(sessionId: Ref<string>) {
       });
     } catch (err) {
       logger.error('Failed to cancel transfer', err);
+      // Re-insert a terminal error entry — the partial remote file may be
+      // left behind when the backend cancellation truly failed.
+      tasks.value = [
+        ...tasks.value,
+        task
+          ? { ...task, status: 'error' as const, message: t('upload.failedToCancel') }
+          : {
+              id: taskId,
+              fileName: t('upload.failedToCancel'),
+              status: 'error' as const,
+              progress: 0,
+              message: t('upload.failedToCancel'),
+              timestamp: Date.now(),
+            },
+      ];
+      return;
     }
     // Remember this cancellation so the final 'cancelled' broadcast does not
     // resurrect the row, then remove it optimistically.
@@ -273,7 +290,7 @@ export function useTransferQueue(sessionId: Ref<string>) {
   };
 
   return {
-    tasks: readonly(tasks),
+    tasks,
     setupListeners,
     startUpload,
     startDownload,
@@ -282,5 +299,9 @@ export function useTransferQueue(sessionId: Ref<string>) {
     cancel,
     clearCompleted,
     dispose,
+    // Lower-level access for callers that resolve the target path themselves
+    // (e.g. the main-window upload flow with its preview dialog).
+    addTask,
+    updateTask,
   };
 }
