@@ -394,6 +394,8 @@ export default {
     minimize: '最小化',
     maximize: '最大化',
     close: '关闭',
+    settings: '设置',
+    toggleTheme: '切换浅色/深色主题',
   },
   metadata: {
     createFailed: '创建失败',

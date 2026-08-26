@@ -8,8 +8,10 @@ import {
 } from '@/core/utils/platform/platform-detection';
 import SearchBox from '@/components/search/SearchBox.vue';
 import SearchDropdown from '@/components/search/SearchDropdown.vue';
+import { Sun, Moon, Settings } from 'lucide-vue-next';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
+import { themeManager, THEME_CHANGED_EVENT } from '@/core/utils/theme-manager';
 import { createLogger } from '@/core/utils/logger';
 
 const logger = createLogger('WINDOW_TITLE_BAR');
@@ -37,6 +39,22 @@ const searchDropdownRef = ref<InstanceType<typeof SearchDropdown> | null>(null);
 const showSearchDropdown = ref(false);
 const searchBoxElement = ref<HTMLElement | undefined>(undefined);
 const searchQuery = ref('');
+
+// --- Theme toggle + settings shortcuts ---
+const isDarkTheme = ref(themeManager.getActualTheme() === 'dark');
+
+/** Toggle between explicit light/dark, exiting 'auto' on first click. */
+const toggleTheme = () => {
+  themeManager.setTheme(isDarkTheme.value ? 'light' : 'dark');
+};
+
+const handleThemeChanged = () => {
+  isDarkTheme.value = themeManager.getActualTheme() === 'dark';
+};
+
+const openSettings = () => {
+  eventBus.emit(APP_EVENTS.OPEN_SETTINGS);
+};
 
 /**
  * Handles search box focus to display the dropdown and update its position.
@@ -127,10 +145,14 @@ onMounted(async () => {
 
   // Listen for global search focus events
   eventBus.on(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
+
+  // Keep the theme toggle icon in sync with the actual light/dark mode
+  window.addEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
 });
 
 onUnmounted(() => {
   eventBus.off(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
+  window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
   if (blurTimer) clearTimeout(blurTimer);
 
   const unlisten = (window as unknown as { __unlistenResize?: () => void })
@@ -217,6 +239,26 @@ const handleMaximize = async () => {
     </div>
 
     <div class="right-section" data-tauri-drag-region>
+      <div class="title-bar-actions">
+        <button
+          class="title-bar-btn"
+          :title="t('window.toggleTheme')"
+          :aria-label="t('window.toggleTheme')"
+          @click="toggleTheme"
+        >
+          <Sun v-if="isDarkTheme" :size="15" />
+          <Moon v-else :size="15" />
+        </button>
+        <button
+          class="title-bar-btn"
+          :title="t('window.settings')"
+          :aria-label="t('window.settings')"
+          @click="openSettings"
+        >
+          <Settings :size="15" />
+        </button>
+      </div>
+
       <div
         v-if="showWindowControls && isWindowsOS"
         class="window-controls windows-controls"
@@ -352,6 +394,36 @@ const handleMaximize = async () => {
 .window-controls {
   display: flex;
   gap: 8px;
+}
+
+.title-bar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 8px;
+}
+
+.window-title-bar.is-windows .title-bar-actions {
+  margin-right: 4px;
+}
+
+.title-bar-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.title-bar-btn:hover {
+  background-color: rgba(128, 128, 128, 0.15);
+  color: var(--color-text-primary);
 }
 
 .window-title-bar.is-windows .window-controls {

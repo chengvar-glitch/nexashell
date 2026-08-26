@@ -396,6 +396,8 @@ export default {
     minimize: 'Minimize',
     maximize: 'Maximize',
     close: 'Close',
+    settings: 'Settings',
+    toggleTheme: 'Toggle light/dark theme',
   },
   metadata: {
     createFailed: 'Failed to create item',
