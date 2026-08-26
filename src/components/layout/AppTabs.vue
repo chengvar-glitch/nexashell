@@ -17,7 +17,6 @@ import {
   MoreHorizontal,
   Terminal,
   Server,
-  Settings,
 } from 'lucide-vue-next';
 import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
@@ -172,10 +171,6 @@ const handleNewSSHTab = async () => {
   if (openSSHForm) {
     openSSHForm();
   }
-};
-
-const handleOpenSettings = () => {
-  eventBus.emit(APP_EVENTS.OPEN_SETTINGS);
 };
 
 // Saved connections dropdown (shown by the "+" button)
@@ -389,18 +384,6 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="right-actions" data-tauri-drag-region>
-      <ShortcutHint
-        :text="`${t('settings.openSettings')}  ${formatShortcut('Cmd+,')}`"
-        position="bottom"
-      >
-        <button
-          class="action-btn more-btn"
-          :aria-label="t('settings.openSettings')"
-          @click="handleOpenSettings"
-        >
-          <Settings :size="16" />
-        </button>
-      </ShortcutHint>
       <ShortcutHint :text="t('common.windowActions')" position="bottom">
         <button
           class="action-btn more-btn"
