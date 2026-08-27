@@ -1350,7 +1350,6 @@ const initialize = async (): Promise<void> => {
 <template>
   <div class="remote-connection-view">
     <ServerDashboard
-      v-if="showDashboard"
       :show="showDashboard"
       :active-tab="activeDashboardTab"
       :session-id="props.sessionId"
