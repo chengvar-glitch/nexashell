@@ -32,8 +32,6 @@ import { createLogger } from '@/core/utils/logger';
 const logger = createLogger('METADATA_MULTI_SELECT');
 const { t } = useI18n();
 
-type MetadataKind = 'group' | 'tag';
-
 interface Props {
   modelValue?: string[];
   items?: MetadataItem[];
@@ -43,8 +41,6 @@ interface Props {
   emptyText?: string;
   allowCreate?: boolean;
   immediateSave?: boolean;
-  /** Which entity this control manages: group or tag */
-  kind: MetadataKind;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -69,8 +65,7 @@ const handleCreateItem = async (name: string): Promise<MetadataItem> => {
   createError.value = '';
   if (props.immediateSave) {
     try {
-      const addCmd = props.kind === 'group' ? 'add_group' : 'add_tag';
-      const id = await invoke<string>(addCmd, { name });
+      const id = await invoke<string>('add_group', { name });
       const newItem: MetadataItem = {
         id,
         name,
@@ -79,12 +74,10 @@ const handleCreateItem = async (name: string): Promise<MetadataItem> => {
         updated_at: new Date().toISOString(),
       };
 
-      eventBus.emit(
-        props.kind === 'group' ? APP_EVENTS.GROUPS_UPDATED : APP_EVENTS.TAGS_UPDATED
-      );
+      eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
       return newItem;
     } catch (error) {
-      logger.error(`Failed to create ${props.kind}:`, error);
+      logger.error('Failed to create group:', error);
       // Surface the backend failure to the user instead of failing silently.
       const msg = error instanceof Error ? error.message : String(error);
       createError.value = msg || t('metadata.createFailed');

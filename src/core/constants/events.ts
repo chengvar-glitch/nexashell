@@ -11,7 +11,6 @@ export const APP_EVENTS = {
   NEW_SSH_TAB: 'app:new-ssh-tab',
   CLOSE_TAB: 'app:close-tab',
   GROUPS_UPDATED: 'app:groups-updated',
-  TAGS_UPDATED: 'app:tags-updated',
   SESSION_SAVED: 'app:session-saved',
   CONNECT_SESSION: 'app:connect-session',
   SPLIT_HORIZONTAL: 'app:split-horizontal',

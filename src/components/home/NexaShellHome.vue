@@ -1,6 +1,6 @@
 <template>
   <div class="nexashell-home">
-    <!-- Sidebar Navigation: Groups and Tags -->
+    <!-- Sidebar Navigation: Groups -->
     <aside class="home-sidebar">
       <div class="sidebar-section">
         <h4 class="section-title">
@@ -132,117 +132,6 @@
           </div>
         </nav>
       </div>
-
-      <div class="sidebar-section">
-        <div class="section-header">
-          <h4 class="section-title">
-            {{ $t('home.tags') }}
-          </h4>
-          <button class="add-btn" @click="showAddTagInput = !showAddTagInput">
-            <Plus :size="14" />
-          </button>
-        </div>
-        <div v-if="showAddTagInput" class="add-input-wrapper">
-          <input
-            v-model="newTagName"
-            type="text"
-            class="add-input"
-            placeholder="Tag name..."
-            autofocus
-            @blur="handleTagInputBlur"
-            @keydown="handleTagInputKeydown"
-          />
-          <div class="add-actions">
-            <button
-              class="action-btn tiny confirm"
-              :title="t('common.confirm')"
-              @mousedown.prevent
-              @click="handleAddTag"
-            >
-              <Check :size="12" />
-            </button>
-            <button
-              class="action-btn tiny cancel"
-              :title="t('common.cancel')"
-              @mousedown.prevent
-              @click="handleTagInputBlur"
-            >
-              <X :size="12" />
-            </button>
-          </div>
-        </div>
-        <div class="tag-cloud">
-          <div v-for="tag in tags" :key="tag.id" class="tag-item-wrapper">
-            <template v-if="editingTagId === tag.id">
-              <div class="tag-edit-container">
-                <input
-                  v-model="renamingTagName"
-                  type="text"
-                  class="rename-tag-input"
-                  autofocus
-                  @blur="handleSaveTagRename"
-                  @keydown.enter="handleSaveTagRename"
-                  @keydown.esc="editingTagId = null"
-                />
-                <div class="color-picker-mini">
-                  <button
-                    v-for="color in TAG_COLORS"
-                    :key="color.value"
-                    class="color-dot"
-                    :class="{ active: renamingTagColor === color.value }"
-                    :style="{
-                      backgroundColor:
-                        color.value || 'var(--color-bg-tertiary)',
-                    }"
-                    @mousedown.prevent
-                    @click="renamingTagColor = color.value"
-                  ></button>
-                </div>
-                <div class="edit-confirm-actions">
-                  <button
-                    class="action-btn tiny"
-                    @mousedown.prevent
-                    @click="handleSaveTagRename"
-                  >
-                    <Check :size="10" />
-                  </button>
-                </div>
-              </div>
-            </template>
-            <template v-else>
-              <span
-                class="tag-badge"
-                :class="{
-                  active: activeView === 'tag' && selectedTagId === tag.id,
-                }"
-                :style="
-                  activeView === 'tag' && selectedTagId === tag.id
-                    ? {}
-                    : { color: tag.color }
-                "
-                @click="setActiveTag(tag.id)"
-              >
-                <Hash :size="12" :style="{ color: tag.color || 'inherit' }" />
-                {{ tag.name }}
-                <span v-if="tagCounts[tag.name] > 0" class="tag-count">
-                  {{ tagCounts[tag.name] }}
-                </span>
-              </span>
-              <div class="item-actions">
-                <button class="action-btn tiny" @click.stop="startEditTag(tag)">
-                  <Pencil :size="10" />
-                </button>
-                <button
-                  class="action-btn tiny delete"
-                  @click.stop="handleDeleteTag(tag.id)"
-                >
-                  <Minus :size="10" />
-                </button>
-              </div>
-            </template>
-          </div>
-        </div>
-      </div>
     </aside>
 
     <!-- Main Content: Session Management -->
@@ -282,10 +171,6 @@
           <button class="batch-btn" @click="toggleBatchGroupMenu($event)">
             <Folder :size="14" />
             {{ t('home.batchAddGroup') }}
-          </button>
-          <button class="batch-btn" @click="toggleBatchTagMenu($event)">
-            <Hash :size="14" />
-            {{ t('home.batchAddTag') }}
           </button>
           <button class="batch-btn danger" @click="handleBatchDelete">
             <Trash2 :size="14" />
@@ -343,7 +228,6 @@
                 <th class="col-name">{{ $t('home.serverName') }}</th>
                 <th class="col-host">{{ $t('home.host') }}</th>
                 <th class="col-groups-list">{{ $t('home.groups') }}</th>
-                <th class="col-tags">{{ $t('home.tags') }}</th>
                 <th class="col-last-connect">{{ $t('home.lastConnected') }}</th>
               </tr>
             </thead>
@@ -423,18 +307,6 @@
                     </span>
                   </div>
                 </td>
-                <td class="col-tags">
-                  <div class="table-tags">
-                    <span
-                      v-for="tag in session.tags"
-                      :key="tag"
-                      class="mini-tag"
-                      :style="getTagStyles(tag)"
-                    >
-                      {{ tag }}
-                    </span>
-                  </div>
-                </td>
                 <td class="col-last-connect">
                   <div class="time-actions-wrapper">
                     <span class="timestamp">
@@ -473,20 +345,13 @@
       @select="handleContextMenuSelect"
     />
 
-    <!-- Batch group/tag submenus -->
+    <!-- Batch group submenu -->
     <DropdownMenu
       v-model:visible="batchGroupMenuOpen"
       :items="batchGroupItems"
       :x="batchGroupX"
       :y="batchGroupY"
       @select="handleBatchGroupSelect"
-    />
-    <DropdownMenu
-      v-model:visible="batchTagMenuOpen"
-      :items="batchTagItems"
-      :x="batchTagX"
-      :y="batchTagY"
-      @select="handleBatchTagSelect"
     />
 
     <!-- Confirm Delete Dialog -->
@@ -528,7 +393,6 @@ import {
   Folder,
   FolderOpen,
   Plus,
-  Hash,
   Minus,
   Terminal,
   Copy,
@@ -541,11 +405,13 @@ import {
   Import,
   Pin,
   PinOff,
+  FolderTree,
   type LucideIcon,
 } from 'lucide-vue-next';
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import ImportXTerminalDialog from '@/components/home/ImportXTerminalDialog.vue';
+import { openFileManagerWindow } from '@/features/window';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
@@ -565,47 +431,24 @@ interface Group {
   updated_at: string;
 }
 
-interface Tag {
-  id: string;
-  name: string;
-  color?: string;
-  sort: number;
-  created_at: string;
-  updated_at: string;
-}
-
-// Predefined professional tag colors (Modern palette)
-const TAG_COLORS = [
-  { name: 'Default', value: '' },
-  { name: 'Rose', value: '#f43f5e' },
-  { name: 'Amber', value: '#f59e0b' },
-  { name: 'Emerald', value: '#10b981' },
-  { name: 'Cyan', value: '#06b6d4' },
-  { name: 'Indigo', value: '#6366f1' },
-  { name: 'Violet', value: '#8b5cf6' },
-  { name: 'Fuchsia', value: '#d946ef' },
-];
-
 // Global states
 const sessions = ref<SavedSessionDisplay[]>([]);
 const groups = ref<Group[]>([]);
-const tags = ref<Tag[]>([]);
 const isMounted = ref(false);
 // True during the initial/refresh session fetch so the UI can show a
 // distinct "loading" state instead of flashing the empty state.
 const isLoading = ref(true);
 
 // View and filter states
-const activeView = ref<'all' | 'favorites' | 'recent' | 'group' | 'tag'>('all');
+const activeView = ref<'all' | 'favorites' | 'recent' | 'group'>('all');
 const selectedGroupId = ref<string | null>(null);
-const selectedTagId = ref<string | null>(null);
 const selectedSessionIds = ref<Set<string>>(new Set());
 
 const favoriteCount = computed(
   () => sessions.value.filter(s => s.is_favorite).length
 );
 
-// Group and Tag counts for sidebar
+// Group counts for sidebar
 const countByNames = (
   extract: (s: SavedSessionDisplay) => string[] | undefined
 ) => {
@@ -619,20 +462,14 @@ const countByNames = (
 };
 
 const groupCounts = computed(() => countByNames(s => s.groups));
-const tagCounts = computed(() => countByNames(s => s.tags));
 
-// Input states for adding new groups/tags
+// Input states for adding new groups
 const showAddGroupInput = ref(false);
 const newGroupName = ref('');
-const showAddTagInput = ref(false);
-const newTagName = ref('');
 
 // Renaming states
 const editingGroupId = ref<string | null>(null);
 const renamingGroupName = ref('');
-const editingTagId = ref<string | null>(null);
-const renamingTagName = ref('');
-const renamingTagColor = ref('');
 
 // Computed values for UI
 const viewTitle = computed(() => {
@@ -646,8 +483,6 @@ const viewTitle = computed(() => {
         groups.value.find(g => g.id === selectedGroupId.value)?.name ||
         t('common.group')
       );
-    case 'tag':
-      return tags.value.find(t => t.id === selectedTagId.value)?.name || t('common.tag');
     default:
       return t('home.allSessions');
   }
@@ -676,11 +511,6 @@ const filteredSessions = computed(() => {
     if (groupName) {
       result = result.filter(s => s.groups?.includes(groupName));
     }
-  } else if (activeView.value === 'tag' && selectedTagId.value) {
-    const tagName = tags.value.find(t => t.id === selectedTagId.value)?.name;
-    if (tagName) {
-      result = result.filter(s => s.tags?.includes(tagName));
-    }
   }
 
   // Pinned sessions first (most recently pinned on top), then by recency.
@@ -693,43 +523,15 @@ const filteredSessions = computed(() => {
 });
 
 // Selection handlers
-// Pre-computed tag name -> tag map for O(1) lookups when rendering many tags
-const tagsByName = computed(() => {
-  const map = new Map<string, Tag>();
-  tags.value.forEach(t => map.set(t.name, t));
-  return map;
-});
-
-const getTagStyles = (tagName: string) => {
-  const tag = tagsByName.value.get(tagName);
-  if (!tag?.color) return {};
-
-  // For colors, we create a soft background and a matching border
-  return {
-    backgroundColor: `${tag.color}15`, // 15% opacity hex
-    borderColor: `${tag.color}40`, // 25% opacity hex for border
-    color: tag.color,
-  };
-};
-
 const setActiveView = (view: 'all' | 'favorites' | 'recent') => {
   activeView.value = view;
   selectedGroupId.value = null;
-  selectedTagId.value = null;
   selectedSessionIds.value = new Set();
 };
 
 const setActiveGroup = (groupId: string) => {
   activeView.value = 'group';
   selectedGroupId.value = groupId;
-  selectedTagId.value = null;
-  selectedSessionIds.value = new Set();
-};
-
-const setActiveTag = (tagId: string) => {
-  activeView.value = 'tag';
-  selectedTagId.value = tagId;
-  selectedGroupId.value = null;
   selectedSessionIds.value = new Set();
 };
 
@@ -794,7 +596,6 @@ const confirmDialogMessage = ref('');
 let pendingDeleteSession: SavedSessionDisplay | null = null;
 let pendingDeleteSessionIds: string[] | null = null;
 let pendingDeleteGroupId: string | null = null;
-let pendingDeleteTagId: string | null = null;
 
 // Copy feedback state
 const {
@@ -816,27 +617,20 @@ const handleSessionSaved = async () => {
   }
 };
 
-// Refresh a metadata list (groups/tags) from the backend, then reload sessions
-// since they render those names/colors.
-const refreshMetadata = async (kind: 'group' | 'tag') => {
+// Refresh the groups list from the backend, then reload sessions since they
+// render group names.
+const refreshGroups = async () => {
   if (!isMounted.value) return;
   try {
-    const fetched = await invoke<Group[] | Tag[]>(
-      kind === 'group' ? 'list_groups' : 'list_tags'
-    );
-    if (kind === 'group') {
-      groups.value = fetched as Group[];
-    } else {
-      tags.value = fetched as Tag[];
-    }
+    const fetched = await invoke<Group[]>('list_groups');
+    groups.value = fetched || [];
     await loadSessions();
   } catch (error) {
-    logger.error(`Failed to refresh ${kind}s`, error);
+    logger.error('Failed to refresh groups', error);
   }
 };
 
-const handleGroupsUpdated = () => refreshMetadata('group');
-const handleTagsUpdated = () => refreshMetadata('tag');
+const handleGroupsUpdated = () => refreshGroups();
 
 const toggleSessionSelection = (sessionId: string) => {
   const next = new Set(selectedSessionIds.value);
@@ -906,7 +700,7 @@ const loadSessions = async () => {
   }
 };
 
-// Fetch groups and tags from backend on mount
+// Fetch groups from backend on mount
 onMounted(async () => {
   isMounted.value = true;
 
@@ -920,16 +714,8 @@ onMounted(async () => {
     logger.error('Failed to fetch groups', error);
   }
 
-  try {
-    const fetchedTags = await invoke<Tag[]>('list_tags');
-    tags.value = fetchedTags || [];
-  } catch (error) {
-    logger.error('Failed to fetch tags', error);
-  }
-
-  // Listen for group and tag updates from other components
+  // Listen for group updates from other components
   eventBus.on(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
-  eventBus.on(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
   // Reload sessions when a new session is saved
   eventBus.on(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
 });
@@ -938,7 +724,6 @@ onUnmounted(() => {
   isMounted.value = false;
   // Clean up event listeners
   eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
-  eventBus.off(APP_EVENTS.TAGS_UPDATED, handleTagsUpdated);
   eventBus.off(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
   clearCopyFeedback();
 });
@@ -1002,16 +787,6 @@ const handleDeleteGroup = (groupId: string) => {
   showConfirmDialog.value = true;
 };
 
-const handleDeleteTag = (tagId: string) => {
-  const tag = tags.value.find(tg => tg.id === tagId);
-  pendingDeleteTagId = tagId;
-  confirmDialogTitle.value = t('home.deleteTag');
-  confirmDialogMessage.value = tag
-    ? t('home.deleteTagConfirm', { name: tag.name })
-    : '';
-  showConfirmDialog.value = true;
-};
-
 const handleAddGroup = async () => {
   const name = newGroupName.value.trim();
   if (!name) return;
@@ -1020,23 +795,11 @@ const handleAddGroup = async () => {
     await invoke('add_group', { name });
     newGroupName.value = '';
     showAddGroupInput.value = false;
-    // Event listener will handle refresh
+    // Notify self (and any other views) so the new group shows immediately
+    // instead of waiting for a restart.
+    eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
   } catch (error) {
     logger.error('Failed to add group', error);
-  }
-};
-
-const handleAddTag = async () => {
-  const name = newTagName.value.trim();
-  if (!name) return;
-
-  try {
-    await invoke('add_tag', { name });
-    newTagName.value = '';
-    showAddTagInput.value = false;
-    // Event listener will handle refresh
-  } catch (error) {
-    logger.error('Failed to add tag', error);
   }
 };
 
@@ -1046,25 +809,11 @@ const handleGroupInputBlur = () => {
   newGroupName.value = '';
 };
 
-const handleTagInputBlur = () => {
-  // Discard if empty or when blurring
-  showAddTagInput.value = false;
-  newTagName.value = '';
-};
-
 const handleGroupInputKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter') {
     handleAddGroup();
   } else if (e.key === 'Escape') {
     handleGroupInputBlur();
-  }
-};
-
-const handleTagInputKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter') {
-    handleAddTag();
-  } else if (e.key === 'Escape') {
-    handleTagInputBlur();
   }
 };
 
@@ -1088,37 +837,6 @@ const handleSaveGroupRename = async () => {
     }
   }
   editingGroupId.value = null;
-};
-
-const startEditTag = (tag: Tag) => {
-  editingTagId.value = tag.id;
-  renamingTagName.value = tag.name;
-  renamingTagColor.value = tag.color || '';
-};
-
-const handleSaveTagRename = async () => {
-  if (!editingTagId.value) return;
-  const newName = renamingTagName.value.trim();
-  const newColor = renamingTagColor.value;
-  if (newName) {
-    try {
-      await invoke('edit_tag', {
-        id: editingTagId.value,
-        name: newName,
-        color: newColor,
-      });
-      const tag = tags.value.find(t => t.id === editingTagId.value);
-      if (tag) {
-        tag.name = newName;
-        tag.color = newColor;
-      }
-      // Also reload sessions since they might display tag names/colors
-      await loadSessions();
-    } catch (error) {
-      logger.error('Failed to update tag', error);
-    }
-  }
-  editingTagId.value = null;
 };
 
 // Context menu handlers
@@ -1147,6 +865,11 @@ const handleSessionContextMenu = (
       label: t('common.connect') || 'Connect',
       icon: Terminal,
     },
+    {
+      key: 'file-manager',
+      label: t('home.openFileManager') || 'Open File Manager',
+      icon: FolderTree,
+    },
     { key: 'divider', label: '', divider: true },
     {
       key: 'copy',
@@ -1174,25 +897,6 @@ const handleSessionContextMenu = (
               active: session.group_ids?.includes(g.id),
             })),
     },
-    {
-      key: 'join-tag',
-      label: t('home.tags') || 'Tags',
-      icon: Hash,
-      children:
-        tags.value.length === 0
-          ? [
-              {
-                key: '__empty__',
-                label: t('connection.noTagsAvailable'),
-                disabled: true,
-              },
-            ]
-          : tags.value.map(tag => ({
-              key: `tag:${tag.id}`,
-              label: tag.name,
-              active: session.tag_ids?.includes(tag.id),
-            })),
-    },
     { key: 'divider', label: '', divider: true },
     {
       key: 'delete',
@@ -1217,7 +921,7 @@ const handleContextMenuSelect = async (key: string) => {
     return;
   }
 
-  // Handle group/tag linking
+  // Handle group linking
   if (key.startsWith('group:')) {
     const groupId = key.split(':')[1];
     const session = selectedSession.value;
@@ -1240,31 +944,12 @@ const handleContextMenuSelect = async (key: string) => {
     return;
   }
 
-  if (key.startsWith('tag:')) {
-    const tagId = key.split(':')[1];
-    const session = selectedSession.value;
-    try {
-      if (session.tag_ids?.includes(tagId)) {
-        await invoke('unlink_session_tag', {
-          sessionId: session.id,
-          tagId,
-        });
-      } else {
-        await invoke('link_session_tag', {
-          sessionId: session.id,
-          tagId,
-        });
-      }
-      await loadSessions();
-    } catch (e) {
-      logger.error('Failed to update session tag', e);
-    }
-    return;
-  }
-
   switch (key) {
     case 'connect':
       await handleQuickConnect(selectedSession.value);
+      break;
+    case 'file-manager':
+      await openFileManagerWindow(selectedSession.value.id);
       break;
     case 'edit':
       handleEditSession(selectedSession.value);
@@ -1289,9 +974,6 @@ const handleEditSession = (session: SavedSessionDisplay) => {
 const batchGroupMenuOpen = ref(false);
 const batchGroupX = ref(0);
 const batchGroupY = ref(0);
-const batchTagMenuOpen = ref(false);
-const batchTagX = ref(0);
-const batchTagY = ref(0);
 
 // Position a batch submenu right below the clicked button.
 const positionBatchMenu = (
@@ -1312,23 +994,11 @@ const toggleBatchGroupMenu = (event: MouseEvent) => {
     const { x, y } = positionBatchMenu(event, 200);
     batchGroupX.value = x;
     batchGroupY.value = y;
-    batchTagMenuOpen.value = false;
   }
   batchGroupMenuOpen.value = !batchGroupMenuOpen.value;
 };
 
-const toggleBatchTagMenu = (event: MouseEvent) => {
-  event.stopPropagation();
-  if (!batchTagMenuOpen.value) {
-    const { x, y } = positionBatchMenu(event, 200);
-    batchTagX.value = x;
-    batchTagY.value = y;
-    batchGroupMenuOpen.value = false;
-  }
-  batchTagMenuOpen.value = !batchTagMenuOpen.value;
-};
-
-// A group/tag is "active" in the batch menu when EVERY selected session has it.
+// A group is "active" in the batch menu when EVERY selected session has it.
 const batchGroupItems = computed(() =>
   groups.value.length === 0
     ? [
@@ -1344,24 +1014,6 @@ const batchGroupItems = computed(() =>
         active:
           selectedSessions.value.length > 0 &&
           selectedSessions.value.every(s => s.group_ids?.includes(g.id)),
-      }))
-);
-
-const batchTagItems = computed(() =>
-  tags.value.length === 0
-    ? [
-        {
-          key: '__empty__',
-          label: t('connection.noTagsAvailable'),
-          disabled: true,
-        },
-      ]
-    : tags.value.map(tag => ({
-        key: `tag:${tag.id}`,
-        label: tag.name,
-        active:
-          selectedSessions.value.length > 0 &&
-          selectedSessions.value.every(s => s.tag_ids?.includes(tag.id)),
       }))
 );
 
@@ -1387,27 +1039,6 @@ const handleBatchGroupSelect = async (key: string) => {
     await loadSessions();
   } catch (e) {
     logger.error('Failed to batch update groups', e);
-  }
-};
-
-const handleBatchTagSelect = async (key: string) => {
-  batchTagMenuOpen.value = false;
-  if (key === 'divider' || key === '__empty__') return;
-  const tagId = key.split(':')[1];
-  const ids = [...selectedSessionIds.value];
-  const allHave = selectedSessions.value.every(s =>
-    s.tag_ids?.includes(tagId)
-  );
-  try {
-    for (const id of ids) {
-      await invoke(allHave ? 'unlink_session_tag' : 'link_session_tag', {
-        sessionId: id,
-        tagId,
-      });
-    }
-    await loadSessions();
-  } catch (e) {
-    logger.error('Failed to batch update tags', e);
   }
 };
 
@@ -1468,25 +1099,6 @@ const onConfirmDelete = async () => {
     return;
   }
 
-  if (pendingDeleteTagId) {
-    const id = pendingDeleteTagId;
-    pendingDeleteTagId = null;
-    try {
-      await invoke('delete_tag', { id });
-      tags.value = tags.value.filter(t => t.id !== id);
-      if (selectedTagId.value === id) {
-        selectedTagId.value = null;
-        activeView.value = 'all';
-      }
-      selectedSessionIds.value = new Set();
-      // The backend cascades the tag association away, so refresh the list
-      await loadSessions();
-    } catch (error) {
-      logger.error('Failed to delete tag', error);
-    }
-    return;
-  }
-
   if (pendingDeleteSessionIds) {
     const ids = pendingDeleteSessionIds;
     pendingDeleteSessionIds = null;
@@ -1522,7 +1134,6 @@ const onCancelDelete = () => {
   pendingDeleteSession = null;
   pendingDeleteSessionIds = null;
   pendingDeleteGroupId = null;
-  pendingDeleteTagId = null;
 };
 </script>
 
@@ -1607,8 +1218,7 @@ const onCancelDelete = () => {
   font-weight: 600;
 }
 
-.nav-item-wrapper:hover .item-actions,
-.tag-item-wrapper:hover .item-actions {
+.nav-item-wrapper:hover .item-actions {
   opacity: 1;
   visibility: visible;
 }
@@ -1663,70 +1273,6 @@ const onCancelDelete = () => {
   font-size: 14px;
   outline: none;
   margin: 2px 4px;
-}
-
-.rename-tag-input {
-  width: 80px;
-  padding: 2px 6px;
-  border: 1px solid var(--color-primary);
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  outline: none;
-}
-
-.tag-edit-container {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 6px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  z-index: 10;
-}
-
-.color-picker-mini {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px;
-  background: var(--color-bg-secondary);
-  border-radius: 6px;
-  border: 1px solid var(--color-border-primary);
-  margin-bottom: 4px;
-}
-
-.color-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
-}
-
-.color-dot:hover {
-  transform: scale(1.2);
-}
-
-.color-dot.active {
-  border-color: #fff;
-  box-shadow:
-    0 0 0 1.5px var(--color-primary),
-    0 2px 4px rgba(0, 0, 0, 0.1);
-  transform: scale(1.1);
-}
-
-.edit-confirm-actions {
-  display: flex;
-  justify-content: flex-end;
-  border-top: 1px solid var(--color-border-secondary);
-  padding-top: 4px;
 }
 
 .section-header {
@@ -1792,61 +1338,6 @@ const onCancelDelete = () => {
 
 .add-input::placeholder {
   color: var(--color-text-tertiary);
-}
-
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 0 12px;
-}
-
-.tag-item-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.tag-badge {
-  font-size: 13px;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
-  border-radius: 12px;
-  transition: all 0.2s;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border-primary);
-}
-
-.tag-badge:hover {
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  border-color: var(--color-primary);
-}
-
-.tag-badge.active {
-  background: var(--color-primary);
-  color: white !important;
-  border-color: var(--color-primary);
-}
-
-.tag-badge.active:hover {
-  color: white;
-  opacity: 0.9;
-}
-
-.tag-count {
-  margin-left: 4px;
-  font-size: 10px;
-  opacity: 0.7;
-  font-weight: 400;
-}
-
-.tag-badge.active .tag-count {
-  opacity: 1;
 }
 
 /* Main Content Area Styles */
@@ -2270,17 +1761,6 @@ const onCancelDelete = () => {
   font-size: 12px;
 }
 
-.col-tags {
-  width: 180px;
-  text-align: right;
-}
-
-.table-tags {
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
-}
-
 .col-last-connect {
   width: 140px;
   text-align: right;
@@ -2321,18 +1801,6 @@ const onCancelDelete = () => {
   color: var(--color-text-primary);
 }
 
-.mini-tag {
-  font-size: 11px;
-  font-weight: 500;
-  background: var(--color-bg-tertiary);
-  padding: 2px 8px;
-  border-radius: 4px;
-  color: var(--color-text-secondary);
-  border: 1px solid transparent;
-  white-space: nowrap;
-}
-
-/* Transient copy-feedback toast */
 .home-toast {
   position: fixed;
   bottom: 24px;

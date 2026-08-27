@@ -189,21 +189,6 @@
         </div>
       </div>
 
-      <div class="modal-form-row tags-row">
-        <div class="modal-form-group full-width">
-          <TagsMultiSelect
-            v-model="formData.tags"
-            :tags="allTags"
-            :label="$t('ssh.tags')"
-            :placeholder="$t('ssh.tagsPlaceholder')"
-            :create-tag-text="$t('ssh.createTag')"
-            :empty-text="$t('ssh.noTagsAvailable')"
-            :immediate-save="true"
-            @tag-added="handleTagAdded"
-          />
-        </div>
-      </div>
-
       <div class="modal-form-row checkbox-row">
         <label class="checkbox-container">
           <input
@@ -263,7 +248,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { Eye, EyeOff } from 'lucide-vue-next';
 import ConnectionProgressBar from './ConnectionProgressBar.vue';
 import GroupsMultiSelect from '../common/GroupsMultiSelect.vue';
-import TagsMultiSelect from '../common/TagsMultiSelect.vue';
 import type { MetadataItem } from '@/core/types/common';
 import { eventBus } from '@/core/utils';
 import { APP_EVENTS } from '@/core/constants';
@@ -325,7 +309,6 @@ const formData = reactive<SSHConnectionFormData>({
       ? props.initialData.save_session
       : true,
   groups: props.initialData?.groups || [],
-  tags: props.initialData?.tags || [],
 });
 
 const validationErrors = reactive<ValidationErrors>({});
@@ -350,7 +333,6 @@ const validationErrors = reactive<ValidationErrors>({});
         if (newData.save_session !== undefined)
           formData.save_session = newData.save_session;
         if (newData.groups !== undefined) formData.groups = [...newData.groups];
-        if (newData.tags !== undefined) formData.tags = [...newData.tags];
 
         // Update sensitive fields if provided
         if (newData.password) {
@@ -385,13 +367,11 @@ const showKeyPassphrase = ref(false);
 const isEditMode = computed(() => !!props.initialData?.id);
 const clearStoredCredentials = ref(false);
 
-// Groups and Tags state
+// Groups state
 const allGroups = ref<MetadataItem[]>([]);
-const allTags = ref<MetadataItem[]>([]);
 const newlyCreatedGroups = ref<string[]>([]);
-const newlyCreatedTags = ref<string[]>([]);
 
-// Fetch groups and tags on component mount
+// Fetch groups on component mount
 onMounted(async () => {
   eventBus.on(APP_EVENTS.CLOSE_DIALOG, onCancel);
 
@@ -400,13 +380,6 @@ onMounted(async () => {
     allGroups.value = groups || [];
   } catch (error) {
     logger.error('Failed to fetch groups', error);
-  }
-
-  try {
-    const tags = await invoke<MetadataItem[]>('list_tags');
-    allTags.value = tags || [];
-  } catch (error) {
-    logger.error('Failed to fetch tags', error);
   }
 });
 
@@ -419,11 +392,6 @@ onUnmounted(() => {
 const handleGroupAdded = (group: MetadataItem) => {
   allGroups.value.push(group);
   newlyCreatedGroups.value.push(group.id);
-};
-
-const handleTagAdded = (tag: MetadataItem) => {
-  allTags.value.push(tag);
-  newlyCreatedTags.value.push(tag.id);
 };
 
 // Toggle password visibility
@@ -483,7 +451,7 @@ const normalizePort = (port: unknown): number | null => {
 
 /**
  * Build the payload shared by Connect and Save-Only, normalizing the port and
- * dropping empty groups/tags. In edit mode, empty secret fields are stripped
+ * dropping empty groups. In edit mode, empty secret fields are stripped
  * (not sent as empty strings) so the backend keeps the stored ciphertext,
  * unless the user explicitly asked to clear them — then `null` is sent.
  */
@@ -493,12 +461,9 @@ const buildSubmitData = (): SSHConnectionFormData => {
     port: normalizePort(formData.port) ?? 22,
   };
 
-  // Remove empty groups and tags arrays
+  // Remove empty groups array
   if (!data.groups || data.groups.length === 0) {
     delete data.groups;
-  }
-  if (!data.tags || data.tags.length === 0) {
-    delete data.tags;
   }
 
   // Edit mode: don't clobber stored credentials with empty strings. If the
@@ -522,13 +487,12 @@ const buildSubmitData = (): SSHConnectionFormData => {
 };
 
 /**
- * After a successful save/connect, the groups/tags that were created live
+ * After a successful save/connect, the groups that were created live
  * through this form are persisted, so they must NOT be rolled back later if
  * the user cancels the (already succeeded) flow.
  */
 const markMetadataCommitted = () => {
   newlyCreatedGroups.value = [];
-  newlyCreatedTags.value = [];
 };
 
 const onSubmit = () => {
@@ -556,7 +520,7 @@ const onCancel = async () => {
     return;
   }
 
-  // Rollback newly created groups and tags if cancelled
+  // Rollback newly created groups if cancelled
   if (newlyCreatedGroups.value.length > 0) {
     for (const id of newlyCreatedGroups.value) {
       try {
@@ -567,18 +531,6 @@ const onCancel = async () => {
     }
     eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
     newlyCreatedGroups.value = [];
-  }
-
-  if (newlyCreatedTags.value.length > 0) {
-    for (const id of newlyCreatedTags.value) {
-      try {
-        await invoke('delete_tag', { id });
-      } catch (error) {
-        logger.error('Failed to rollback tag', { id, error });
-      }
-    }
-    eventBus.emit(APP_EVENTS.TAGS_UPDATED);
-    newlyCreatedTags.value = [];
   }
 
   emit('cancel');

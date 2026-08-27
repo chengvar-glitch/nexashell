@@ -5,8 +5,7 @@
 //! expensive PBKDF2 key-derivation (390k iterations per session).
 
 use super::{
-    ExportData, ExportSession, Group, SESSION_COLUMNS, Session, Tag, db_conn, row_to_session,
-    with_db,
+    ExportData, ExportSession, Group, SESSION_COLUMNS, Session, db_conn, row_to_session, with_db,
 };
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -24,9 +23,7 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
         struct RawData {
             sessions: Vec<(Session, Option<String>)>,
             group_map: std::collections::HashMap<String, Vec<String>>,
-            tag_map: std::collections::HashMap<String, Vec<String>>,
             groups: Vec<Group>,
-            tags: Vec<Tag>,
         }
 
         let raw = with_db(|conn| {
@@ -65,21 +62,6 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
             }
             drop(g);
 
-            let mut tag_map = std::collections::HashMap::new();
-            let mut t = conn
-                .prepare("SELECT session_id, tag_id FROM session_tags")
-                .map_err(|e| e.to_string())?;
-            let rows = t
-                .query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| e.to_string())?;
-            for r in rows {
-                let (sid, tid): (String, String) = r.map_err(|e| e.to_string())?;
-                tag_map.entry(sid).or_insert_with(Vec::new).push(tid);
-            }
-            drop(t);
-
             let groups = {
                 let mut s = conn
                     .prepare("SELECT id, name, sort, created_at, updated_at FROM groups")
@@ -99,37 +81,14 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
                     .map_err(|e| e.to_string())?
             };
 
-            let tags = {
-                let mut s = conn
-                    .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags")
-                    .map_err(|e| e.to_string())?;
-                let rows = s
-                    .query_map([], |row| {
-                        Ok(Tag {
-                            id: row.get(0)?,
-                            name: row.get(1)?,
-                            color: row.get(2)?,
-                            sort: row.get(3)?,
-                            created_at: row.get(4)?,
-                            updated_at: row.get(5)?,
-                        })
-                    })
-                    .map_err(|e| e.to_string())?;
-                rows.collect::<Result<Vec<_>, _>>()
-                    .map_err(|e| e.to_string())?
-            };
-
             Ok(RawData {
                 sessions,
                 group_map,
-                tag_map,
                 groups,
-                tags,
             })
         })?;
 
         let mut group_map = raw.group_map;
-        let mut tag_map = raw.tag_map;
         let mut export_sessions = Vec::with_capacity(raw.sessions.len());
         for (metadata, encrypted_creds) in raw.sessions {
             let re_encrypted = if let Some(creds) = encrypted_creds {
@@ -143,7 +102,6 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
 
             export_sessions.push(ExportSession {
                 group_ids: group_map.remove(&metadata.id).unwrap_or_default(),
-                tag_ids: tag_map.remove(&metadata.id).unwrap_or_default(),
                 metadata,
                 encrypted_credentials: re_encrypted,
             });
@@ -152,7 +110,6 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
         let data = ExportData {
             sessions: export_sessions,
             groups: raw.groups,
-            tags: raw.tags,
         };
         serde_json::to_string(&data).map_err(|e| e.to_string())
     })
@@ -220,13 +177,6 @@ pub async fn import_sessions(json_data: String, password: String) -> Result<(), 
             ).map_err(|e| e.to_string())?;
         }
 
-        for tag in export_data.tags {
-            tx.execute(
-                "INSERT OR IGNORE INTO tags (id, name, color, sort, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![tag.id, tag.name, tag.color, tag.sort, tag.created_at, tag.updated_at],
-            ).map_err(|e| e.to_string())?;
-        }
-
         for (session, re_encrypted) in prepared_sessions {
             let metadata = session.metadata;
 
@@ -255,19 +205,6 @@ pub async fn import_sessions(json_data: String, password: String) -> Result<(), 
                     params![metadata.id, gid],
                 )
                 .map_err(|e| format!("Failed to link group {}: {}", gid, e))?;
-            }
-
-            tx.execute(
-                "DELETE FROM session_tags WHERE session_id = ?1",
-                params![metadata.id],
-            )
-            .map_err(|e| e.to_string())?;
-            for tid in session.tag_ids {
-                tx.execute(
-                    "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-                    params![metadata.id, tid],
-                )
-                .map_err(|e| format!("Failed to link tag {}: {}", tid, e))?;
             }
         }
 

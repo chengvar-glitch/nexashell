@@ -24,9 +24,7 @@ export interface SavedSession {
  */
 export interface SavedSessionDisplay extends SavedSession {
   groups?: string[]; // names
-  tags?: string[]; // names
   group_ids?: string[];
-  tag_ids?: string[];
   // Transient/UI only properties
   password?: string;
   key_passphrase?: string;
@@ -58,7 +56,6 @@ export interface SSHConnectionFormData {
   key_passphrase?: string | null;
   save_session: boolean;
   groups?: string[];
-  tags?: string[];
   /** True when the user explicitly asked to clear any stored credentials. */
   clearCredentials?: boolean;
 }

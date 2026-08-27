@@ -37,6 +37,38 @@ const TERMINAL_BUFFER_SIZE: usize = 4096;
 const LOCAL_BATCH_SIZE_THRESHOLD: usize = 1024;
 const LOCAL_BATCH_TIME_MS: u64 = 5;
 
+/// Resolve the platform default shell:
+/// - Windows: PowerShell 7 (`pwsh.exe`) when installed, else Windows
+///   PowerShell (`powershell.exe`).
+/// - macOS/Linux: `$SHELL` when set (e.g. interactive login), else the
+///   platform default — zsh on macOS (default since Catalina), bash as a
+///   generic fallback. GUI-launched apps may have no `SHELL` env var, so the
+///   env var alone would wrongly fall through to bash on modern macOS.
+fn default_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let program_files = std::env::var("ProgramFiles")
+            .unwrap_or_else(|_| r"C:\Program Files".to_string());
+        let pwsh7 = format!(r"{}\PowerShell\7\pwsh.exe", program_files);
+        if std::path::Path::new(&pwsh7).exists() {
+            return pwsh7;
+        }
+        "powershell.exe".to_string()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(shell) = std::env::var("SHELL").ok().filter(|s| !s.is_empty()) {
+            return shell;
+        }
+        for candidate in ["/bin/zsh", "/bin/bash"] {
+            if std::path::Path::new(candidate).exists() {
+                return candidate.to_string();
+            }
+        }
+        "sh".to_string()
+    }
+}
+
 // ============================================================================
 // Data Structures
 // ============================================================================
@@ -92,13 +124,7 @@ impl TerminalManager {
             })
             .map_err(|e| TerminalError::SpawnFailed(format!("Failed to open PTY: {}", e)))?;
 
-        #[cfg(target_os = "windows")]
-        let shell = "powershell.exe";
-        #[cfg(not(target_os = "windows"))]
-        let shell = std::env::var("SHELL")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "/bin/bash".to_string());
+        let shell = default_shell();
 
         let mut cmd = CommandBuilder::new(&shell);
         cmd.env("TERM", "xterm-256color");

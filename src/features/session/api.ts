@@ -17,7 +17,6 @@ export interface SaveSessionWithCredentialsPayload {
   keyPassphrase: string | null;
   clearCredentials: boolean;
   groupIds: string[] | null;
-  tagIds: string[] | null;
 }
 
 class SessionAPI {
@@ -132,8 +131,7 @@ class SessionAPI {
     authType: string,
     privateKeyPath?: string,
     isFavorite?: boolean,
-    groupIds?: string[],
-    tagIds?: string[]
+    groupIds?: string[]
   ): Promise<string> {
     try {
       logger.debug('saveSession invoke', {
@@ -143,7 +141,6 @@ class SessionAPI {
         username,
         isFavorite,
         groupCount: groupIds?.length || 0,
-        tagCount: tagIds?.length || 0,
       });
 
       const sessionId = await invoke<string>(
@@ -157,7 +154,6 @@ class SessionAPI {
           privateKeyPath: privateKeyPath || null,
           isFavorite: isFavorite ?? null,
           groupIds: groupIds || null,
-          tagIds: tagIds || null,
         } as Record<string, unknown>
       );
 

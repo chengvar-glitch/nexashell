@@ -66,22 +66,11 @@ pub struct Group {
     pub updated_at: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Tag {
-    pub id: String,
-    pub name: String,
-    pub color: Option<String>,
-    pub sort: i64,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct ExportSession {
     pub metadata: Session,
     pub encrypted_credentials: Option<String>,
     pub group_ids: Vec<String>,
-    pub tag_ids: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -90,15 +79,12 @@ pub struct SessionWithRelations {
     pub session: Session,
     pub group_ids: Vec<String>,
     pub groups: Vec<String>,
-    pub tag_ids: Vec<String>,
-    pub tags: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ExportData {
     pub sessions: Vec<ExportSession>,
     pub groups: Vec<Group>,
-    pub tags: Vec<Tag>,
 }
 
 fn add_column_if_not_exists(
@@ -142,7 +128,7 @@ struct SetClause<'a> {
 
 /// Build the `SET ... WHERE ...` SQL and positional `?` parameter list from
 /// optional fields, so the "edit" commands (`save_session_with_credentials`,
-/// `edit_group`, `edit_tag`, `edit_session`) don't each hand-roll the fragile
+/// `edit_group`, `edit_session`) don't each hand-roll the fragile
 /// `Vec<Box<dyn ToSql>>` + string-concatenation boilerplate.
 ///
 /// Column/table names are caller-controlled (never user input), but are still
@@ -193,7 +179,7 @@ fn exec_update(conn: &Connection, sql: &str, params_vec: &[Box<dyn ToSql>]) -> R
     Ok(())
 }
 
-fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
+fn ensure_groups(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "CREATE TABLE IF NOT EXISTS groups (
             id TEXT PRIMARY KEY,
@@ -207,40 +193,11 @@ fn ensure_groups_and_tags(conn: &Connection) -> Result<(), String> {
     .map_err(|e| e.to_string())?;
 
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS tags (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL DEFAULT '',
-            color TEXT,
-            sort INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    // The `color` column is required by list_tags/list_tags_for_session; a
-    // silent failure here would leave those SELECTs failing at runtime with a
-    // confusing "no such column" error. Propagate instead.
-    add_column_if_not_exists(conn, "tags", "color", "TEXT")?;
-
-    conn.execute(
         "CREATE TABLE IF NOT EXISTS session_groups (
             session_id TEXT NOT NULL,
             group_id TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
             UNIQUE(session_id, group_id)
-        )",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS session_tags (
-            session_id TEXT NOT NULL,
-            tag_id TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            UNIQUE(session_id, tag_id)
         )",
         [],
     )
@@ -309,7 +266,15 @@ pub fn init_db() -> Result<String, String> {
         );
     }
 
-    ensure_groups_and_tags(&conn)?;
+    ensure_groups(&conn)?;
+
+    // The tag feature is removed; drop its leftover tables from older
+    // schemas so the database matches the code (child table first because of
+    // the ON DELETE CASCADE FK it used to carry).
+    conn.execute("DROP TABLE IF EXISTS session_tags", [])
+        .map_err(|e| e.to_string())?;
+    conn.execute("DROP TABLE IF EXISTS tags", [])
+        .map_err(|e| e.to_string())?;
 
     // SSH port-forwarding rules persisted per session.
     conn.execute(
@@ -371,16 +336,6 @@ pub fn init_db() -> Result<String, String> {
     .map_err(|e| e.to_string())?;
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_session_groups_session_id ON session_groups(session_id)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_session_tags_tag_id ON session_tags(tag_id)",
-        [],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_session_tags_session_id ON session_tags(session_id)",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -470,16 +425,6 @@ fn ensure_relation_fks(conn: &mut Connection) -> Result<(), String> {
     )?;
     rebuild_table_with_fk(
         conn,
-        "session_tags",
-        "CREATE TABLE session_tags_new (
-            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-            tag_id TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
-            created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
-            UNIQUE(session_id, tag_id)
-        )",
-    )?;
-    rebuild_table_with_fk(
-        conn,
         "tunnel_rules",
         "CREATE TABLE tunnel_rules_new (
             id TEXT PRIMARY KEY,
@@ -563,7 +508,6 @@ pub fn save_session_with_credentials(
     key_passphrase: Option<String>,
     is_favorite: Option<bool>,
     group_ids: Option<Vec<String>>,
-    tag_ids: Option<Vec<String>>,
     clear_credentials: bool,
 ) -> Result<String, String> {
     let is_update = id.is_some();
@@ -645,19 +589,12 @@ pub fn save_session_with_credentials(
 
         // Only re-sync relations when the caller supplied them. Treating `None`
         // as "unchanged" mirrors the credential guard above — otherwise an
-        // update that omits group_ids/tag_ids would silently wipe every
-        // group/tag link the session has (exactly the symmetric data-loss the
-        // credential guard at the top of this branch protects against).
+        // update that omits group_ids would silently wipe every group link the
+        // session has (exactly the symmetric data-loss the credential guard at
+        // the top of this branch protects against).
         if group_ids.is_some() {
             tx.execute(
                 "DELETE FROM session_groups WHERE session_id = ?1",
-                params![session_id],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-        if tag_ids.is_some() {
-            tx.execute(
-                "DELETE FROM session_tags WHERE session_id = ?1",
                 params![session_id],
             )
             .map_err(|e| e.to_string())?;
@@ -687,16 +624,6 @@ pub fn save_session_with_credentials(
                 params![session_id, group_id],
             )
             .map_err(|e| format!("Failed to link group: {}", e))?;
-        }
-    }
-
-    if let Some(tags) = tag_ids {
-        for tag_id in tags {
-            tx.execute(
-                "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-                params![session_id, tag_id],
-            )
-            .map_err(|e| format!("Failed to link tag: {}", e))?;
         }
     }
 
@@ -741,7 +668,6 @@ pub fn save_session(
     private_key_path: Option<String>,
     is_favorite: Option<bool>,
     group_ids: Option<Vec<String>>,
-    tag_ids: Option<Vec<String>>,
 ) -> Result<String, String> {
     let id = Uuid::new_v4().to_string();
     let mut guard = db_conn()?;
@@ -771,15 +697,6 @@ pub fn save_session(
             tx.execute(
                 "INSERT OR IGNORE INTO session_groups (session_id, group_id) VALUES (?1, ?2)",
                 params![id, gid],
-            )
-            .map_err(|e| e.to_string())?;
-        }
-    }
-    if let Some(tags) = tag_ids {
-        for tid in tags {
-            tx.execute(
-                "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-                params![id, tid],
             )
             .map_err(|e| e.to_string())?;
         }
@@ -841,7 +758,6 @@ pub fn list_sessions() -> Result<Vec<Session>, String> {
 #[tauri::command]
 pub fn get_sessions(
     group_id: Option<String>,
-    tag_id: Option<String>,
     id: Option<String>,
     server_name: Option<String>,
     host_addr: Option<String>,
@@ -853,19 +769,12 @@ pub fn get_sessions(
     if group_id.is_some() {
         sql.push_str(" JOIN session_groups sg ON s.id = sg.session_id");
     }
-    if tag_id.is_some() {
-        sql.push_str(" JOIN session_tags st ON s.id = st.session_id");
-    }
 
     let mut wheres = Vec::new();
     let mut params_vec: Vec<Box<dyn ToSql>> = Vec::new();
     if let Some(gid) = group_id {
         wheres.push("sg.group_id = ?".to_string());
         params_vec.push(Box::new(gid));
-    }
-    if let Some(tid) = tag_id {
-        wheres.push("st.tag_id = ?".to_string());
-        params_vec.push(Box::new(tid));
     }
     if let Some(pid) = id {
         wheres.push("s.id = ?".to_string());
@@ -940,40 +849,14 @@ pub fn get_sessions_with_relations() -> Result<Vec<SessionWithRelations>, String
         }
         drop(gstmt);
 
-        let mut tag_map: std::collections::HashMap<String, (Vec<String>, Vec<String>)> =
-            std::collections::HashMap::new();
-        let mut tstmt = conn
-            .prepare(
-                "SELECT st.session_id, t.id, t.name FROM session_tags st JOIN tags t ON t.id = st.tag_id",
-            )
-            .map_err(|e| e.to_string())?;
-        let trows = tstmt
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        for r in trows {
-            let (sid, tid, tname) = r.map_err(|e| e.to_string())?;
-            let entry = tag_map.entry(sid).or_default();
-            entry.0.push(tid);
-            entry.1.push(tname);
-        }
-
         Ok(sessions
             .into_iter()
             .map(|s| {
                 let (gids, gnames) = group_map.remove(&s.id).unwrap_or_default();
-                let (tids, tnames) = tag_map.remove(&s.id).unwrap_or_default();
                 SessionWithRelations {
                     session: s,
                     group_ids: gids,
                     groups: gnames,
-                    tag_ids: tids,
-                    tags: tnames,
                 }
             })
             .collect())
@@ -1019,58 +902,6 @@ pub fn delete_group(id: String) -> Result<(), String> {
     )
     .map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM groups WHERE id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-#[tauri::command]
-pub fn edit_tag(
-    id: String,
-    name: Option<String>,
-    color: Option<String>,
-    sort: Option<i64>,
-) -> Result<(), String> {
-    let mut guard = db_conn()?;
-    let conn = guard
-        .as_mut()
-        .ok_or_else(|| "DB not initialized".to_string())?;
-    let mut sets = Vec::new();
-    if let Some(n) = name {
-        sets.push(SetClause {
-            column: "name",
-            value: Box::new(n),
-        });
-    }
-    if let Some(c) = color {
-        sets.push(SetClause {
-            column: "color",
-            value: Box::new(c),
-        });
-    }
-    if let Some(s) = sort {
-        sets.push(SetClause {
-            column: "sort",
-            value: Box::new(s),
-        });
-    }
-    if sets.is_empty() {
-        return Ok(());
-    }
-    let (sql, params) = build_update("tags", sets, "id", Box::new(id))?;
-    exec_update(conn, &sql, &params)
-}
-
-#[tauri::command]
-pub fn delete_tag(id: String) -> Result<(), String> {
-    let mut guard = db_conn()?;
-    let conn = guard
-        .as_mut()
-        .ok_or_else(|| "DB not initialized".to_string())?;
-    let tx = conn.transaction().map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM session_tags WHERE tag_id = ?1", params![id])
-        .map_err(|e| e.to_string())?;
-    tx.execute("DELETE FROM tags WHERE id = ?1", params![id])
         .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -1151,11 +982,6 @@ pub fn delete_session(id: String) -> Result<(), String> {
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "DELETE FROM session_groups WHERE session_id = ?1",
-        params![id],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.execute(
-        "DELETE FROM session_tags WHERE session_id = ?1",
         params![id],
     )
     .map_err(|e| e.to_string())?;
@@ -1257,103 +1083,6 @@ pub fn list_groups_for_session(session_id: String) -> Result<Vec<Group>, String>
                     sort: row.get(2)?,
                     created_at: row.get(3)?,
                     updated_at: row.get(4)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-    })
-}
-
-#[tauri::command]
-pub fn add_tag(
-    name: Option<String>,
-    color: Option<String>,
-    sort: Option<i64>,
-) -> Result<String, String> {
-    let mut guard = db_conn()?;
-    let conn = guard
-        .as_mut()
-        .ok_or_else(|| "DB not initialized".to_string())?;
-    let id = Uuid::new_v4().to_string();
-    let name = name.unwrap_or_default();
-    let sort = sort.unwrap_or(1);
-    conn.execute(
-        "INSERT INTO tags (id, name, color, sort) VALUES (?1, ?2, ?3, ?4)",
-        params![id, name, color, sort],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(id)
-}
-
-#[tauri::command]
-pub fn list_tags() -> Result<Vec<Tag>, String> {
-    with_db(|conn| {
-        let mut stmt = conn
-            .prepare("SELECT id, name, color, sort, created_at, updated_at FROM tags ORDER BY sort, created_at")
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map([], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    color: row.get(2)?,
-                    sort: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
-                })
-            })
-            .map_err(|e| e.to_string())?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())
-    })
-}
-
-#[tauri::command]
-pub fn link_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
-    with_db(|conn| {
-        conn.execute(
-            "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?1, ?2)",
-            params![session_id, tag_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-}
-
-#[tauri::command]
-pub fn unlink_session_tag(session_id: String, tag_id: String) -> Result<(), String> {
-    with_db(|conn| {
-        conn.execute(
-            "DELETE FROM session_tags WHERE session_id = ?1 AND tag_id = ?2",
-            params![session_id, tag_id],
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(())
-    })
-}
-
-#[tauri::command]
-pub fn list_tags_for_session(session_id: String) -> Result<Vec<Tag>, String> {
-    with_db(|conn| {
-        let mut stmt = conn
-            .prepare(
-                "SELECT t.id, t.name, t.color, t.sort, t.created_at, t.updated_at
-                 FROM tags t
-                 JOIN session_tags st ON t.id = st.tag_id
-                 WHERE st.session_id = ?1
-                 ORDER BY t.sort, t.created_at",
-            )
-            .map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![session_id], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    color: row.get(2)?,
-                    sort: row.get(3)?,
-                    created_at: row.get(4)?,
-                    updated_at: row.get(5)?,
                 })
             })
             .map_err(|e| e.to_string())?;
@@ -1468,7 +1197,7 @@ pub fn update_tunnel_rule(
     .into_iter()
     .flatten()
     .collect();
-    // No-op edit should not bump updated_at (matches edit_group/edit_tag).
+    // No-op edit should not bump updated_at (matches edit_group).
     if sets.is_empty() {
         return Ok(());
     }
@@ -1570,7 +1299,7 @@ pub fn update_snippet(
     .into_iter()
     .flatten()
     .collect();
-    // No-op edit should not bump updated_at (matches edit_group/edit_tag).
+    // No-op edit should not bump updated_at (matches edit_group).
     if sets.is_empty() {
         return Ok(());
     }

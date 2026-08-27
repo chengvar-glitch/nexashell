@@ -142,7 +142,7 @@ import { createLogger } from '@/core/utils/logger';
 const logger = createLogger('MULTI_SELECT');
 
 // Each instance needs a unique DOM id for its input/label, because several
-// multi-selects (groups/tags) can be rendered on the same page — a shared
+// multi-selects (groups) can be rendered on the same page — a shared
 // `item-select` id produced invalid duplicate ids.
 let instanceSeq = 0;
 const inputId = `item-select-${++instanceSeq}`;

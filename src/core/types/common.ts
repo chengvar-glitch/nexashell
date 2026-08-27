@@ -1,5 +1,5 @@
 /**
- * Common metadata item interface for Tags and Groups
+ * Common metadata item interface for Groups.
  */
 export interface MetadataItem {
   id: string;

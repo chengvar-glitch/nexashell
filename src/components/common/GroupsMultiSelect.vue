@@ -8,7 +8,6 @@
     :empty-text="emptyText"
     :allow-create="allowCreateGroup"
     :immediate-save="immediateSave"
-    kind="group"
     @update:model-value="val => emit('update:modelValue', val)"
     @item-added="item => emit('group-added', item)"
   />

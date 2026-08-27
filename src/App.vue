@@ -246,7 +246,6 @@ onMounted(async () => {
         key_passphrase: '',
         save_session: true,
         groups: payload.group_ids ? [...payload.group_ids] : [],
-        tags: payload.tag_ids ? [...payload.tag_ids] : [],
       };
 
       savedSSHFormData.value = initialFormData;
@@ -301,7 +300,6 @@ onMounted(async () => {
           key_passphrase: credentials[2] || '',
           save_session: false,
           groups: [],
-          tags: [],
         };
 
         await sessionApi.touchSession(session.id);
@@ -375,33 +373,33 @@ onBeforeUnmount(() => {
   }
 });
 
-// Process any new groups or tags first
-// Resolve `new:` prefixed metadata ids to persisted ones via the backend.
-const createNewMetadataIds = async (
-  ids: string[],
-  kind: 'group' | 'tag'
-): Promise<string[]> => {
+// Process any new groups first
+// Resolve `new:` prefixed group ids to persisted ones via the backend, and
+// notify the home view so a freshly created group shows up immediately.
+const createNewGroupIds = async (ids: string[]): Promise<string[]> => {
   const result = [...ids];
+  let created = false;
   for (let i = 0; i < result.length; i++) {
     if (result[i].startsWith('new:')) {
       const name = result[i].substring(4);
       try {
-        result[i] = await invoke<string>(kind === 'group' ? 'add_group' : 'add_tag', {
-          name,
-        });
+        result[i] = await invoke<string>('add_group', { name });
+        created = true;
       } catch (error) {
-        logger.error(`Failed to create ${kind}: ${name}`, error);
+        logger.error(`Failed to create group: ${name}`, error);
       }
     }
+  }
+  if (created) {
+    eventBus.emit(APP_EVENTS.GROUPS_UPDATED);
   }
   return result;
 };
 
-// Process any new groups or tags first
+// Resolve any new groups created through the connection form.
 const processMetadata = async (data: SSHConnectionFormData) => {
-  const groupIds = await createNewMetadataIds(data.groups || [], 'group');
-  const tagIds = await createNewMetadataIds(data.tags || [], 'tag');
-  return { groupIds, tagIds };
+  const groupIds = await createNewGroupIds(data.groups || []);
+  return { groupIds };
 };
 
 /**
@@ -411,7 +409,7 @@ const processMetadata = async (data: SSHConnectionFormData) => {
  */
 const persistSession = async (data: SSHConnectionFormData): Promise<string | null> => {
   const authType = data.password ? 'password' : 'key';
-  const { groupIds, tagIds } = await processMetadata(data);
+  const { groupIds } = await processMetadata(data);
 
   const savePayload: SaveSessionWithCredentialsPayload = {
     id: data.id || null,
@@ -425,7 +423,6 @@ const persistSession = async (data: SSHConnectionFormData): Promise<string | nul
     keyPassphrase: data.key_passphrase || null,
     clearCredentials: !!data.clearCredentials,
     groupIds: groupIds.length > 0 ? groupIds : null,
-    tagIds: tagIds.length > 0 ? tagIds : null,
   };
 
   const resultId = await sessionApi.saveSessionWithCredentials(savePayload);
