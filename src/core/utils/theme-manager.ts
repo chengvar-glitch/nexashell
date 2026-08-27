@@ -99,11 +99,10 @@ class ThemeManager {
     return 'light';
   }
 
+  private transitionTimer?: ReturnType<typeof setTimeout>;
+
   private applyTheme(theme: ThemeMode) {
     const root = document.documentElement;
-
-    // Remove existing theme classes
-    root.classList.remove('theme-light', 'theme-dark');
 
     // Determine actual theme to apply
     let actualTheme: 'light' | 'dark';
@@ -113,11 +112,23 @@ class ThemeManager {
       actualTheme = theme;
     }
 
+    // Apply transition animation class
+    root.classList.add('theme-transitioning');
+
+    // Remove existing theme classes
+    root.classList.remove('theme-light', 'theme-dark');
+
     // Apply theme class
     root.classList.add(`theme-${actualTheme}`);
 
     // Set color-scheme for native elements
     root.style.colorScheme = actualTheme;
+
+    // Remove animation class after transition completes (matches CSS 0.3s)
+    clearTimeout(this.transitionTimer);
+    this.transitionTimer = setTimeout(() => {
+      root.classList.remove('theme-transitioning');
+    }, 300);
   }
 
   setTheme(theme: ThemeMode) {

@@ -110,6 +110,20 @@ body {
   overflow: hidden;
 }
 
+/* Theme switch: animate colors in place instead of covering the UI with an
+ * overlay. Only active while html.theme-transitioning is set (theme-manager). */
+html.theme-transitioning,
+html.theme-transitioning *,
+html.theme-transitioning *::before,
+html.theme-transitioning *::after {
+  transition:
+    background-color 0.3s ease,
+    color 0.3s ease,
+    border-color 0.3s ease,
+    fill 0.3s ease,
+    stroke 0.3s ease !important;
+}
+
 /* Dark theme palette.
  *
  * theme-manager always resolves the active mode to a `.theme-dark` or

@@ -20,12 +20,6 @@
               :size="24"
               class="error-icon"
             />
-            <component
-              :is="LoadingIcon"
-              v-else
-              :size="24"
-              class="loading-icon"
-            />
             {{ headerTitle }}
           </h3>
         </div>
@@ -189,7 +183,6 @@ import { useI18n } from 'vue-i18n';
 import {
   Check as CheckIcon,
   AlertCircle as ErrorIcon,
-  Loader as LoadingIcon,
 } from 'lucide-vue-next';
 
 const { t } = useI18n();
@@ -567,12 +560,6 @@ const handleClose = () => {
 .error-icon {
   color: #ff4757;
   margin-right: 8px;
-}
-
-.loading-icon {
-  color: var(--color-primary);
-  margin-right: 8px;
-  animation: spin 1s linear infinite;
 }
 
 /* Action buttons */
