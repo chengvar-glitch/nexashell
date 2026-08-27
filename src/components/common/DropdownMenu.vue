@@ -28,6 +28,7 @@ interface Props {
   x?: number;
   y?: number;
   trigger?: 'click' | 'contextmenu';
+  maxHeight?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -35,6 +36,7 @@ const props = withDefaults(defineProps<Props>(), {
   x: 0,
   y: 0,
   trigger: 'click',
+  maxHeight: undefined,
 });
 
 const emit = defineEmits<{
@@ -62,6 +64,10 @@ const menuStyle = computed<CSSProperties>(() => {
   }
   return {};
 });
+
+const menuListStyle = computed<CSSProperties>(() =>
+  props.maxHeight ? { maxHeight: props.maxHeight, overflowY: 'auto' } : {}
+);
 
 const updatePosition = async () => {
   if (!props.visible) return;
@@ -232,7 +238,7 @@ onUnmounted(() => {
         @mouseenter="handleMouseEnterMenu"
         @mouseleave="handleMouseLeaveMenu"
       >
-        <div class="menu-list">
+        <div class="menu-list" :style="menuListStyle">
           <template v-for="item in items" :key="item.key">
             <div v-if="item.divider" class="menu-divider" />
             <div

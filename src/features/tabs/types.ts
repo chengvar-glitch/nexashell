@@ -51,6 +51,10 @@ export interface TabManagement {
   setActivePane: (id: string) => void;
   addTab: (tab: Tab) => void;
   closeTab: (id: string) => Promise<void>;
+  /** Close every closable tab except `keepId` (right-click "close others"). */
+  closeOthers: (keepId: string) => Promise<void>;
+  /** Close every closable tab; only non-closable tabs (home) survive. */
+  closeAllTabs: () => Promise<void>;
   /** Splits the active pane. Returns 'ok' when a pane was created, 'limit'
    *  when the per-tab pane cap blocks it, or 'unavailable' otherwise. */
   splitActivePane: (direction: SplitDirection) => SplitPaneResult;

@@ -6,6 +6,7 @@ import {
   nextTick,
   inject,
   computed,
+  watch,
 } from 'vue';
 import { useI18n } from 'vue-i18n';
 import TabItem from '@/components/common/TabItem.vue';
@@ -14,10 +15,12 @@ import ShortcutHint from '@/components/common/ShortcutHint.vue';
 import {
   Plus,
   ChevronDown,
-  MoreHorizontal,
   Terminal,
   Server,
+  Home,
 } from 'lucide-vue-next';
+import { computeScrollTarget } from './tab-scroll';
+import { type TabType } from '@/features/tabs';
 import { TAB_MANAGEMENT_KEY, OPEN_SSH_FORM_KEY } from '@/core/types';
 import { NEW_TAB_MENU_ITEMS } from '@/core/constants';
 import { APP_EVENTS } from '@/core/constants';
@@ -84,6 +87,61 @@ const positionMenuBelow = (
 
 const tabsContainerRef = ref<HTMLElement>();
 
+// --- Overflow tab menu ---
+// Shown when the tab strip overflows: a fixed ▾ button (outside the scroll
+// container) lists every tab so any of them stays reachable by a jump.
+const isOverflowing = ref(false);
+const overflowMenuOpen = ref(false);
+const overflowMenuX = ref(0);
+const overflowMenuY = ref(0);
+
+const updateOverflow = () => {
+  const container = tabsContainerRef.value;
+  if (!container) return;
+  isOverflowing.value = container.scrollWidth > container.clientWidth;
+};
+
+const onToggleOverflowMenu = (event: MouseEvent) => {
+  event.stopPropagation();
+  const target = event.currentTarget as HTMLElement;
+  const rect = target.getBoundingClientRect();
+  if (!overflowMenuOpen.value) {
+    // Anchor at the button's left; DropdownMenu clamps within the viewport.
+    overflowMenuX.value = rect.left;
+    overflowMenuY.value = rect.bottom + 2;
+  }
+  overflowMenuOpen.value = !overflowMenuOpen.value;
+};
+
+const overflowTabIcon = (type: TabType) => {
+  if (type === 'ssh') return Server;
+  if (type === 'terminal') return Terminal;
+  return Home;
+};
+
+const overflowTabsItems = computed(() =>
+  tabs.value.map(tab => ({
+    key: tab.id,
+    label: tab.label,
+    icon: overflowTabIcon(tab.type),
+    active: tab.id === activeTabId.value,
+  }))
+);
+
+const handleOverflowTabSelect = async (key: string) => {
+  overflowMenuOpen.value = false;
+  if (key === activeTabId.value) return;
+  tabManagement.setActiveTab(key);
+  await nextTick();
+  scrollToActiveTab();
+};
+
+// Re-evaluate overflow once the tab strip has been updated in the DOM.
+watch(
+  () => tabs.value.length,
+  () => nextTick(updateOverflow)
+);
+
 // Translate menu items reactively
 const translatedMenuItems = computed(() =>
   NEW_TAB_MENU_ITEMS.map(item => ({
@@ -103,6 +161,14 @@ const handleTabClick = async (id: string) => {
 
 const handleTabClose = async (id: string) => {
   await tabManagement.closeTab(id);
+};
+
+const handleCloseOthers = async (id: string) => {
+  await tabManagement.closeOthers(id);
+};
+
+const handleCloseAll = async () => {
+  await tabManagement.closeAllTabs();
 };
 
 const toggleDropdown = (event: MouseEvent) => {
@@ -279,37 +345,35 @@ const handleSavedSessionSelect = (key: string) => {
   eventBus.emit(APP_EVENTS.CONNECT_SESSION, session);
 };
 
-// Scroll to the currently active tab
+// Scroll to the currently active tab using viewport-relative rects
+// (scroll-aware, unlike offsetLeft which ignores ancestor scrolling).
 const scrollToActiveTab = () => {
-  if (!tabsContainerRef.value) return;
+  const container = tabsContainerRef.value;
+  if (!container) return;
 
-  const activeTabElement = document.querySelector(
+  const activeTabElement = container.querySelector(
     `.tab-item[data-id="${activeTabId.value}"]`
-  ) as HTMLElement;
-  if (activeTabElement && tabsContainerRef.value) {
-    const containerScrollLeft = tabsContainerRef.value.scrollLeft;
-    const containerWidth = tabsContainerRef.value.clientWidth;
-    const tabOffsetLeft = activeTabElement.offsetLeft;
-    const tabWidth = activeTabElement.offsetWidth;
+  ) as HTMLElement | null;
+  if (!activeTabElement) return;
 
-    let newScrollLeft = containerScrollLeft;
+  const containerRect = container.getBoundingClientRect();
+  if (containerRect.width === 0) return;
 
-    // If the tab is outside the view to the left
-    if (tabOffsetLeft < 0) {
-      newScrollLeft = containerScrollLeft + tabOffsetLeft;
-    }
-    // If the tab is outside the view to the right
-    else if (tabOffsetLeft + tabWidth > containerWidth) {
-      newScrollLeft =
-        containerScrollLeft + (tabOffsetLeft + tabWidth - containerWidth);
-    }
+  const tabRect = activeTabElement.getBoundingClientRect();
+  const target = computeScrollTarget(
+    { scrollLeft: container.scrollLeft, clientWidth: container.clientWidth },
+    { left: tabRect.left, right: tabRect.right },
+    containerRect.left
+  );
 
-    // Scroll to the target position
-    tabsContainerRef.value.scrollTo({
-      left: newScrollLeft,
-      behavior: 'smooth',
-    });
+  if (target !== null) {
+    container.scrollTo({ left: target, behavior: 'smooth' });
   }
+};
+
+const handleWindowResize = () => {
+  scrollToActiveTab();
+  updateOverflow();
 };
 
 onMounted(() => {
@@ -318,7 +382,11 @@ onMounted(() => {
   eventBus.on(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   eventBus.on(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
 
-  window.addEventListener('resize', scrollToActiveTab);
+  window.addEventListener('resize', handleWindowResize);
+
+  // Measure overflow after the first render (and after tab count changes,
+  // once the new tab is actually in the DOM).
+  nextTick(updateOverflow);
 });
 
 onBeforeUnmount(() => {
@@ -327,12 +395,12 @@ onBeforeUnmount(() => {
   eventBus.off(APP_EVENTS.NEW_SSH_TAB, handleNewSSHTab);
   eventBus.off(APP_EVENTS.SESSION_SAVED, invalidateSavedConnectionsCache);
 
-  window.removeEventListener('resize', scrollToActiveTab);
+  window.removeEventListener('resize', handleWindowResize);
 });
 </script>
 
 <template>
-  <div class="app-tabs border-bottom" data-tauri-drag-region>
+  <div class="app-tabs" data-tauri-drag-region>
     <div
       ref="tabsContainerRef"
       class="tabs-container scrollbar-hidden"
@@ -350,6 +418,8 @@ onBeforeUnmount(() => {
           :data-id="tab.id"
           @click="handleTabClick"
           @close="handleTabClose"
+          @close-others="handleCloseOthers"
+          @close-all="handleCloseAll"
         />
       </TransitionGroup>
 
@@ -383,16 +453,20 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="right-actions" data-tauri-drag-region>
-      <ShortcutHint :text="t('common.windowActions')" position="bottom">
-        <button
-          class="action-btn more-btn"
-          :aria-label="t('common.windowActions')"
-        >
-          <MoreHorizontal :size="16" />
-        </button>
-      </ShortcutHint>
-    </div>
+    <ShortcutHint
+      v-if="isOverflowing"
+      :text="t('tabs.overflowTabs')"
+      position="bottom"
+    >
+      <button
+        class="action-btn overflow-tabs-btn"
+        :class="{ 'is-active': overflowMenuOpen }"
+        :aria-label="t('tabs.overflowTabs')"
+        @click="onToggleOverflowMenu"
+      >
+        <ChevronDown :size="14" />
+      </button>
+    </ShortcutHint>
 
     <DropdownMenu
       v-model:visible="isDropdownOpen"
@@ -409,6 +483,15 @@ onBeforeUnmount(() => {
       :y="savedConnectionsY"
       @select="handleSavedSessionSelect"
     />
+
+    <DropdownMenu
+      v-model:visible="overflowMenuOpen"
+      :items="overflowTabsItems"
+      :x="overflowMenuX"
+      :y="overflowMenuY"
+      max-height="60vh"
+      @select="handleOverflowTabSelect"
+    />
   </div>
 </template>
 
@@ -416,9 +499,10 @@ onBeforeUnmount(() => {
 .app-tabs {
   display: flex;
   align-items: center;
-  background-color: var(--color-bg-secondary);
+  background-color: transparent;
   padding: 0 4px;
-  height: 36px;
+  height: 100%;
+  min-width: 0;
   overflow: hidden;
   position: relative;
 }
@@ -500,16 +584,14 @@ onBeforeUnmount(() => {
   transform: rotate(180deg);
 }
 
-.right-actions {
-  display: flex;
-  align-items: center;
-  padding: 0 8px;
-  margin-left: auto;
-  border-left: 1px solid var(--color-border-tertiary);
+.overflow-tabs-btn {
+  margin-left: 4px;
+  flex-shrink: 0;
 }
 
-.more-btn {
-  color: var(--color-text-tertiary);
+.overflow-tabs-btn.is-active {
+  background-color: var(--color-interactive-hover);
+  color: var(--color-text-primary);
 }
 
 .dropdown-btn {

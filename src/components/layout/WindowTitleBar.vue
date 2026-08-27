@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted, nextTick, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isMacOSBrowser,
   isWindowsBrowser,
 } from '@/core/utils/platform/platform-detection';
-import SearchBox from '@/components/search/SearchBox.vue';
-import SearchDropdown from '@/components/search/SearchDropdown.vue';
+import AppTabs from '@/components/layout/AppTabs.vue';
 import { Sun, Moon, Settings } from 'lucide-vue-next';
 import { APP_EVENTS } from '@/core/constants';
 import { eventBus } from '@/core/utils/event-bus';
@@ -20,8 +19,9 @@ const { t } = useI18n({ useScope: 'global' });
 /**
  * WindowTitleBar Component
  *
- * Provides a custom title bar with platform-specific window controls (macOS traffic lights,
- * Windows control buttons) and a centralized search functionality.
+ * Provides a custom title bar with platform-specific window controls (macOS
+ * traffic lights, Windows control buttons). The tab strip (AppTabs) lives in
+ * the same row — the whole bar is one line.
  */
 
 const appWindow = getCurrentWindow();
@@ -32,13 +32,6 @@ const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
 const isFullscreen = ref(false);
 const isMaximized = ref(false);
-
-// --- Search Functionality Refs ---
-const searchBoxRef = ref<InstanceType<typeof SearchBox> | null>(null);
-const searchDropdownRef = ref<InstanceType<typeof SearchDropdown> | null>(null);
-const showSearchDropdown = ref(false);
-const searchBoxElement = ref<HTMLElement | undefined>(undefined);
-const searchQuery = ref('');
 
 // --- Theme toggle + settings shortcuts ---
 const isDarkTheme = ref(themeManager.getActualTheme() === 'dark');
@@ -54,64 +47,6 @@ const handleThemeChanged = () => {
 
 const openSettings = () => {
   eventBus.emit(APP_EVENTS.OPEN_SETTINGS);
-};
-
-/**
- * Handles search box focus to display the dropdown and update its position.
- */
-const onSearchBoxFocus = () => {
-  showSearchDropdown.value = true;
-  nextTick(() => {
-    if (searchBoxRef.value) {
-      // Synchronize input element for dropdown anchoring
-      const inputElement = searchBoxRef.value.$el.querySelector('input');
-      if (inputElement) {
-        searchBoxElement.value = inputElement;
-      } else if (searchBoxRef.value.$el) {
-        searchBoxElement.value = searchBoxRef.value.$el;
-      }
-      if (searchDropdownRef.value) {
-        searchDropdownRef.value.updatePosition();
-      }
-    }
-  });
-};
-
-/**
- * Handles search box blur with a delay to allow interaction with dropdown items.
- */
-let blurTimer: ReturnType<typeof setTimeout> | null = null;
-const onSearchBoxBlur = () => {
-  // Delay closing to allow user to click dropdown options
-  if (blurTimer) clearTimeout(blurTimer);
-  blurTimer = setTimeout(() => {
-    const activeElement = document.activeElement;
-    const dropdownElement = document.querySelector('.search-dropdown');
-    // Prevent closing if focus moved into the dropdown itself
-    if (dropdownElement && dropdownElement.contains(activeElement)) {
-      return;
-    }
-    showSearchDropdown.value = false;
-  }, 150);
-};
-
-/**
- * Forwards KeyboardEvent to the SearchDropdown component.
- */
-const onSearchBoxKeyDown = (event: KeyboardEvent) => {
-  if (!showSearchDropdown.value || !searchDropdownRef.value) {
-    return;
-  }
-  searchDropdownRef.value?.handleKeyDown(event);
-};
-
-/**
- * Opens the dropdown when the user starts typing.
- */
-const onSearchBoxInput = () => {
-  if (!showSearchDropdown.value) {
-    showSearchDropdown.value = true;
-  }
 };
 
 onMounted(async () => {
@@ -143,17 +78,12 @@ onMounted(async () => {
     showWindowControls.value = isMac || isWin;
   }
 
-  // Listen for global search focus events
-  eventBus.on(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
-
   // Keep the theme toggle icon in sync with the actual light/dark mode
   window.addEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
 });
 
 onUnmounted(() => {
-  eventBus.off(APP_EVENTS.FOCUS_SEARCH, handleFocusSearch);
   window.removeEventListener(THEME_CHANGED_EVENT, handleThemeChanged);
-  if (blurTimer) clearTimeout(blurTimer);
 
   const unlisten = (window as unknown as { __unlistenResize?: () => void })
     .__unlistenResize;
@@ -161,18 +91,6 @@ onUnmounted(() => {
     unlisten();
   }
 });
-
-/**
- * Programmatically focuses the search box.
- */
-const handleFocusSearch = () => {
-  nextTick(() => {
-    if (searchBoxRef.value) {
-      searchBoxRef.value.focus();
-      showSearchDropdown.value = true;
-    }
-  });
-};
 
 /**
  * Closes the application window.
@@ -226,17 +144,7 @@ const handleMaximize = async () => {
       <!-- Native macOS traffic lights will float over this area -->
     </div>
 
-    <div class="center-section" data-tauri-drag-region>
-      <SearchBox
-        ref="searchBoxRef"
-        v-model="searchQuery"
-        class="disable-selection"
-        @focus="onSearchBoxFocus"
-        @blur="onSearchBoxBlur"
-        @keydown="onSearchBoxKeyDown"
-        @input="onSearchBoxInput"
-      />
-    </div>
+    <AppTabs />
 
     <div class="right-section" data-tauri-drag-region>
       <div class="title-bar-actions">
@@ -321,14 +229,6 @@ const handleMaximize = async () => {
         </button>
       </div>
     </div>
-
-    <SearchDropdown
-      ref="searchDropdownRef"
-      v-model:visible="showSearchDropdown"
-      :anchor-element="searchBoxElement"
-      :search-query="searchQuery"
-      @update:search-query="searchQuery = $event"
-    />
   </div>
 </template>
 
@@ -336,7 +236,7 @@ const handleMaximize = async () => {
 .window-title-bar {
   height: 38px;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: stretch;
   background-color: var(--color-bg-secondary);
   position: relative;
@@ -383,12 +283,6 @@ const handleMaximize = async () => {
 
 .window-title-bar.is-windows .right-section {
   align-items: stretch;
-}
-
-.center-section {
-  display: flex;
-  justify-content: center;
-  align-items: center;
 }
 
 .window-controls {
@@ -459,10 +353,5 @@ const handleMaximize = async () => {
 .windows-control-btn.close-btn:active {
   background-color: #f1707a !important;
   color: white !important;
-}
-
-.disable-selection {
-  user-select: none;
-  -webkit-user-select: none;
 }
 </style>

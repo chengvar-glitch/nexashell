@@ -4,7 +4,6 @@ import {
 import { eventBus } from './event-bus';
 import { APP_EVENTS } from '@/core/constants';
 
-const focusSearch = () => eventBus.emit(APP_EVENTS.FOCUS_SEARCH);
 const splitVertical = () => eventBus.emit(APP_EVENTS.SPLIT_VERTICAL);
 const splitHorizontal = () => eventBus.emit(APP_EVENTS.SPLIT_HORIZONTAL);
 const createNewLocalTab = () => eventBus.emit(APP_EVENTS.NEW_LOCAL_TAB);
@@ -93,18 +92,6 @@ export class ShortcutManager {
     );
   }
 
-  /** True when Tab should open/focus the already-visible search dropdown. */
-  private isSearchDropdownTabAction(event: KeyboardEvent): boolean {
-    const target = event.target as HTMLElement | null;
-    if (!target || typeof target.closest !== 'function') return false;
-    const searchDropdownVisible = !!document.querySelector('.search-dropdown');
-    return (
-      searchDropdownVisible &&
-      (target.closest('.search-container') !== null ||
-        target.closest('.search-dropdown') !== null)
-    );
-  }
-
   private handleKeyDown(event: KeyboardEvent) {
     const target = event.target as HTMLElement;
     const isInputElement =
@@ -115,32 +102,16 @@ export class ShortcutManager {
     // When the event targets a terminal, let xterm keep control of terminal
     // input. On macOS the shell never sees app-level Cmd+<key> combos, and
     // those are the app's shortcuts (Cmd+, settings, Cmd+T new tab, Cmd+W
-    // close, Cmd+D split, Cmd+P search), so let metaKey events through.
-    // Block everything else (Ctrl+D/EOF, Ctrl+Q, plain keys) so the terminal
-    // owns them instead of a global shortcut swallowing them.
+    // close, Cmd+D split, Cmd+P command palette), so let metaKey events
+    // through. Block everything else (Ctrl+D/EOF, Ctrl+Q, plain keys) so the
+    // terminal owns them instead of a global shortcut swallowing them.
     if (this.isInTerminal(event) && !event.metaKey) {
       return;
     }
 
-    if (isInputElement) {
-      if (this.isGlobalShortcut(event.key, event)) {
-        // Allow global shortcuts to proceed
-      } else if (event.key === 'Tab') {
-        // Only intercept Tab when it performs an actual action (focusing the
-        // visible search dropdown); otherwise let native focus navigation work.
-        if (this.isSearchDropdownTabAction(event)) {
-          // fall through to shortcut resolution
-        } else {
-          return;
-        }
-      } else {
-        // Don't trigger other shortcuts in input fields
-        return;
-      }
-    }
-
-    if (event.key === 'Tab' && !this.isSearchDropdownTabAction(event)) {
-      // Let native Tab navigation proceed instead of blocking it globally.
+    if (isInputElement && !this.isGlobalShortcut(event.key, event)) {
+      // Don't trigger other shortcuts in input fields; Tab keeps native
+      // focus navigation.
       return;
     }
 
@@ -210,17 +181,6 @@ export const PredefinedShortcuts = {
       eventBus.emit(APP_EVENTS.OPEN_SSH_FORM);
     },
   },
-  FOCUS_SEARCH: {
-    key: 'p',
-    metaKey: IS_MAC,
-    ctrlKey: !IS_MAC,
-    shiftKey: false,
-    altKey: false,
-    description: 'Focus search box',
-    handler: () => {
-      focusSearch();
-    },
-  },
   CLOSE_DIALOG: {
     key: 'Escape',
     metaKey: false,
@@ -265,7 +225,7 @@ export const PredefinedShortcuts = {
     key: 'p',
     metaKey: IS_MAC,
     ctrlKey: !IS_MAC,
-    shiftKey: true,
+    shiftKey: false,
     altKey: false,
     description: 'Open command palette',
     handler: () => {

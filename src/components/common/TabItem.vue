@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { Home, Terminal, Server } from 'lucide-vue-next';
 import { type TabType } from '@/features/tabs';
 import { useI18n } from 'vue-i18n';
@@ -26,6 +26,8 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   click: [id: string];
   close: [id: string];
+  'close-others': [id: string];
+  'close-all': [];
 }>();
 
 const contextMenuVisible = ref(false);
@@ -43,8 +45,34 @@ const handleClose = (e: Event) => {
   }
 };
 
+/**
+ * Right-click menu: split actions only make sense on terminal/ssh tabs; the
+ * close actions apply everywhere (the home tab shows them with "close
+ * current" disabled since it is never closable).
+ */
+const contextMenuItems = computed(() => {
+  const items: Array<{
+    key: string;
+    label: string;
+    divider?: boolean;
+    disabled?: boolean;
+  }> = [];
+  if (props.type !== 'home') {
+    items.push(
+      { key: 'split-vertical', label: t('pane.splitVertical') },
+      { key: 'split-horizontal', label: t('pane.splitHorizontal') },
+      { key: '__divider__', label: '', divider: true }
+    );
+  }
+  items.push(
+    { key: 'close-all', label: t('tabs.closeAll') },
+    { key: 'close-others', label: t('tabs.closeOthers') },
+    { key: 'close-current', label: t('tabs.closeCurrent'), disabled: !props.closable }
+  );
+  return items;
+});
+
 const handleContextMenu = (e: MouseEvent) => {
-  if (props.type === 'home') return;
   e.preventDefault();
   e.stopPropagation();
   contextMenuX.value = e.clientX;
@@ -63,6 +91,14 @@ const handleContextMenuSelect = (key: string) => {
     } else {
       eventBus.emit(APP_EVENTS.SPLIT_VERTICAL);
     }
+  } else if (key === 'close-current') {
+    if (props.closable) {
+      emit('close', props.id);
+    }
+  } else if (key === 'close-others') {
+    emit('close-others', props.id);
+  } else if (key === 'close-all') {
+    emit('close-all');
   }
 };
 </script>
@@ -106,10 +142,7 @@ const handleContextMenuSelect = (key: string) => {
       :x="contextMenuX"
       :y="contextMenuY"
       :trigger="'contextmenu'"
-      :items="[
-        { key: 'split-vertical', label: t('pane.splitVertical') },
-        { key: 'split-horizontal', label: t('pane.splitHorizontal') },
-      ]"
+      :items="contextMenuItems"
       @select="handleContextMenuSelect"
     />
   </div>

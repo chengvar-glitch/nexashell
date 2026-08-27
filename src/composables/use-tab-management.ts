@@ -324,6 +324,30 @@ export function useTabManagement() {
     });
   };
 
+  /**
+   * Close every closable tab except `keepId` (right-click "close others").
+   * The home tab is never closable, so it survives regardless. Sequential
+   * closeTab keeps the active-tab adoption logic stable.
+   */
+  const closeOthers = async (keepId: string): Promise<void> => {
+    const toClose = tabs.value
+      .filter(t => t.id !== keepId && t.closable !== false)
+      .map(t => t.id);
+    for (const id of toClose) {
+      await closeTab(id);
+    }
+  };
+
+  /** Close every closable tab; only non-closable tabs (the home tab) survive. */
+  const closeAllTabs = async (): Promise<void> => {
+    const toClose = tabs.value
+      .filter(t => t.closable !== false)
+      .map(t => t.id);
+    for (const id of toClose) {
+      await closeTab(id);
+    }
+  };
+
   const getActiveTab = () => {
     return tabs.value.find(tab => tab.id === activeTabId.value);
   };
@@ -348,6 +372,8 @@ export function useTabManagement() {
     setActivePane,
     addTab,
     closeTab,
+    closeOthers,
+    closeAllTabs,
     splitActivePane,
     closePane,
     getActiveTab,

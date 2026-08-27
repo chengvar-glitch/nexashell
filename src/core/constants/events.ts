@@ -10,7 +10,6 @@ export const APP_EVENTS = {
   NEW_LOCAL_TAB: 'app:new-local-tab',
   NEW_SSH_TAB: 'app:new-ssh-tab',
   CLOSE_TAB: 'app:close-tab',
-  FOCUS_SEARCH: 'app:focus-search',
   GROUPS_UPDATED: 'app:groups-updated',
   TAGS_UPDATED: 'app:tags-updated',
   SESSION_SAVED: 'app:session-saved',

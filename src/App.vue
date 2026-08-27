@@ -3,7 +3,6 @@ import { ref, onMounted, onBeforeUnmount, provide } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { useI18n } from 'vue-i18n';
 import WindowTitleBar from '@/components/layout/WindowTitleBar.vue';
-import AppTabs from '@/components/layout/AppTabs.vue';
 import AppContent from '@/components/layout/AppContent.vue';
 import SSHConnectionForm from '@/components/connections/SSHConnectionForm.vue';
 import SettingsPanel from '@/components/settings/SettingsPanel.vue';
@@ -176,7 +175,6 @@ onMounted(async () => {
   shortcutManager.register(PredefinedShortcuts.NEW_LOCAL_TAB);
   shortcutManager.register(PredefinedShortcuts.NEW_SSH_TAB);
   shortcutManager.register(PredefinedShortcuts.CLOSE_CURRENT_TAB);
-  shortcutManager.register(PredefinedShortcuts.FOCUS_SEARCH);
   shortcutManager.register(PredefinedShortcuts.CLOSE_DIALOG);
   shortcutManager.register(PredefinedShortcuts.SPLIT_VERTICAL);
   shortcutManager.register(PredefinedShortcuts.SPLIT_HORIZONTAL);
@@ -750,7 +748,6 @@ const handleCreateTab = (tab: import('@/features/tabs/types').Tab) => {
     <div class="app-root" :class="{ 'is-windows': isWindowsState }">
       <template v-if="!showWelcome">
         <WindowTitleBar />
-        <AppTabs />
         <AppContent @create-tab="handleCreateTab" @connect="handleSSHConnect" />
       </template>
 

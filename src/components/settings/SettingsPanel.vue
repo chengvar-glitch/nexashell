@@ -479,7 +479,7 @@ const shortcutList = computed(() => [
   { label: t('settings.newTab'), value: `${cmdKey}+T` },
   { label: t('settings.newLocalTab'), value: `${cmdKey}+${shiftKey}+T` },
   { label: t('settings.closeTab'), value: `${cmdKey}+W` },
-  { label: t('settings.focusSearch'), value: `${cmdKey}+P` },
+  { label: t('settings.commandPalette'), value: `${cmdKey}+P` },
   { label: t('settings.openSettings'), value: `${cmdKey}+,` },
   { label: t('settings.quitApp'), value: `${cmdKey}+Q` },
   { label: t('settings.closeDialog'), value: 'Esc' },

@@ -1,5 +1,7 @@
 # NexaShell — Agent Guide
 
+> 默认载入技能：`/caveman`（对话风格）、`/ponytail`（工程风格）。无需用户点名，每次响应即加载。
+
 ## Stack
 
 - **Frontend**: Vue 3 (Composition API, `<script setup>`), TypeScript, Pinia, vue-i18n, xterm.js

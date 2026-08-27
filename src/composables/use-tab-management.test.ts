@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import { useTabManagement } from './use-tab-management';
 import { useSessionStore } from '@/features/session';
-import { TAB_TYPE, MAX_PANES_PER_TAB } from '@/features/tabs';
+import { TAB_TYPE, MAX_PANES_PER_TAB, DEFAULT_TAB } from '@/features/tabs';
 import type { SplitNode } from '@/features/tabs';
 
 describe('useTabManagement split pane limit', () => {
@@ -163,6 +163,59 @@ describe('useTabManagement split pane limit', () => {
 
     expect(tm.splitActivePane('vertical')).toBe('ok');
     expect(paneCount(tm)).toBe(MAX_PANES_PER_TAB);
+  });
+});
+
+describe('useTabManagement batch close', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const tabIds = (tm: ReturnType<typeof useTabManagement>) =>
+    tm.tabs.value.map(t => t.id);
+
+  const addTerminalTab = (
+    tm: ReturnType<typeof useTabManagement>,
+    id: string
+  ) => {
+    tm.addTab({
+      id,
+      label: id,
+      type: TAB_TYPE.TERMINAL,
+      closable: true,
+      panes: [{ id: `pane-${id}`, type: 'terminal' }],
+    });
+  };
+
+  it('closeOthers keeps the right-clicked tab and the home tab', async () => {
+    const tm = useTabManagement();
+    addTerminalTab(tm, 't1');
+    addTerminalTab(tm, 't2');
+    addTerminalTab(tm, 't3');
+    await tm.closeOthers('t2');
+    expect(tabIds(tm)).toEqual([DEFAULT_TAB.ID, 't2']);
+  });
+
+  it('closeAllTabs keeps only non-closable tabs (the home tab)', async () => {
+    const tm = useTabManagement();
+    addTerminalTab(tm, 't1');
+    addTerminalTab(tm, 't2');
+    await tm.closeAllTabs();
+    expect(tabIds(tm)).toEqual([DEFAULT_TAB.ID]);
+  });
+
+  it('closeOthers never closes a non-closable tab', async () => {
+    const tm = useTabManagement();
+    addTerminalTab(tm, 't1');
+    tm.addTab({
+      id: 't2',
+      label: 't2',
+      type: TAB_TYPE.SSH,
+      closable: false,
+      panes: [{ id: 'pane-t2', type: 'ssh' }],
+    });
+    await tm.closeOthers('t1');
+    expect(tabIds(tm)).toEqual([DEFAULT_TAB.ID, 't1', 't2']);
   });
 });
 
