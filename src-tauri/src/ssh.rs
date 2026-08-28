@@ -2633,6 +2633,19 @@ pub fn disconnect_ssh(
     state.disconnect_ssh(&SessionId::from(sessionId))
 }
 
+/// Whether a live SSH session exists under this id. The standalone file
+/// manager uses this to reuse an existing connection (opened from a terminal)
+/// instead of dialling a second one.
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn has_ssh_session(state: tauri::State<'_, SshManager>, sessionId: String) -> bool {
+    state
+        .channels
+        .read()
+        .map(|m| m.contains_key(&SessionId::from(sessionId)))
+        .unwrap_or(false)
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn send_ssh_input(

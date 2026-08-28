@@ -6,6 +6,9 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import SftpBrowser from '@/components/connections/SftpBrowser.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import { useTransferQueue } from '@/composables/use-transfer-queue';
+import { sessionApi } from '@/features/session';
+import type { SavedSession } from '@/features/session/types';
+import { invoke } from '@tauri-apps/api/core';
 import { createLogger } from '@/core/utils/logger';
 import { formatBytes, formatSpeed, type SftpEntry, type UploadTask } from '@/core/types';
 import {
@@ -38,8 +41,58 @@ const sessionId = ref<string>(
   label.startsWith('file-manager-') ? label.slice('file-manager-'.length) : ''
 );
 
+// Connection ownership. Opened from the server list we receive `?saved=…` and
+// dial our OWN SSH connection (no terminal tab required); it is released when
+// this window closes. Opened from a terminal we reuse that live session and
+// leave its lifecycle to the tab.
+const savedId = new URLSearchParams(window.location.search).get('saved');
+const ownsConnection = ref(false);
+let connectionReleased = false;
+const connectState = ref<'connecting' | 'ready' | 'error'>('connecting');
+const connectError = ref('');
+
+const dialOwnConnection = async (saved: string) => {
+  try {
+    const sessions = await sessionApi.listSessions();
+    const record = sessions.find(s => s.id === saved) as SavedSession | undefined;
+    if (!record) {
+      connectState.value = 'error';
+      connectError.value = `session not found: ${saved}`;
+      return;
+    }
+    const [, password, keyPassphrase] = await sessionApi.getSessionCredentials(saved);
+    await sessionApi.connectSSH(
+      sessionId.value,
+      record.addr,
+      record.port,
+      record.username,
+      password || '',
+      record.private_key_path || null,
+      keyPassphrase || null
+    );
+    ownsConnection.value = true;
+    connectState.value = 'ready';
+  } catch (err) {
+    logger.error('File manager failed to connect', err);
+    connectState.value = 'error';
+    connectError.value = err instanceof Error ? err.message : String(err);
+  }
+};
+
+/** Release an owned connection. Idempotent; never throws. */
+const releaseConnection = async () => {
+  if (!ownsConnection.value || connectionReleased) return;
+  connectionReleased = true;
+  try {
+    await sessionApi.disconnectSSH(sessionId.value);
+  } catch (err) {
+    logger.warn('File manager failed to release its connection', err);
+  }
+};
+
 const disconnected = ref(false);
 let disconnectUnlisten: UnlistenFn | null = null;
+let unlistenClose: UnlistenFn | null = null;
 
 const transferQueue = useTransferQueue(sessionId);
 const showTransfers = ref(true);
@@ -82,6 +135,38 @@ onMounted(async () => {
   disconnectUnlisten = await listen(`ssh-disconnected-${sessionId.value}`, () => {
     disconnected.value = true;
   });
+
+  // Reuse a live session (terminal entry point) or dial our own (server list).
+  // ponytail: if this webview crashes without firing close/unmount, an owned
+  // connection leaks until app exit — upgrade path is a backend lease timeout.
+  try {
+    const exists = await invoke<boolean>('has_ssh_session', {
+      sessionId: sessionId.value,
+    });
+    if (exists) {
+      ownsConnection.value = false;
+      connectState.value = 'ready';
+    } else if (savedId) {
+      await dialOwnConnection(savedId);
+    } else {
+      connectState.value = 'error';
+      connectError.value = 'no live session and no saved session to dial';
+    }
+  } catch (err) {
+    logger.error('Connection check failed', err);
+    connectState.value = 'error';
+    connectError.value = err instanceof Error ? err.message : String(err);
+  }
+
+  // Release the owned connection before the window goes away — hooking
+  // close-requested guarantees the disconnect completes before destruction.
+  unlistenClose = await appWindow.onCloseRequested(async event => {
+    if (!ownsConnection.value) return;
+    event.preventDefault();
+    await releaseConnection();
+    await appWindow.destroy();
+  });
+
   await transferQueue.setupListeners();
 
   // Tauri native drag events. Dropping picks up the absolute local paths and
@@ -102,15 +187,20 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  // Fallback release if the window went down without close-requested.
+  void releaseConnection();
   if (disconnectUnlisten) {
     void disconnectUnlisten();
     disconnectUnlisten = null;
   }
+  if (unlistenClose) {
+    void unlistenClose();
+    unlistenClose = null;
+  }
   if (unlistenDrop) {
     void unlistenDrop();
     unlistenDrop = null;
-  }
-  if (unlistenDragEnter) {
+  }  if (unlistenDragEnter) {
     void unlistenDragEnter();
     unlistenDragEnter = null;
   }
@@ -318,12 +408,21 @@ const taskStatusClass = (task: UploadTask): string => {
 <template>
   <div class="file-manager-root">
     <template v-if="sessionId">
-      <div v-if="disconnected" class="fm-disconnected">
+      <div v-if="connectState === 'error'" class="fm-empty">
+        <p>{{ t('connection.connectionError') }}</p>
+        <p class="fm-error-detail">{{ connectError }}</p>
+      </div>
+
+      <div v-else-if="disconnected" class="fm-disconnected">
         <span class="dot" />
         {{ t('dashboard.disconnected') }}
         <button type="button" class="retry-close" @click="disconnected = false">
           <CircleX :size="13" />
         </button>
+      </div>
+
+      <div v-else-if="connectState === 'connecting'" class="fm-empty">
+        <p>{{ t('connection.establishingSSH') }}</p>
       </div>
 
       <div v-else class="fm-layout">
@@ -981,6 +1080,13 @@ const taskStatusClass = (task: UploadTask): string => {
 }
 .fm-empty p {
   margin: 0;
+}
+.fm-error-detail {
+  margin-top: 6px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--color-danger);
+  word-break: break-word;
 }
 
 /* ---- Drag-and-drop overlay ---- */

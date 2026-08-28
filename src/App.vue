@@ -496,17 +496,9 @@ const handleSSHConnect = async (data: SSHConnectionFormData) => {
       data.private_key_path || null,
       data.key_passphrase || null,
       80, // Default columns
-      24, // Default rows
-      data.id || null // saved-session id for savedId → runtimeId resolution
+      24 // Default rows
     );
     logger.info('SSH session created successfully', { sessionId });
-
-    // Let other views (e.g. server list → open file manager) resolve the
-    // runtime session id once the connection is up.
-    eventBus.emit(APP_EVENTS.SESSION_CONNECTED, {
-      sessionId,
-      savedId: data.id || null,
-    });
 
     // Best-effort auto-start of persisted tunnels for this runtime session.
     // Failures are non-fatal; the user can still start tunnels from the panel.

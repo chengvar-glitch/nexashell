@@ -20,10 +20,19 @@ export const fileManagerWindowLabel = (sessionId: string): string =>
  * Returns true when a window is available (either created or already shown);
  * false when it could not be created.
  */
-export async function openFileManagerWindow(sessionId: string): Promise<boolean> {
+export async function openFileManagerWindow(
+  sessionId: string,
+  opts?: { savedId?: string }
+): Promise<boolean> {
   if (!sessionId) return false;
 
   const label = fileManagerWindowLabel(sessionId);
+  // `saved` tells the window to dial its own SSH connection from the saved
+  // session's credentials (server-list entry point). Without it the window
+  // reuses the live session keyed by `sessionId` (terminal entry point).
+  const url = opts?.savedId
+    ? `filemanager.html?saved=${encodeURIComponent(opts.savedId)}`
+    : 'filemanager.html';
 
   // Reuse an existing window for this session if one is still open.
   const existing = await WebviewWindow.getByLabel(label).catch(err => {
@@ -42,7 +51,7 @@ export async function openFileManagerWindow(sessionId: string): Promise<boolean>
 
   try {
     const win = new WebviewWindow(label, {
-      url: 'filemanager.html',
+      url,
       title: 'NexaShell File Manager',
       width: 920,
       height: 720,

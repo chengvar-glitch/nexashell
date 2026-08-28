@@ -127,6 +127,7 @@ pub fn run() {
             system::close_window,
             ssh::connect_ssh,
             ssh::disconnect_ssh,
+            ssh::has_ssh_session,
             ssh::send_ssh_input,
             ssh::get_buffered_ssh_output,
             ssh::forget_host_key,

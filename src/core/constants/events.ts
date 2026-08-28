@@ -13,7 +13,6 @@ export const APP_EVENTS = {
   GROUPS_UPDATED: 'app:groups-updated',
   SESSION_SAVED: 'app:session-saved',
   CONNECT_SESSION: 'app:connect-session',
-  SESSION_CONNECTED: 'app:session-connected',
   SPLIT_HORIZONTAL: 'app:split-horizontal',
   SPLIT_VERTICAL: 'app:split-vertical',
   COMMAND_PALETTE: 'app:command-palette',

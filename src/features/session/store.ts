@@ -44,10 +44,6 @@ const credentialCache = new Map<string, CachedCredentials>();
 export const useSessionStore = defineStore('session', () => {
   const sessions = ref<Record<string, SessionState>>({});
   const tabToSessionMap = ref<Record<string, string>>({});
-  // Saved-session id (db) → runtime session id. The backend SSH/SFTP session is
-  // keyed by the runtime id, so features targeting a saved session (e.g. the
-  // file manager) must resolve through this map first.
-  const savedToRuntime = ref<Record<string, string>>({});
 
   const getSession = (sessionId: string): SessionState | undefined => {
     return sessions.value[sessionId];
@@ -61,11 +57,6 @@ export const useSessionStore = defineStore('session', () => {
     return tabId in tabToSessionMap.value;
   };
 
-  /** Runtime session id for a saved (db) session id, if currently connected. */
-  const getRuntimeSessionId = (savedSessionId: string): string | undefined => {
-    return savedToRuntime.value[savedSessionId];
-  };
-
   const createSSHSession = async (
     sessionId: string,
     tabId: string,
@@ -77,8 +68,7 @@ export const useSessionStore = defineStore('session', () => {
     privateKeyPath?: string | null,
     keyPassphrase?: string | null,
     cols: number = 80,
-    rows: number = 24,
-    savedSessionId?: string | null
+    rows: number = 24
   ): Promise<void> => {
     if (hasSession(sessionId) || hasSessionForTab(tabId)) {
       logger.warn('Session already exists, refusing to overwrite', { sessionId, tabId });
@@ -104,9 +94,6 @@ export const useSessionStore = defineStore('session', () => {
 
       sessions.value[sessionId] = session;
       tabToSessionMap.value[tabId] = sessionId;
-      if (savedSessionId) {
-        savedToRuntime.value[savedSessionId] = sessionId;
-      }
 
       logger.debug('Creating SSH session', {
         sessionId,
@@ -244,9 +231,6 @@ export const useSessionStore = defineStore('session', () => {
     // Success — only now remove local state.
     delete sessions.value[sessionId];
     delete tabToSessionMap.value[session.tabId];
-    for (const [savedId, runtimeId] of Object.entries(savedToRuntime.value)) {
-      if (runtimeId === sessionId) delete savedToRuntime.value[savedId];
-    }
     credentialCache.delete(sessionId);
 
     logger.info('disconnectSession: removed session state locally', {
@@ -308,17 +292,14 @@ export const useSessionStore = defineStore('session', () => {
   const reset = () => {
     sessions.value = {};
     tabToSessionMap.value = {};
-    savedToRuntime.value = {};
     credentialCache.clear();
   };
 
   return {
     sessions,
     tabToSessionMap,
-    savedToRuntime,
     getSession,
     hasSession,
-    getRuntimeSessionId,
     createSSHSession,
     createLocalSession,
     disconnectSession,
