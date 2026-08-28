@@ -161,10 +161,17 @@ onMounted(async () => {
   // Release the owned connection before the window goes away — hooking
   // close-requested guarantees the disconnect completes before destruction.
   unlistenClose = await appWindow.onCloseRequested(async event => {
-    if (!ownsConnection.value) return;
+    if (!ownsConnection.value || connectionReleased) return;
     event.preventDefault();
     await releaseConnection();
-    await appWindow.destroy();
+    try {
+      await appWindow.destroy();
+    } catch (err) {
+      // destroy denied/blocked → fall back to a plain close; the released
+      // mark above makes the re-entrant close-requested skip preventDefault.
+      logger.warn('destroy() failed, falling back to close()', err);
+      await appWindow.close();
+    }
   });
 
   await transferQueue.setupListeners();
