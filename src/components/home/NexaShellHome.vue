@@ -418,7 +418,7 @@ import { APP_EVENTS } from '@/core/constants';
 import { formatRelativeTime, parseDbTimestamp, sortSessions } from '@/core/utils/time-utils';
 import { createLogger } from '@/core/utils/logger';
 import { useToastMessage } from '@/composables';
-import { sessionApi } from '@/features/session';
+import { sessionApi, useSessionStore } from '@/features/session';
 import type { SavedSessionDisplay } from '@/features/session/types';
 
 const logger = createLogger('NexaShellHome');
@@ -718,6 +718,8 @@ onMounted(async () => {
   eventBus.on(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
   // Reload sessions when a new session is saved
   eventBus.on(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
+  // Auto-open the file manager once a requested session finishes connecting
+  eventBus.on(APP_EVENTS.SESSION_CONNECTED, handleSessionConnected);
 });
 
 onUnmounted(() => {
@@ -725,11 +727,28 @@ onUnmounted(() => {
   // Clean up event listeners
   eventBus.off(APP_EVENTS.GROUPS_UPDATED, handleGroupsUpdated);
   eventBus.off(APP_EVENTS.SESSION_SAVED, handleSessionSaved);
+  eventBus.off(APP_EVENTS.SESSION_CONNECTED, handleSessionConnected);
   clearCopyFeedback();
 });
 
 const handleNewConnection = () => {
   if (openSSHForm) openSSHForm();
+};
+
+const sessionStore = useSessionStore();
+
+// Saved-session id awaiting "connect then open file manager" (see context menu).
+let pendingFileManagerSavedId: string | null = null;
+
+const handleSessionConnected = (args: unknown) => {
+  const { sessionId, savedId } = (args || {}) as {
+    sessionId?: string;
+    savedId?: string | null;
+  };
+  if (pendingFileManagerSavedId && savedId === pendingFileManagerSavedId && sessionId) {
+    pendingFileManagerSavedId = null;
+    void openFileManagerWindow(sessionId);
+  }
 };
 
 const handleQuickConnect = async (session: SavedSessionDisplay) => {
@@ -948,9 +967,19 @@ const handleContextMenuSelect = async (key: string) => {
     case 'connect':
       await handleQuickConnect(selectedSession.value);
       break;
-    case 'file-manager':
-      await openFileManagerWindow(selectedSession.value.id);
+    case 'file-manager': {
+      // The backend SFTP session is keyed by the runtime id, not the saved id —
+      // resolve an active connection first; otherwise connect, then open.
+      const savedId = selectedSession.value.id;
+      const runtimeId = sessionStore.getRuntimeSessionId(savedId);
+      if (runtimeId) {
+        await openFileManagerWindow(runtimeId);
+      } else {
+        pendingFileManagerSavedId = savedId;
+        await handleQuickConnect(selectedSession.value);
+      }
       break;
+    }
     case 'edit':
       handleEditSession(selectedSession.value);
       break;
