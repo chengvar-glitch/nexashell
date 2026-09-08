@@ -1919,30 +1919,17 @@ impl SshManager {
 
         let first_has_leading_slash = trimmed.starts_with('/') || trimmed.starts_with('\\');
 
-        // A native Windows drive prefix (`C`) maps to a virtual `/C:/` root.
-        let first_is_drive_letter = segments[0].len() == 1
-            && segments[0].as_bytes()[0].is_ascii_alphabetic()
-            && segments.len() > 1;
-
-        if first_is_drive_letter {
-            let mut out = format!("/{}:/", segments[0]);
+        // A top-level `C:`-style segment becomes a `/C:/` drive root. Build
+        // `/C:` first so each remaining segment contributes exactly one slash.
+        if segments[0].len() == 2 && segments[0].as_bytes()[1] == b':' {
+            let mut out = format!("/{}:", &segments[0][..1]);
             for seg in segments.iter().skip(1) {
-                if seg.len() == 2 && seg.as_bytes()[1] == b':' {
-                    // Avoid double-colon segments from a `C:`-style input.
-                    continue;
-                }
                 out.push('/');
                 out.push_str(seg);
             }
-            return out;
-        }
-
-        // A top-level `C:`-style segment becomes a `/C:/` drive root.
-        if segments[0].len() == 2 && segments[0].as_bytes()[1] == b':' {
-            let mut out = format!("/{}:/", &segments[0][..1]);
-            for seg in segments.iter().skip(1) {
+            if out.ends_with(':') {
+                // Bare drive root (`C:`) keeps the trailing slash.
                 out.push('/');
-                out.push_str(seg);
             }
             return out;
         }
@@ -1968,7 +1955,13 @@ impl SshManager {
     /// result is a navigable drive root (`/C:/`). `name` may already carry a
     /// trailing colon (`C:` -> `/C:/`).
     fn join_remote_path(base: &str, name: &str, is_dir: bool) -> String {
-        let base = Self::normalize_remote_path(base);
+        // Keep an empty base empty (relative join); `normalize` maps "" to "/"
+        // for safety at other call sites.
+        let base = if base.trim().is_empty() {
+            String::new()
+        } else {
+            Self::normalize_remote_path(base)
+        };
         let name = Self::normalize_remote_path(name);
         let name = name.trim_matches('/').to_string();
         if name.is_empty() {
@@ -1976,8 +1969,8 @@ impl SshManager {
         }
 
         let looks_like_drive_root = is_dir
-            && (name.len() == 2 && name.as_bytes()[1] == b':')
-            || (name.len() == 1 && name.is_ascii() && name.as_bytes()[0].is_ascii_alphabetic());
+            && ((name.len() == 2 && name.as_bytes()[1] == b':')
+                || (name.len() == 1 && name.is_ascii() && name.as_bytes()[0].is_ascii_alphabetic()));
 
         if base == "/" {
             if looks_like_drive_root {
