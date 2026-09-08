@@ -166,6 +166,11 @@ pub struct UploadControl {
     pub paused: Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
 }
 
+/// Join-handle slot shared between a transfer worker's own watcher and
+/// `disconnect_ssh`; whichever side takes it first owns the task outcome.
+type TransferHandleSlot = Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>;
+type TransferHandles = Arc<RwLock<HashMap<String, TransferHandleSlot>>>;
+
 pub struct SshChannelInfo {
     pub handle: Option<tokio::task::JoinHandle<()>>,
     pub status_handle: Option<tokio::task::JoinHandle<()>>,
@@ -200,7 +205,7 @@ pub struct SshChannelInfo {
     /// task id. Each handle sits in an `Arc<Mutex<Option<...>>>` so either the
     /// task's own watcher (to await it) or `disconnect_ssh` (to abort it) can
     /// take it exactly once. Removed from the map when the worker settles.
-    pub transfers: Arc<RwLock<HashMap<String, Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>>>>,
+    pub transfers: TransferHandles,
 
     pub input_listener_id: Option<tauri::EventId>,
     pub resize_listener_id: Option<tauri::EventId>,
@@ -2078,7 +2083,7 @@ impl SshManager {
     fn remove_dir_recursive(sftp: &ssh2::Sftp, path: &str) -> Result<(), SshError> {
         // Guard: never allow recursion on `/` or a virtual drive root.
         let trimmed = path.trim_end_matches('/');
-        if trimmed == "" || trimmed == "/" {
+        if trimmed.is_empty() || trimmed == "/" {
             return Err(SshError::OperationFailed(
                 "Refusing to remove the remote root directory".to_string(),
             ));

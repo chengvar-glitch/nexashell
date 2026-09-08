@@ -296,6 +296,7 @@ impl TunnelManager {
     /// shared listener is dropped. The listener lives in `listener_holder` so a
     /// `stop_*` call can drop it to release the port; the accept loop polls
     /// non-blocking so it never holds the mutex across a blocking accept.
+    #[allow(clippy::too_many_arguments)] // 私有辅助函数，参数均为独立的状态句柄
     fn run_listener(
         conn_addr: String,
         host_for_err: String,
