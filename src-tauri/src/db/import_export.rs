@@ -13,7 +13,10 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 #[tauri::command]
-pub async fn export_sessions(password: String) -> Result<String, String> {
+pub async fn export_sessions(
+    password: String,
+    session_ids: Option<Vec<String>>,
+) -> Result<String, String> {
     // The per-session PBKDF2 key derivation (390k iterations, hundreds of ms
     // per session) must not run on the main thread — a large export would
     // freeze the UI. spawn_blocking keeps the window responsive.
@@ -27,18 +30,37 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
         }
 
         let raw = with_db(|conn| {
+            // `encrypted_credentials` trails SESSION_COLUMNS; compute its index
+            // from the column list so adding columns cannot silently shift it
+            // (a hardcoded index once read `is_pinned` here and broke export).
+            let creds_idx = SESSION_COLUMNS.split(", ").count();
+            let (where_clause, params_vec) = match &session_ids {
+                Some(ids) => {
+                    if ids.is_empty() {
+                        return Ok(RawData {
+                            sessions: Vec::new(),
+                            group_map: std::collections::HashMap::new(),
+                            groups: Vec::new(),
+                        });
+                    }
+                    let placeholders: Vec<String> =
+                        (1..=ids.len()).map(|i| format!("?{}", i)).collect();
+                    (
+                        format!(" WHERE id IN ({})", placeholders.join(", ")),
+                        ids.clone(),
+                    )
+                }
+                None => (String::new(), Vec::new()),
+            };
             let sql = format!(
-                "SELECT {}, encrypted_credentials FROM sessions",
-                SESSION_COLUMNS
+                "SELECT {}, encrypted_credentials FROM sessions{}",
+                SESSION_COLUMNS, where_clause
             );
             let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
             let session_rows = stmt
-                .query_map([], |row| {
-                    let mut s = row_to_session(row)?;
-                    // When using SELECT with extra column at end, indices shift:
-                    // encrypted_credentials is column 11.
-                    let _ = &mut s;
-                    let encrypted: Option<String> = row.get(11)?;
+                .query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
+                    let s = row_to_session(row)?;
+                    let encrypted: Option<String> = row.get(creds_idx)?;
                     Ok((s, encrypted))
                 })
                 .map_err(|e| e.to_string())?;
@@ -107,9 +129,25 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
             });
         }
 
+        // A partial (batch) export must only carry the groups its sessions
+        // actually belong to — restoring it elsewhere would recreate unrelated
+        // groups. A full export keeps every group (complete backup).
+        let groups = if session_ids.is_some() {
+            let referenced: HashSet<String> = export_sessions
+                .iter()
+                .flat_map(|s| s.group_ids.iter().cloned())
+                .collect();
+            raw.groups
+                .into_iter()
+                .filter(|g| referenced.contains(&g.id))
+                .collect()
+        } else {
+            raw.groups
+        };
+
         let data = ExportData {
             sessions: export_sessions,
-            groups: raw.groups,
+            groups,
         };
         serde_json::to_string(&data).map_err(|e| e.to_string())
     })
@@ -118,7 +156,7 @@ pub async fn export_sessions(password: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn import_sessions(json_data: String, password: String) -> Result<(), String> {
+pub async fn import_sessions(json_data: String, password: String) -> Result<usize, String> {
     // PBKDF2 key derivation runs per session on the blocking pool — never on
     // the main thread — so large imports do not freeze the UI.
     tokio::task::spawn_blocking(move || {
@@ -177,19 +215,23 @@ pub async fn import_sessions(json_data: String, password: String) -> Result<(), 
             ).map_err(|e| e.to_string())?;
         }
 
+        let mut imported = 0usize;
         for (session, re_encrypted) in prepared_sessions {
             let metadata = session.metadata;
 
             tx.execute(
-                "INSERT OR REPLACE INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, encrypted_credentials, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                "INSERT OR REPLACE INTO sessions (id, addr, port, server_name, username, auth_type, private_key_path, is_favorite, is_pinned, pinned_at, last_connected_at, encrypted_credentials, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
                 params![
                     metadata.id, metadata.addr, metadata.port, metadata.server_name,
                     metadata.username, metadata.auth_type, metadata.private_key_path,
-                    if metadata.is_favorite { 1 } else { 0 }, re_encrypted,
+                    if metadata.is_favorite { 1 } else { 0 },
+                    if metadata.is_pinned { 1 } else { 0 },
+                    metadata.pinned_at, metadata.last_connected_at, re_encrypted,
                     metadata.created_at, metadata.updated_at
                 ],
             ).map_err(|e| e.to_string())?;
+            imported += 1;
 
             // Relation writes MUST propagate errors: a partially-applied link set
             // committing silently would leave the import inconsistent. Every other
@@ -208,7 +250,8 @@ pub async fn import_sessions(json_data: String, password: String) -> Result<(), 
             }
         }
 
-        tx.commit().map_err(|e| e.to_string())
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(imported)
     })
     .await
     .map_err(|e| e.to_string())?

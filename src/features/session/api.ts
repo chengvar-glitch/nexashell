@@ -245,6 +245,44 @@ class SessionAPI {
   }
 
   /**
+   * Export sessions to a portable encrypted JSON backup string. When
+   * `sessionIds` is provided only those sessions are exported (batch export);
+   * `null` exports everything.
+   */
+  async exportSessions(
+    sessionIds: string[] | null,
+    password: string
+  ): Promise<string> {
+    try {
+      return await invoke<string>('export_sessions', {
+        password,
+        sessionIds,
+      } as Record<string, unknown>);
+    } catch (error) {
+      logger.error('Failed to export sessions', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Import sessions from an encrypted backup previously produced by
+   * `exportSessions`. Resolves with the number of imported sessions.
+   */
+  async importBackup(jsonData: string, password: string): Promise<number> {
+    try {
+      const imported = await invoke<number>('import_sessions', {
+        jsonData,
+        password,
+      } as Record<string, unknown>);
+      logger.info('Backup import finished', { imported });
+      return imported;
+    } catch (error) {
+      logger.error('Failed to import backup', error);
+      throw error;
+    }
+  }
+
+  /**
    * Import sessions from XTerminal-format text (label blocks, key=value or
    * pipe-separated lines). Resolves with the import summary.
    */

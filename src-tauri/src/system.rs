@@ -52,3 +52,16 @@ pub fn close_window(window: Window) -> Result<(), String> {
     window.close().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+/// Read a UTF-8 text file chosen by the user via the native dialog. Used for
+/// backup-file import; the path comes from `plugin-dialog`, never typed input.
+#[command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Write a UTF-8 text file to a path chosen via the native save dialog.
+#[command]
+pub fn write_text_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}

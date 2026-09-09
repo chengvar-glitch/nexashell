@@ -172,6 +172,10 @@
             <Folder :size="14" />
             {{ t('home.batchAddGroup') }}
           </button>
+          <button class="batch-btn" @click="showExportDialog = true">
+            <Download :size="14" />
+            {{ t('home.exportBatch') }}
+          </button>
           <button class="batch-btn danger" @click="handleBatchDelete">
             <Trash2 :size="14" />
             {{ t('common.delete') }}
@@ -379,6 +383,15 @@
       @update:visible="showImportDialog = $event"
       @imported="loadSessions"
     />
+
+    <!-- Batch export dialog: password first, then the native save dialog -->
+    <ExportSessionsDialog
+      ref="exportDialogRef"
+      :visible="showExportDialog"
+      :count="selectedSessionIds.size"
+      @update:visible="showExportDialog = $event"
+      @confirm="handleBatchExport"
+    />
   </div>
 </template>
 
@@ -403,6 +416,7 @@ import {
   GripVertical,
   MoreVertical,
   Import,
+  Download,
   Pin,
   PinOff,
   FolderTree,
@@ -411,6 +425,7 @@ import {
 import DropdownMenu from '@/components/common/DropdownMenu.vue';
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue';
 import ImportXTerminalDialog from '@/components/home/ImportXTerminalDialog.vue';
+import ExportSessionsDialog from '@/components/home/ExportSessionsDialog.vue';
 import { openFileManagerWindow } from '@/features/window';
 import { OPEN_SSH_FORM_KEY } from '@/core/types';
 import { eventBus } from '@/core/utils';
@@ -606,6 +621,12 @@ const {
 
 // XTerminal import dialog state
 const showImportDialog = ref(false);
+
+// Batch export state
+const showExportDialog = ref(false);
+const exportDialogRef = ref<InstanceType<typeof ExportSessionsDialog> | null>(
+  null
+);
 
 const openSSHForm = inject(OPEN_SSH_FORM_KEY);
 const { t, locale } = useI18n();
@@ -1059,6 +1080,32 @@ const handleBatchFavorite = async () => {
     });
   } catch (e) {
     logger.error('Failed to batch toggle favorite', e);
+  }
+};
+
+// Batch export: pick the destination first (cheap cancel), then build and
+// write the encrypted backup. The dialog closes in every outcome — failures
+// surface through the toast below.
+const handleBatchExport = async (password: string) => {
+  const ids = [...selectedSessionIds.value];
+  try {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const path = await save({
+      defaultPath: `nexashell-sessions-${date}.json`,
+      filters: [{ name: 'NexaShell Backup', extensions: ['json'] }],
+    });
+    if (path) {
+      const json = await sessionApi.exportSessions(ids, password);
+      await invoke('write_text_file', { path, contents: json });
+      logger.info('Batch export finished', { count: ids.length, path });
+      showCopyFeedback(t('home.exportSuccess', { count: ids.length }));
+    }
+    exportDialogRef.value?.finish();
+  } catch (e) {
+    logger.error('Batch export failed', e);
+    exportDialogRef.value?.finish();
+    showCopyFeedback(t('home.exportFailed'));
   }
 };
 

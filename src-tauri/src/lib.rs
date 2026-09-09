@@ -125,6 +125,8 @@ pub fn run() {
             system::toggle_maximize,
             system::minimize_window,
             system::close_window,
+            system::read_text_file,
+            system::write_text_file,
             ssh::connect_ssh,
             ssh::disconnect_ssh,
             ssh::has_ssh_session,
