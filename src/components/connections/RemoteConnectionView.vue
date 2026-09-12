@@ -12,6 +12,7 @@ import { listen, UnlistenFn, emit } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 import { useSettingsStore } from '@/features/settings';
 import { attachMacWebKitIMESymbolFix } from '@/core/utils/terminal-input-fix';
+import { isLinuxBrowser } from '@/core/utils/platform/platform-detection';
 import { themeManager } from '@/core/utils/theme-manager';
 import { rafThrottle } from '@/core/utils/rAF';
 import {
@@ -1071,11 +1072,15 @@ const initialize = async (): Promise<void> => {
   searchAddon = new SearchAddon();
   terminal.loadAddon(searchAddon);
 
-  // Use WebGL renderer for better performance
-  try {
-    terminal.loadAddon(new WebglAddon());
-  } catch {
-    logger.warn('WebGL addon unavailable, using standard renderer');
+  // WebGL glyph atlas renders corrupted (garbled/blurry text) on WebKitGTK
+  // with most Linux GPU drivers; fall back to the DOM renderer on Linux.
+  // ponytail: re-enable once WebGL output is verified on target distros.
+  if (!isLinuxBrowser()) {
+    try {
+      terminal.loadAddon(new WebglAddon());
+    } catch {
+      logger.warn('WebGL addon unavailable, using standard renderer');
+    }
   }
 
   terminal.open(terminalRef.value);

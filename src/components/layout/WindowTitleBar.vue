@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
   isMacOSBrowser,
   isWindowsBrowser,
+  isLinuxBrowser,
 } from '@/core/utils/platform/platform-detection';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import { Sun, Moon, Settings } from 'lucide-vue-next';
@@ -30,6 +31,7 @@ const appWindow = getCurrentWindow();
 const showWindowControls = ref(false);
 const isMacOS_OS = ref(false);
 const isWindowsOS = ref(false);
+const isLinuxOS = ref(false);
 const isFullscreen = ref(false);
 const isMaximized = ref(false);
 
@@ -54,9 +56,11 @@ onMounted(async () => {
     // Detect platform for layout adjustments
     const isMac = isMacOSBrowser();
     const isWin = isWindowsBrowser();
+    const isLinux = isLinuxBrowser();
     isMacOS_OS.value = isMac;
     isWindowsOS.value = isWin;
-    showWindowControls.value = isMac || isWin;
+    isLinuxOS.value = isLinux;
+    showWindowControls.value = isMac || isWin || isLinux;
 
     isFullscreen.value = await appWindow.isFullscreen();
     isMaximized.value = await appWindow.isMaximized();
@@ -73,9 +77,11 @@ onMounted(async () => {
     logger.error('Failed to detect platform:', error);
     const isMac = isMacOSBrowser();
     const isWin = isWindowsBrowser();
+    const isLinux = isLinuxBrowser();
     isMacOS_OS.value = isMac;
     isWindowsOS.value = isWin;
-    showWindowControls.value = isMac || isWin;
+    isLinuxOS.value = isLinux;
+    showWindowControls.value = isMac || isWin || isLinux;
   }
 
   // Keep the theme toggle icon in sync with the actual light/dark mode
@@ -136,7 +142,7 @@ const handleMaximize = async () => {
     class="window-title-bar border-bottom"
     :class="{
       'fullscreen-mode': isFullscreen && isMacOS_OS,
-      'is-windows': isWindowsOS,
+      'is-windows': isWindowsOS || isLinuxOS,
     }"
     data-tauri-drag-region
   >
@@ -168,7 +174,7 @@ const handleMaximize = async () => {
       </div>
 
       <div
-        v-if="showWindowControls && isWindowsOS"
+        v-if="showWindowControls && (isWindowsOS || isLinuxOS)"
         class="window-controls windows-controls"
       >
         <button

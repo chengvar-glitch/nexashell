@@ -60,6 +60,30 @@ export function isWindowsBrowser(): boolean {
 }
 
 /**
+ * Detect if it is a Linux system (browser environment)
+ */
+export function isLinuxBrowser(): boolean {
+  // Guard `window` before dereferencing it (e.g. in non-browser contexts).
+  if (typeof window === 'undefined') {
+    return (
+      typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux')
+    );
+  }
+  const tauri = (window as unknown as { __TAURI__?: { os?: { platform(): string } } })
+    .__TAURI__;
+  if (tauri?.os) {
+    try {
+      return tauri.os.platform() === 'linux';
+    } catch {
+      return navigator.userAgent.includes('Linux');
+    }
+  }
+  return (
+    typeof navigator !== 'undefined' && navigator.userAgent.includes('Linux')
+  );
+}
+
+/**
  * Format a shortcut string based on platform
  * replaces "Cmd+" with "Ctrl+" if not on macOS
  */
